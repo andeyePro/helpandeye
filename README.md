@@ -71,14 +71,16 @@ flood of separate alarms.
 
 ## How messages travel
 
-The unit picks the first route that works:
+The box is a standard Heltec LoRa board with nothing added. It sends over the
+[MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh at 868 MHz, licence-exempt, with
+repeaters on mains power with battery and optional solar backup. It reaches the internet and the
+mobile networks only through the phone app, over Bluetooth, because the phone goes out with the user
+and the box stays at home. The first route that works is used:
 
-1. Internet (home Wi-Fi)
-2. Mobile network (multi-network SIM)
-3. [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh at 868 MHz, licence-exempt,
-   with repeaters on mains power, with battery and optional solar backup
-
-The phone app talks to the unit over Bluetooth, with Wi-Fi as a fallback when available.
+1. Internet, through the phone
+2. The phone's own mobile network
+3. Other mobile networks, if the phone has a multi-network SIM
+4. The MeshCore mesh, where the community has built one
 
 ## Privacy
 
