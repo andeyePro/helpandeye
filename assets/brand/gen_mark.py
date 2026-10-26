@@ -26,7 +26,6 @@ OPEN = [                                   # the open pose, four cubics
     [P(311, 137), P(311, 137),      P(232, 221), P(145, 157)],
 ]
 W = 17.0                                   # the brand stroke width
-GW = 0.7 * W                               # every in-iris glyph (11.90)
 
 def _seg(c):
     return ('C%.2f,%.2f %.2f,%.2f %.2f,%.2f'
@@ -54,33 +53,32 @@ CX = (OPEN[2][0][0] + OPEN[2][3][0]) / 2
 CY = (_hi + _lo) / 2
 R = (_lo - _hi) / 2                        # 234.59, 149.83, r 49.15
 
-# ------------------------------------------------------------- the plus --
-# A first-aid plus.  Each arm reaches 0.62r from the centre, the same high
-# point as Time&I's hand, Vibe&I's chevron and Mail&I's flap apex.
+# ------------------------------------------------------------ the cross --
+# A first-aid cross: a Greek cross of five equal squares (ISO 7010 E003), so
+# each arm is a third of the span, with square ends.  It spans 0.62r either
+# side of the centre, the same reach as the other <X>&I glyphs.
 A = 0.62 * R
+ARM = 2 * A / 3.0
 
-def plus():
-    return ('M%.2f,%.2f L%.2f,%.2f' % (CX, CY - A, CX, CY + A),
-            'M%.2f,%.2f L%.2f,%.2f' % (CX - A, CY, CX + A, CY))
+def cross():
+    """The cross as one closed outline, filled in the page colour."""
+    h = ARM / 2.0
+    pts = [(-h, -A), (h, -A), (h, -h), (A, -h), (A, h), (h, h),
+           (h, A), (-h, A), (-h, h), (-A, h), (-A, -h), (-h, -h)]
+    return 'M' + ' L'.join('%.2f,%.2f' % (CX + x, CY + y) for x, y in pts) + 'Z'
 
-GREEN = '#2E7D32'                          # Material green 800: first-aid green, not the protected red cross
-
-def _stroke(d, ink, w):
-    return ('<path d="%s" stroke="%s" stroke-width="%.2f" stroke-linecap="round" '
-            'stroke-linejoin="round" fill="none"/>' % (d, ink, w))
+GREEN = '#009A44'                          # safety green, the usual screen value for ISO 3864 first-aid green; never the protected red cross
 
 # ------------------------------------------------------------- the drawing --
 def mark_body(bg, colour, uid):
     """The mark inside its own 365x235 space.  bg=None knocks the glyph clean
     through to whatever is behind (the tinted app-icon appearance)."""
-    pent, vee = plus()
     o = ['<defs><clipPath id="ap%s"><path d="%s"/></clipPath>' % (uid, _aperture())]
     if bg is None:
         o.append('<mask id="ir%s" maskUnits="userSpaceOnUse" x="0" y="0" '
                  'width="365" height="235"><circle cx="%.2f" cy="%.2f" r="%.2f" fill="#fff"/>'
                  % (uid, CX, CY, R))
-        for d in (pent, vee):
-            o.append(_stroke(d, '#000', GW))
+        o.append('<path d="%s" fill="#000"/>' % cross())
         o.append('</mask>')
     o.append('</defs>')
     o.append('<g clip-path="url(#ap%s)">' % uid)
@@ -89,8 +87,7 @@ def mark_body(bg, colour, uid):
                  % (colour, uid))
     else:
         o.append('<circle cx="%.2f" cy="%.2f" r="%.2f" fill="%s"/>' % (CX, CY, R, colour))
-        for d in (pent, vee):
-            o.append(_stroke(d, bg, GW))
+        o.append('<path d="%s" fill="%s"/>' % (cross(), bg))
     o.append('</g>')
     o.append('<g stroke="%s" stroke-width="%d" stroke-linecap="round" fill="none">'
              % (colour, W))
@@ -145,4 +142,4 @@ if __name__ == '__main__':
         open(os.path.join(svg, 'icon-ios-%s.svg' % ap), 'w').write(icon(ap, 'ios'))
     for ap in ('any', 'dark'):
         open(os.path.join(svg, 'icon-mac-%s.svg' % ap), 'w').write(icon(ap, 'mac'))
-    print('iris %.2f,%.2f r%.2f | glyph stroke %.2f | plus arm %.2fr' % (CX, CY, R, GW, A / R))
+    print('iris %.2f,%.2f r%.2f | cross reach %.2fr, arm %.2f' % (CX, CY, R, A / R, ARM))
