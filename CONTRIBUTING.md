@@ -1,8 +1,8 @@
 # Contributing to Help&I
 
-Thanks for looking. Help&I lets elderly and vulnerable people call local volunteers for help when
-power, phones and internet are down. Someone may depend on it on the worst day of their year, and
-that shapes most of what follows.
+Thanks for looking. Help&I lets people call for help, and check in, when power, phones and
+internet are down. Someone may depend on it on the worst day of their year, and that shapes most
+of what follows.
 
 ## The short version
 
@@ -16,12 +16,13 @@ that shapes most of what follows.
 
 ### A human confirms help
 
-A request is only answered when a warden acknowledges it by hand. Changes that confirm, close or
-time out a request automatically will not be accepted.
+A request is only answered when a responder acknowledges it by hand. Changes that confirm, close
+or time out a request automatically will not be accepted.
 
 ### Supplement, never replace
 
-Help&I adds to 999, NHS 111 and telecare. It does not replace them, and its copy must say so.
+Help&I adds to 999, NHS 111, telecare and any lone-working procedure already in place. It does
+not replace them, and its copy must say so.
 
 ### Privacy
 

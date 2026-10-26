@@ -4,7 +4,7 @@ Instructions for an AI coding agent asked to work on Help&I. If you are a human 
 read `CONTRIBUTING.md` instead.
 
 Help&I is a call-for-help unit for elderly and vulnerable people: firmware for Heltec LoRa boards,
-a warden console, an optional phone and watch app, and the help.andeye.com site. Someone may
+a responder console, an optional phone and watch app, and the help.andeye.com site. Someone may
 press its red button while lying on the floor in a power cut. Much of what it does (buttons,
 buzzers, radio range, battery life) cannot be checked by a machine. That is the constraint
 everything below follows from: for changes that affect behaviour on a unit, the project's final
@@ -41,7 +41,7 @@ Every PR description must state:
 
 ## Rules that are easy to break
 
-- **Help is confirmed by a human.** Nothing may tell a user that help is coming unless a warden
+- **Help is confirmed by a human.** Nothing may tell a user that help is coming unless a responder
   pressed acknowledge. Never auto-acknowledge, auto-close or time out a red-button request.
 - **No false reassurance.** The unit shows a cross when delivery fails. Do not add a
   "delivered" tick or any state a user could read as "someone is on their way".
