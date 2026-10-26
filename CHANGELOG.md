@@ -4,6 +4,15 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-26
 
+- [x] **Safety green and a first-aid cross** - the mark moves from Material green 800 to safety green
+  `#009A44` and from a thin plus to a square-ended Greek cross of five equal squares (ISO 7010 E003),
+  regenerated from `assets/brand/gen_mark.py` with the site icons. The site marks every claim that
+  needs a local radio network with an asterisk explained in a closing "Be clear what you have"
+  section, opens each situation for more detail, uses one text width throughout, and carries the
+  same four buttons top and bottom.
+- [x] **Site adopts andeye kit v1** - dark kit tokens, type, layout, hero and eyebrow mark sizes, and the
+  standard footer, with the Help&I mark inline from `assets/brand/gen_mark.py`. Adds favicon, Apple
+  touch icon and Open Graph image. Deployed as the Cloudflare Worker `helpandeye` from `wrangler.jsonc`.
 - [x] **Positioned by situation, not by person; wardens renamed responders** - README, CONTRIBUTING
   and AGENTS now describe a resilient call-for-help system for neighbourhoods, people out on their
   own, community groups and teams, with the phone app first and the box and pendant optional.

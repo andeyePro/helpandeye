@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" role="img" aria-label="Help&amp;I">
+<defs><clipPath id="apf"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+<mask id="irf" maskUnits="userSpaceOnUse" x="0" y="0" width="365" height="235"><circle cx="234.59" cy="149.83" r="49.15" fill="#fff"/>
+<path d="M224.43,119.36 L244.75,119.36 L244.75,139.68 L265.07,139.68 L265.07,159.99 L244.75,159.99 L244.75,180.31 L224.43,180.31 L224.43,159.99 L204.12,159.99 L204.12,139.68 L224.43,139.68Z" fill="#000"/>
+</mask>
+</defs>
+<g clip-path="url(#apf)">
+<rect x="0" y="0" width="365" height="235" fill="#009A44" mask="url(#irf)"/>
+</g>
+<g stroke="#009A44" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg>

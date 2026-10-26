@@ -43,7 +43,8 @@ entitlements that let the app receive fall-detection events from Apple Watch and
 so that a detected fall can reach responders too.
 
 **Optional box and pendant.** A mains-powered button box with a battery, an optional pendant
-with a charging cradle for incidents away from the box, and solar-powered mesh repeaters. The
+with a charging cradle for incidents away from the box, and mesh repeaters on mains power with
+battery and optional solar backup. The
 buttons work with no phone, no app and no charger.
 
 ## Simple buttons
@@ -75,7 +76,7 @@ The unit picks the first route that works:
 1. Internet (home Wi-Fi)
 2. Mobile network (multi-network SIM)
 3. [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh at 868 MHz, licence-exempt,
-   with solar-powered repeaters
+   with repeaters on mains power, with battery and optional solar backup
 
 The phone app talks to the unit over Bluetooth, with Wi-Fi as a fallback when available.
 
