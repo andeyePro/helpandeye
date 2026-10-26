@@ -118,6 +118,14 @@ sold to others will need UKCA/RED conformity before release.
 - **Testing with real users**: running the steps in `tests/MANUAL-TESTS.md` on real boards and
   phones, and telling us what confused you.
 
+## Website
+
+`site/` is plain HTML with no build step. Cloudflare serves it as a Worker with static assets,
+configured in `wrangler.jsonc` and built from this repository by Workers Builds: `main` is
+https://help.andeye.com, `dev` is https://dev.help.andeye.com, and every other branch gets a
+preview URL on `workers.dev`. Change the site on a branch, merge to `dev` to review it, then merge
+`dev` to `main` to go live.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). AI agents: read [AGENTS.md](AGENTS.md).
