@@ -62,11 +62,15 @@
   .btn-primary:hover { background: #38973d; color: #fff; }
   .btn-ghost { background: transparent; color: var(--text); border-color: var(--line); }
   .btn-ghost:hover { border-color: var(--accent-ink); color: var(--accent-ink); }
+  .btn .gh { width: 1.1em; height: 1.1em; vertical-align: -0.18em; margin-right: 0.45em; }
+  .works { display: grid; gap: 12px; margin-top: 2rem; }
+  .works .card h3 { color: var(--text); }
+  .answer { margin-top: 1.5rem; max-width: 760px; }
   .fineprint { font-size: 0.85rem; color: var(--faint); margin: 0; }
 
   section { padding: clamp(64px, 11vh, 120px) 0; }
   .deep { background: var(--bg-deep); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
-  .notice { max-width: 760px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line-soft);
+  .notice { max-width: 760px; margin: 0; background: var(--panel); border: 1px solid var(--line-soft);
              border-left: 6px solid var(--accent); border-radius: var(--radius); padding: 20px 24px; }
   .notice p { margin: 0; }
   .prose p { font-size: clamp(1.25rem, 2.4vw, 1.7rem); line-height: 1.5; letter-spacing: -0.01em; color: var(--muted); max-width: 800px; }
@@ -122,24 +126,57 @@
 </svg>
     <p class="eyebrow">Help&amp;I · In development, not yet available</p>
     <h1>Get help, even when the<br>power and phones are down.</h1>
-    <p class="sub lede">Press a button and reach people who know you, even in a power cut, with no
-    internet and no mobile signal.</p>
+    <p class="sub lede">Press a button and reach people you have chosen. Help&amp;I tries the internet,
+    then the mobile networks, then a local radio network, so a call can still get through when the
+    usual routes fail.</p>
     <div class="ctas">
       <a class="btn btn-primary" href="https://contact.andeye.com/?source=help.andeye.com&amp;subject=Help%26I%20waitlist">Join the waitlist</a>
-      <a class="btn btn-ghost" href="https://github.com/andeyePro/helpandeye">See the code</a>
-      <a class="btn btn-ghost" href="https://andeye.com">andeye.com</a>
+      <a class="btn btn-ghost" href="https://contact.andeye.com/?source=help.andeye.com&amp;subject=Volunteering%20for%20Help%26I&amp;cb=Hardware%20development&amp;cb=Software%20development&amp;cb=Testing&amp;cb=Advisory&amp;cb=Share%20an%20idea">Volunteer</a>
+      <a class="btn btn-ghost" href="https://github.com/andeyePro/helpandeye"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg>See the code</a>
     </div>
     <p class="fineprint">Free and open-source. Nothing here is ready to rely on yet.</p>
   </div>
 </header>
 
-<section class="deep" id="first">
+
+<section class="deep" id="works">
   <div class="wrap">
     <div class="notice">
       <p><strong>Help&amp;I does not replace 999.</strong> In an emergency, call 999 first if you can.
       Help&amp;I adds to your telecare alarm, your phone and any lone-working arrangements you already
       have. It does not replace them.</p>
     </div>
+    <div class="eyebrow-row" style="margin-top:clamp(48px,8vh,88px)"><svg class="eye row-eye" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true">
+<defs><clipPath id="apk"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+</defs>
+<g clip-path="url(#apk)">
+<circle cx="234.59" cy="149.83" r="49.15" fill="#2E7D32"/>
+<path d="M234.59,119.36 L234.59,180.31" stroke="#090b11" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M204.12,149.83 L265.07,149.83" stroke="#090b11" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</g>
+<g stroke="#2E7D32" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg><p class="eyebrow">What works when</p></div>
+    <h2>Be clear what you have.</h2>
+    <p class="lede">Help&amp;I is not magic. What it can reach depends on which parts you use and what
+    your area has set up.</p>
+    <div class="works">
+      <div class="card"><h3>The phone or watch app on its own</h3><p>Works while your phone has internet
+        or a mobile signal. Like any phone, it cannot send when both are down.</p></div>
+      <div class="card"><h3>A Help&amp;I box or pendant</h3><p>Keeps working in a power cut on its
+        battery. It tries the internet, then the mobile networks, then a local radio network if your
+        area has one.</p></div>
+      <div class="card"><h3>A local radio network</h3><p>Only exists where local volunteers have set one
+        up, with small solar-powered relays. Without one, a box can only use the internet and mobile
+        networks.</p></div>
+    </div>
+    <p class="lede answer">Whichever you use, help only comes if a person you have chosen is there to
+    answer. Help&amp;I tells you when someone has replied. Until then, keep trying other ways if you
+    can.</p>
   </div>
 </section>
 
@@ -229,7 +266,7 @@
         someone has read your message and said so.</p></div>
       <div class="card"><h3>You will know if it did not get through</h3><p>The screen shows a cross, so
         you can try again or use another way.</p></div>
-      <div class="card"><h3>It keeps working in a power cut</h3><p>The box runs on its battery and can let
+      <div class="card"><h3>The box keeps working in a power cut</h3><p>The box runs on its battery and can let
         people know the power is off, long before it runs low.</p></div>
       <div class="card"><h3>Check in if you want to</h3><p>Agree times to press green, and someone is
         asked to look in if you miss one. It is off unless you turn it on.</p></div>
@@ -283,8 +320,8 @@
     <ol class="route">
       <li>Over the internet, while it works.</li>
       <li>Over the mobile networks, while they work.</li>
-      <li>Over a local radio network run by the community, which runs on batteries and sunlight and
-        needs no licence.</li>
+      <li>Over a local radio network, where your community has set one up. It runs on batteries and
+        sunlight and needs no licence.</li>
     </ol>
     <div class="two">
       <div class="card"><h3>Your privacy</h3><p>Messages carry a unit number, never your name, address or
@@ -314,11 +351,11 @@
 </g>
 </svg><p class="eyebrow">Open and shared</p></div>
     <h2>Built in the open.</h2>
-    <p class="lede">Help&amp;I is free and open-source. The code and design are on GitHub, and help is
-    welcome: with phone and watch apps, with the electronics, with radio testing, or simply by trying it
-    and telling us what confused you.</p>
+    <p class="lede">Help&amp;I is free and open-source, and help is welcome: hardware development,
+    software development, testing, advice, or simply an idea. Tell us how you would like to help.</p>
     <div class="ctas" style="justify-content:flex-start">
-      <a class="btn btn-primary" href="https://github.com/andeyePro/helpandeye">Help&amp;I on GitHub</a>
+      <a class="btn btn-primary" href="https://contact.andeye.com/?source=help.andeye.com&amp;subject=Volunteering%20for%20Help%26I&amp;cb=Hardware%20development&amp;cb=Software%20development&amp;cb=Testing&amp;cb=Advisory&amp;cb=Share%20an%20idea">Volunteer</a>
+      <a class="btn btn-ghost" href="https://github.com/andeyePro/helpandeye"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656"/></svg>See the code</a>
       <a class="btn btn-ghost" href="https://github.com/andeyePro/helpandeye/discussions">Discussions</a>
     </div>
   </div>
