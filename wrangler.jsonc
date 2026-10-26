@@ -2,6 +2,7 @@
   "name": "helpandeye",
   "compatibility_date": "2026-10-01",
   "assets": { "directory": "./site" },
+  "previews": {},
   "env": {
     "dev": { "name": "helpandeye-dev" }
   }
