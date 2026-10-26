@@ -23,7 +23,7 @@ jobs:
         with:
           path-to-signatures: 'signatures/version1/cla.json'
           # This repo's own copy, so the signed text is pinned in its history.
-          path-to-document: 'https://github.com/Aqueum/helpandi/blob/main/CLA.md'
+          path-to-document: 'https://github.com/andeyePro/helpandeye/blob/main/CLA.md'
           branch: 'main'
           # Accounts exempt from signing: bots and andeye Ltd's own.
           allowlist: 'dependabot[bot],Aqueum'
