@@ -4,6 +4,10 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-26
 
+- [x] **@claude in Discussions** - `.github/workflows/claude-discussions.yml` answers any discussion or
+  comment that mentions @claude, posting as the Claude GitHub App. Claude runs with no tools, sees
+  only the project documents and the thread, and answers only questions about Help&I. Runs on the
+  maintainer's Claude subscription through the `CLAUDE_CODE_OAUTH_TOKEN` secret.
 - [x] **Safety green and a first-aid cross** - the mark moves from Material green 800 to safety green
   `#009A44` and from a thin plus to a square-ended Greek cross of five equal squares (ISO 7010 E003),
   regenerated from `assets/brand/gen_mark.py` with the site icons. The site marks every claim that
