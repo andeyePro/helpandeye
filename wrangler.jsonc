@@ -1,0 +1,8 @@
+{
+  "name": "help-andeye",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./site" },
+  "env": {
+    "dev": { "name": "help-andeye-dev" }
+  }
+}
