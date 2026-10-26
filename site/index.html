@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Help&amp;I – Help when the power and phones are down</title>
+<title>Help&amp;I – Get help, even when the power and phones are down</title>
 <meta name="description" content="Resilient call-for-help system. One press reaches a volunteer, even when the power, phones and internet are down.">
 <link rel="canonical" href="https://help.andeye.com/">
-<meta property="og:title" content="Help&amp;I – Help when the power and phones are down">
+<meta property="og:title" content="Help&amp;I – Get help, even when the power and phones are down">
 <meta property="og:description" content="Resilient call-for-help system. One press reaches a volunteer, even when the power, phones and internet are down.">
 <meta property="og:url" content="https://help.andeye.com/">
 <meta property="og:type" content="website">
@@ -17,6 +17,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<script src="/andeye-eye.js"></script>
 <style>
   :root {
     --bg: #0c0f16; --bg-deep: #090b11; --panel: #131826; --panel-2: #161c2c;
@@ -120,7 +121,7 @@
 </g>
 </svg>
     <p class="eyebrow">Help&amp;I · In development, not yet available</p>
-    <h1>Help when the power<br>and phones are down.</h1>
+    <h1>Get help, even when the<br>power and phones are down.</h1>
     <p class="sub lede">Press a button and reach people who know you, even in a power cut, with no
     internet and no mobile signal.</p>
     <div class="ctas">
@@ -335,5 +336,29 @@
     </nav>
   </div>
 </footer>
+<script>
+// Each eye is drawn and animated by the shared andeye engine, copied verbatim from the kit.
+// The engine has no plus glyph yet, so the plus is added to its iris group here; it is
+// clipped by the lids and fades in with the iris. Without JavaScript the static mark stays.
+(function () {
+  if (!window.andeyeEye) return;
+  var NS = 'http://www.w3.org/2000/svg';
+  document.querySelectorAll('svg.eye').forEach(function (svg) {
+    var bg = svg.querySelector('path[stroke-width="11.90"]').getAttribute('stroke');
+    var label = svg.getAttribute('aria-label');
+    svg.innerHTML = '';
+    if (label) svg.setAttribute('aria-label', label);
+    var g = window.andeyeEye(svg, { colour: '#2E7D32', iris: 'fill', background: bg, drawOn: true }).iris;
+    var a = g.r * 0.62;
+    var plus = document.createElementNS(NS, 'path');
+    plus.setAttribute('d', 'M' + g.cx + ',' + (g.cy - a) + ' V' + (g.cy + a)
+                         + ' M' + (g.cx - a) + ',' + g.cy + ' H' + (g.cx + a));
+    plus.setAttribute('stroke', bg);
+    plus.setAttribute('stroke-width', 17 * 0.7);
+    plus.setAttribute('stroke-linecap', 'round');
+    svg.querySelector('g[clip-path]').appendChild(plus);
+  });
+})();
+</script>
 </body>
 </html>
