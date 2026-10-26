@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Help&amp;I</title>
+<meta name="description" content="A call-for-help unit for elderly and vulnerable people that keeps working in a power cut.">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<style>
+  :root { --ink:#1d2b24; --muted:#4d5c55; --bg:#fbfaf6; --card:#fff; --line:#dfe3df;
+          --green:#00843d; --red:#c8102e; --amber:#e8a200; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink:#eef2ee; --muted:#b5c0ba; --bg:#121815; --card:#1b231f; --line:#2c3732; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:1.15rem/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { max-width:44rem; margin:0 auto; padding:2rem 1rem 4rem; }
+  header { display:flex; align-items:center; gap:.8rem; margin-bottom:2.5rem; }
+  header img { width:4.5rem; height:auto; }
+  header span { font-size:2rem; font-weight:700; letter-spacing:-.01em; }
+  h1 { font-size:clamp(1.8rem,5vw,2.5rem); line-height:1.2; margin:0 0 1rem; }
+  h2 { font-size:1.35rem; margin:2.5rem 0 .75rem; }
+  p { margin:0 0 1rem; }
+  .lede { color:var(--muted); font-size:1.25rem; }
+  .notice { border-left:6px solid var(--green); background:var(--card); padding:1rem 1.2rem;
+            border-radius:.4rem; margin:2rem 0; }
+  .buttons { display:grid; gap:1rem; margin:1.5rem 0; }
+  .btn { display:flex; align-items:center; gap:1rem; background:var(--card);
+         border:1px solid var(--line); border-radius:.6rem; padding:1rem; }
+  .dot { flex:none; border-radius:50%; box-shadow:inset 0 -4px 0 rgba(0,0,0,.2); }
+  .big { width:4rem; height:4rem; background:var(--red); }
+  .small { width:2.4rem; height:2.4rem; margin:0 .8rem; }
+  .amber { background:var(--amber); } .green { background:var(--green); }
+  .btn strong { display:block; font-size:1.2rem; }
+  .btn span { color:var(--muted); }
+  ol { padding-left:1.4rem; } li { margin-bottom:.5rem; }
+  .status { display:inline-block; background:var(--amber); color:#1d2b24; font-weight:700;
+            font-size:.9rem; padding:.2rem .6rem; border-radius:1rem; margin-bottom:1rem; }
+  a { color:var(--green); }
+  footer { margin-top:3rem; padding-top:1.5rem; border-top:1px solid var(--line);
+           color:var(--muted); font-size:1rem; }
+</style>
+</head>
+<body>
+<main>
+  <header><img src="logo.svg" alt=""><span>Help&amp;I</span></header>
+
+  <span class="status">In development, not yet available</span>
+  <h1>Help when the power and phones are down.</h1>
+  <p class="lede">Help&amp;I is a small unit for older and vulnerable people. One press calls a
+  local volunteer, even in a power cut, with no internet and no mobile signal.</p>
+
+  <div class="notice"><strong>Help&amp;I does not replace 999.</strong> In an emergency, call
+  999 first if you can. Help&amp;I adds to your telecare alarm and phone. It does not replace them.</div>
+
+  <h2>Three buttons</h2>
+  <div class="buttons">
+    <div class="btn"><div class="dot big"></div><div><strong>Red: come now</strong>
+      <span>A volunteer is alerted straight away.</span></div></div>
+    <div class="btn"><div class="dot small amber"></div><div><strong>Amber: come when you can</strong>
+      <span>For things that can wait a little while.</span></div></div>
+    <div class="btn"><div class="dot small green"></div><div><strong>Green: I'm OK now</strong>
+      <span>Lets everyone know you are fine.</span></div></div>
+  </div>
+  <p>If a message cannot get through, the unit shows a cross so you know to try again or use
+  another way. A volunteer will always reply by hand to tell you help is coming.</p>
+
+  <h2>Why now</h2>
+  <p>Landlines are moving to digital. Many telecare alarms now need mains power and broadband,
+  so they can stop working in a power cut. Mobile masts often lose power within hours.</p>
+
+  <h2>How it gets through</h2>
+  <ol>
+    <li>Over the internet, while it works.</li>
+    <li>Over the mobile network, while that works.</li>
+    <li>Over a local radio mesh that runs on batteries and solar power, and needs no licence.</li>
+  </ol>
+  <p>The unit has a battery, tells volunteers when the power goes off, and warns them before
+  its battery runs low.</p>
+
+  <h2>Your privacy</h2>
+  <p>Messages carry a unit number, never your name, address or health details.</p>
+
+  <h2>Open source</h2>
+  <p>Help&amp;I is free and open-source software. The code and design are on
+  <a href="https://github.com/Aqueum/helpandi">GitHub</a>.</p>
+
+  <footer>Help&amp;I is a project of andeye Ltd, registered in Scotland (SC665704).</footer>
+</main>
+</body>
+</html>
