@@ -37,10 +37,10 @@
   .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
   .measure { max-width: var(--measure); }
 
-  .eyebrow { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; color: var(--accent); margin: 0; }
+  .eyebrow { font-size: 1rem; font-weight: 700; letter-spacing: 0.04em; color: var(--accent); margin: 0; }
   .eyebrow-row { display: flex; align-items: center; gap: 10px; margin: 0 0 0.9rem; }
   svg.eye { aspect-ratio: 365 / 235; display: block; }
-  .row-eye { flex: none; width: 32px; height: auto; }
+  .row-eye { flex: none; width: 40px; height: auto; }
   h1 { font-size: clamp(2.5rem, 6.2vw, 4.4rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1.04; margin: 0 auto 1.1rem; max-width: 18ch; }
   h2 { font-size: clamp(1.8rem, 3.6vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; margin: 0 0 1rem; }
   h3 { font-size: 1.15rem; font-weight: 700; margin: 0 0 0.4rem; }
@@ -232,8 +232,8 @@
 
 <section class="deep" id="clear">
   <div class="wrap">
-    <div class="eyebrow-row"><svg class="eye row-eye" data-bg="#090b11" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true"><defs><clipPath id="ape6"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath></defs><g clip-path="url(#ape6)"><circle cx="234.59" cy="149.83" r="49.15" fill="#009A44"/><path d="M224.43,119.36 L244.75,119.36 L244.75,139.68 L265.07,139.68 L265.07,159.99 L244.75,159.99 L244.75,180.31 L224.43,180.31 L224.43,159.99 L204.12,159.99 L204.12,139.68 L224.43,139.68Z" fill="#090b11"/></g><g stroke="#009A44" stroke-width="17" stroke-linecap="round" fill="none"><path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/><path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/><path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/></g></svg><p class="eyebrow"><span aria-hidden="true">*</span>Be clear what you have</p></div>
-    <h2>Help&amp;I is not magic.</h2>
+    <div class="eyebrow-row"><svg class="eye row-eye" data-bg="#090b11" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true"><defs><clipPath id="ape6"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath></defs><g clip-path="url(#ape6)"><circle cx="234.59" cy="149.83" r="49.15" fill="#009A44"/><path d="M224.43,119.36 L244.75,119.36 L244.75,139.68 L265.07,139.68 L265.07,159.99 L244.75,159.99 L244.75,180.31 L224.43,180.31 L224.43,159.99 L204.12,159.99 L204.12,139.68 L224.43,139.68Z" fill="#090b11"/></g><g stroke="#009A44" stroke-width="17" stroke-linecap="round" fill="none"><path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/><path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/><path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/></g></svg><p class="eyebrow">Be clear what you have</p></div>
+    <h2><span class="star" aria-hidden="true">*</span>Help&amp;I is not magic.</h2>
     <p class="lede measure">What it can reach depends on which parts you use and what your area has set
     up. Everything marked * needs a local radio network.</p>
     <div class="grid three">
@@ -241,7 +241,8 @@
         signal. Like any phone, it cannot send when both are down.</p></div>
       <div class="card"><h3>A Help&amp;I box or pendant</h3><p>A small radio with the three buttons. It
         keeps running on its battery in a power cut, and sends over the local radio network where there
-        is one, or through your phone when the phone is nearby.</p></div>
+        is one, or through your phone when the phone is nearby. Your phone goes out with you; the box
+        stays at home.</p></div>
       <div class="card"><h3>A local radio network</h3><p>Only exists where local volunteers have set one
         up. Its relays run on mains power, with battery and optional solar backup. Without one, a box can
         only send through your phone.</p></div>
