@@ -3,125 +3,337 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Help&amp;I</title>
+<title>Help&amp;I – Help when the power and phones are down</title>
 <meta name="description" content="Resilient call-for-help system. One press reaches a volunteer, even when the power, phones and internet are down.">
-<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="canonical" href="https://help.andeye.com/">
+<meta property="og:title" content="Help&amp;I – Help when the power and phones are down">
+<meta property="og:description" content="Resilient call-for-help system. One press reaches a volunteer, even when the power, phones and internet are down.">
+<meta property="og:url" content="https://help.andeye.com/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Help&amp;I">
+<meta property="og:image" content="https://help.andeye.com/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
-  :root { --ink:#1d2b24; --muted:#4d5c55; --bg:#fbfaf6; --card:#fff; --line:#dfe3df;
-          --green:#00843d; --red:#c8102e; --amber:#e8a200; }
-  @media (prefers-color-scheme: dark) {
-    :root { --ink:#eef2ee; --muted:#b5c0ba; --bg:#121815; --card:#1b231f; --line:#2c3732; }
+  :root {
+    --bg: #0c0f16; --bg-deep: #090b11; --panel: #131826; --panel-2: #161c2c;
+    --line: #232b40; --line-soft: #1b2233; --text: #eef1f6; --muted: #98a0b3; --faint: #6a7382;
+    --radius: 14px;
+    --accent: #2E7D32; --accent-soft: rgba(46, 125, 50, 0.14);
+    --accent-ink: #7fd69e; /* the accent lifted for small text on the dark ground */
+    --red: #c8102e; --amber: #e8a200; --green: #2E7D32;
   }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink);
-         font:1.15rem/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
-  main { max-width:44rem; margin:0 auto; padding:2rem 1rem 4rem; }
-  header { display:flex; align-items:center; gap:.8rem; margin-bottom:2.5rem; }
-  header img { width:6rem; height:auto; }
-  header span { font-size:2rem; font-weight:700; letter-spacing:-.01em; }
-  h1 { font-size:clamp(1.8rem,5vw,2.5rem); line-height:1.2; margin:0 0 1rem; }
-  h2 { font-size:1.35rem; margin:2.5rem 0 .75rem; }
-  p { margin:0 0 1rem; }
-  .lede { color:var(--muted); font-size:1.25rem; }
-  .notice { border-left:6px solid var(--green); background:var(--card); padding:1rem 1.2rem;
-            border-radius:.4rem; margin:2rem 0; }
-  .buttons { display:grid; gap:1rem; margin:1.5rem 0; }
-  .btn { display:flex; align-items:center; gap:1rem; background:var(--card);
-         border:1px solid var(--line); border-radius:.6rem; padding:1rem; }
-  .dot { flex:none; border-radius:50%; box-shadow:inset 0 -4px 0 rgba(0,0,0,.2); }
-  .big { width:4rem; height:4rem; background:var(--red); }
-  .small { width:2.4rem; height:2.4rem; margin:0 .8rem; }
-  .amber { background:var(--amber); } .green { background:var(--green); }
-  .btn strong { display:block; font-size:1.2rem; }
-  .btn span { color:var(--muted); }
-  ol, ul { padding-left:1.4rem; } li { margin-bottom:.5rem; }
-  .status { display:inline-block; background:var(--amber); color:#1d2b24; font-weight:700;
-            font-size:.9rem; padding:.2rem .6rem; border-radius:1rem; margin-bottom:1rem; }
-  a { color:var(--green); }
-  footer { margin-top:3rem; padding-top:1.5rem; border-top:1px solid var(--line);
-           color:var(--muted); font-size:1rem; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif; line-height: 1.55;
+         overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--accent); color: #fff; }
+  a { color: var(--text); }
+  a:hover { color: var(--accent-ink); }
+  :focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; border-radius: 4px; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px; }
+
+  .eyebrow { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; color: var(--accent-ink); margin: 0; }
+  .eyebrow-row { display: flex; align-items: center; gap: 10px; margin: 0 0 0.9rem; }
+  svg.eye { aspect-ratio: 365 / 235; display: block; }
+  .row-eye { flex: none; width: 32px; height: auto; }
+  h1 { font-size: clamp(2.5rem, 6.2vw, 4.4rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1.04; margin: 0 0 1.1rem; }
+  h2 { font-size: clamp(1.8rem, 3.6vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; margin: 0 0 1rem; }
+  h3 { font-size: 1.15rem; font-weight: 700; margin: 0 0 0.4rem; }
+  p { margin: 0 0 1rem; }
+  .lede { font-size: clamp(1.05rem, 1.8vw, 1.25rem); color: var(--muted); }
+
+  .hero { position: relative; padding: clamp(56px, 9vh, 96px) 0 clamp(24px, 4vh, 48px); text-align: center; }
+  .hero::before { content: ""; position: absolute; top: -140px; left: 50%; transform: translateX(-50%);
+    width: min(820px, 120vw); height: 620px; pointer-events: none;
+    background: radial-gradient(closest-side, rgba(238, 241, 246, 0.07), rgba(238, 241, 246, 0) 72%); }
+  .hero-eye { position: relative; width: clamp(230px, 36vw, 330px); height: auto; margin: 0 auto 2.2rem; }
+  .hero .eyebrow { margin-bottom: 0.9rem; }
+  .hero .sub { max-width: 680px; margin: 0 auto 1.9rem; }
+  .ctas { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem; }
+  .btn { display: inline-block; font: inherit; font-size: 1rem; font-weight: 700; text-decoration: none;
+          padding: 0.85rem 1.6rem; border-radius: 999px; border: 1px solid transparent;
+          transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #38973d; color: #fff; }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--line); }
+  .btn-ghost:hover { border-color: var(--accent-ink); color: var(--accent-ink); }
+  .fineprint { font-size: 0.85rem; color: var(--faint); margin: 0; }
+
+  section { padding: clamp(64px, 11vh, 120px) 0; }
+  .deep { background: var(--bg-deep); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+  .notice { max-width: 760px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line-soft);
+             border-left: 6px solid var(--accent); border-radius: var(--radius); padding: 20px 24px; }
+  .notice p { margin: 0; }
+  .prose p { font-size: clamp(1.25rem, 2.4vw, 1.7rem); line-height: 1.5; letter-spacing: -0.01em; color: var(--muted); max-width: 800px; }
+  .prose strong { color: var(--text); font-weight: 800; }
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 2rem; }
+  .card { background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 20px 22px; }
+  .card p { color: var(--muted); font-size: 0.95rem; margin: 0; }
+
+  .buttons { display: grid; gap: 12px; margin: 2rem 0 1.5rem; }
+  .press { display: flex; align-items: center; gap: 18px; background: var(--panel); border: 1px solid var(--line-soft);
+            border-radius: var(--radius); padding: 16px 20px; }
+  .dot { flex: none; border-radius: 50%; box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.3); }
+  .big { width: 4rem; height: 4rem; background: var(--red); }
+  .small { width: 2.4rem; height: 2.4rem; margin: 0 0.8rem; }
+  .amber { background: var(--amber); }
+  .green { background: var(--green); }
+  .press strong { display: block; font-size: 1.15rem; }
+  .press span { color: var(--muted); }
+
+  ol.route { padding-left: 1.4rem; margin: 1.5rem 0 0; max-width: 760px; }
+  ol.route li { margin-bottom: 0.6rem; font-size: 1.05rem; }
+  .two { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 2rem; }
+
+  footer { border-top: 1px solid var(--line-soft); padding: 40px 0 56px; color: var(--faint); font-size: 0.88rem; }
+  footer .wrap { display: flex; justify-content: space-between; align-items: center; gap: 18px; flex-wrap: wrap; }
+  footer nav { display: flex; gap: 22px; flex-wrap: wrap; }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--accent-ink); }
+  footer p { margin: 0; }
+
+  @media (max-width: 860px) { .grid, .two { grid-template-columns: 1fr; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
 </style>
 </head>
 <body>
-<main>
-  <header><img src="logo.svg" alt=""><span>Help&amp;I</span></header>
 
-  <span class="status">In development, not yet available</span>
-  <h1>Help when the power and phones are down.</h1>
-  <p class="lede">Press a button and reach people who know you, even in a power cut, with no
-  internet and no mobile signal.</p>
-
-  <div class="notice"><strong>Help&amp;I does not replace 999.</strong> In an emergency, call
-  999 first if you can. Help&amp;I adds to your telecare alarm, your phone and any lone-working
-  arrangements you already have. It does not replace them.</div>
-
-  <h2>Who it helps</h2>
-  <ul>
-    <li><strong>Neighbours.</strong> Someone nearby knows when you need them, even if your
-      telecare alarm has stopped working in a power cut.</li>
-    <li><strong>People out on their own.</strong> Farmers, walkers and lone workers can check in
-      and call for help where there is no signal.</li>
-    <li><strong>Communities.</strong> A street, village or valley can keep in touch and look after
-      each other through an outage.</li>
-    <li><strong>Teams.</strong> A simple way to call for a hand at a site or an event.</li>
-  </ul>
-  <p>You choose who answers: family, neighbours, a volunteer rota or your own team.</p>
-
-  <h2>Three buttons</h2>
-  <div class="buttons">
-    <div class="btn"><div class="dot big"></div><div><strong>Red: come now</strong>
-      <span>Someone is alerted straight away.</span></div></div>
-    <div class="btn"><div class="dot small amber"></div><div><strong>Amber: come when you can</strong>
-      <span>For things that can wait a little while.</span></div></div>
-    <div class="btn"><div class="dot small green"></div><div><strong>Green: I'm OK now</strong>
-      <span>Lets everyone know you are fine.</span></div></div>
+<header class="hero" id="top">
+  <div class="wrap">
+    <svg class="eye hero-eye" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" role="img" aria-label="The Help&amp;I mark: the andeye eye with a first-aid plus in a green iris">
+<defs><clipPath id="aph"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+</defs>
+<g clip-path="url(#aph)">
+<circle cx="234.59" cy="149.83" r="49.15" fill="#2E7D32"/>
+<path d="M234.59,119.36 L234.59,180.31" stroke="#0c0f16" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M204.12,149.83 L265.07,149.83" stroke="#0c0f16" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</g>
+<g stroke="#2E7D32" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg>
+    <p class="eyebrow">Help&amp;I · In development, not yet available</p>
+    <h1>Help when the power<br>and phones are down.</h1>
+    <p class="sub lede">Press a button and reach people who know you, even in a power cut, with no
+    internet and no mobile signal.</p>
+    <div class="ctas">
+      <a class="btn btn-primary" href="https://contact.andeye.com/?source=help.andeye.com&amp;subject=Help%26I%20waitlist">Join the waitlist</a>
+      <a class="btn btn-ghost" href="https://github.com/andeyePro/helpandeye">See the code</a>
+      <a class="btn btn-ghost" href="https://andeye.com">andeye.com</a>
+    </div>
+    <p class="fineprint">Free and open-source. Nothing here is ready to rely on yet.</p>
   </div>
-  <p>Use them on your phone, on your watch, or on a small box or pendant that works with no
-  phone at all. After the first press, the phone can ask a few simple follow-up questions so the
-  people coming know what to expect.</p>
+</header>
 
-  <h2>What you can count on</h2>
-  <ul>
-    <li><strong>A person always answers.</strong> You are only told help is coming when someone
-      has read your message and said so.</li>
-    <li><strong>You will know if it did not get through.</strong> The screen shows a cross, so you
-      can try again or use another way.</li>
-    <li><strong>It keeps working in a power cut.</strong> The box runs on its battery and can let
-      people know the power is off, long before it runs low.</li>
-    <li><strong>Check in if you want to.</strong> Agree times to press green, and someone is
-      asked to look in if you miss one. It is off unless you turn it on.</li>
-  </ul>
-  <p>We also plan to pass on falls detected by your watch, so that a fall reaches the people who
-  can help even if you cannot press anything.</p>
+<section class="deep" id="first">
+  <div class="wrap">
+    <div class="notice">
+      <p><strong>Help&amp;I does not replace 999.</strong> In an emergency, call 999 first if you can.
+      Help&amp;I adds to your telecare alarm, your phone and any lone-working arrangements you already
+      have. It does not replace them.</p>
+    </div>
+  </div>
+</section>
 
-  <h2>Why now</h2>
-  <p>Landlines are moving to digital. Many telecare alarms now need mains power and broadband,
-  so they can stop working in a power cut. Mobile masts often lose power within hours. And in
-  much of the countryside there is no signal to begin with.</p>
+<section id="who">
+  <div class="wrap">
+    <div class="eyebrow-row"><svg class="eye row-eye" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true">
+<defs><clipPath id="apw"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+</defs>
+<g clip-path="url(#apw)">
+<circle cx="234.59" cy="149.83" r="49.15" fill="#2E7D32"/>
+<path d="M234.59,119.36 L234.59,180.31" stroke="#0c0f16" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M204.12,149.83 L265.07,149.83" stroke="#0c0f16" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</g>
+<g stroke="#2E7D32" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg><p class="eyebrow">Who it helps</p></div>
+    <h2>Set it up for your situation.</h2>
+    <p class="lede">You choose who answers: family, neighbours, a volunteer rota or your own team.</p>
+    <div class="grid">
+      <div class="card"><h3>Neighbours</h3><p>Someone nearby knows when you need them, even if your
+        telecare alarm has stopped working in a power cut.</p></div>
+      <div class="card"><h3>People out on their own</h3><p>Farmers, walkers and lone workers can check in
+        and call for help where there is no signal.</p></div>
+      <div class="card"><h3>Communities</h3><p>A street, village or valley can keep in touch and look after
+        each other through an outage.</p></div>
+      <div class="card"><h3>Teams</h3><p>A simple way to call for a hand at a site or an event.</p></div>
+    </div>
+  </div>
+</section>
 
-  <h2>How it gets through</h2>
-  <ol>
-    <li>Over the internet, while it works.</li>
-    <li>Over the mobile networks, while they work.</li>
-    <li>Over a local radio network run by the community, which runs on batteries and sunlight
-      and needs no licence.</li>
-  </ol>
+<section class="deep" id="buttons">
+  <div class="wrap">
+    <div class="eyebrow-row"><svg class="eye row-eye" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true">
+<defs><clipPath id="apb"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+</defs>
+<g clip-path="url(#apb)">
+<circle cx="234.59" cy="149.83" r="49.15" fill="#2E7D32"/>
+<path d="M234.59,119.36 L234.59,180.31" stroke="#090b11" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M204.12,149.83 L265.07,149.83" stroke="#090b11" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</g>
+<g stroke="#2E7D32" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg><p class="eyebrow">Three buttons</p></div>
+    <h2>One press says what you need.</h2>
+    <div class="buttons">
+      <div class="press"><div class="dot big"></div><div><strong>Red: come now</strong>
+        <span>Someone is alerted straight away.</span></div></div>
+      <div class="press"><div class="dot small amber"></div><div><strong>Amber: come when you can</strong>
+        <span>For things that can wait a little while.</span></div></div>
+      <div class="press"><div class="dot small green"></div><div><strong>Green: I'm OK now</strong>
+        <span>Lets everyone know you are fine.</span></div></div>
+    </div>
+    <p class="lede">Use them on your phone, on your watch, or on a small box or pendant that works with no
+    phone at all. After the first press, the phone can ask a few simple follow-up questions so the
+    people coming know what to expect.</p>
+  </div>
+</section>
 
-  <h2>Your privacy</h2>
-  <p>Messages carry a unit number, never your name, address or health details. You sign a plain
-  sheet that says what is sent and who can see it.</p>
+<section id="count-on">
+  <div class="wrap">
+    <div class="eyebrow-row"><svg class="eye row-eye" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true">
+<defs><clipPath id="apc"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+</defs>
+<g clip-path="url(#apc)">
+<circle cx="234.59" cy="149.83" r="49.15" fill="#2E7D32"/>
+<path d="M234.59,119.36 L234.59,180.31" stroke="#0c0f16" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M204.12,149.83 L265.07,149.83" stroke="#0c0f16" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</g>
+<g stroke="#2E7D32" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg><p class="eyebrow">What you can count on</p></div>
+    <h2>A person always answers.</h2>
+    <div class="grid">
+      <div class="card"><h3>Help is confirmed by a person</h3><p>You are only told help is coming when
+        someone has read your message and said so.</p></div>
+      <div class="card"><h3>You will know if it did not get through</h3><p>The screen shows a cross, so
+        you can try again or use another way.</p></div>
+      <div class="card"><h3>It keeps working in a power cut</h3><p>The box runs on its battery and can let
+        people know the power is off, long before it runs low.</p></div>
+      <div class="card"><h3>Check in if you want to</h3><p>Agree times to press green, and someone is
+        asked to look in if you miss one. It is off unless you turn it on.</p></div>
+    </div>
+    <p class="lede" style="margin-top:2rem">We also plan to pass on falls detected by your watch, so that a
+    fall reaches the people who can help even if you cannot press anything.</p>
+  </div>
+</section>
 
-  <h2>Standards</h2>
-  <p>We are designing Help&amp;I to meet the British standards for lone-worker services and
-  alarm handling. It is not certified yet, and nothing here should be read as if it were.</p>
+<section class="deep" id="why">
+  <div class="wrap prose">
+    <div class="eyebrow-row"><svg class="eye row-eye" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true">
+<defs><clipPath id="apy"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+</defs>
+<g clip-path="url(#apy)">
+<circle cx="234.59" cy="149.83" r="49.15" fill="#2E7D32"/>
+<path d="M234.59,119.36 L234.59,180.31" stroke="#090b11" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M204.12,149.83 L265.07,149.83" stroke="#090b11" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</g>
+<g stroke="#2E7D32" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg><p class="eyebrow">Why now</p></div>
+    <p><strong>Landlines are moving to digital.</strong> Many telecare alarms now need mains power and
+    broadband, so they can stop working in a power cut. Mobile masts often lose power within hours.
+    And in much of the countryside there is no signal to begin with.</p>
+  </div>
+</section>
 
-  <h2>Open and shared</h2>
-  <p>Help&amp;I is free and open-source. The code and design are on
-  <a href="https://github.com/andeyePro/helpandeye">GitHub</a>, and help is welcome: with
-  phone and watch apps, with the electronics, with radio testing, or simply by trying it and
-  telling us what confused you.</p>
+<section id="route">
+  <div class="wrap">
+    <div class="eyebrow-row"><svg class="eye row-eye" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true">
+<defs><clipPath id="apr"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+</defs>
+<g clip-path="url(#apr)">
+<circle cx="234.59" cy="149.83" r="49.15" fill="#2E7D32"/>
+<path d="M234.59,119.36 L234.59,180.31" stroke="#0c0f16" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M204.12,149.83 L265.07,149.83" stroke="#0c0f16" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</g>
+<g stroke="#2E7D32" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg><p class="eyebrow">How it gets through</p></div>
+    <h2>Whatever still works.</h2>
+    <ol class="route">
+      <li>Over the internet, while it works.</li>
+      <li>Over the mobile networks, while they work.</li>
+      <li>Over a local radio network run by the community, which runs on batteries and sunlight and
+        needs no licence.</li>
+    </ol>
+    <div class="two">
+      <div class="card"><h3>Your privacy</h3><p>Messages carry a unit number, never your name, address or
+        health details. You sign a plain sheet that says what is sent and who can see it.</p></div>
+      <div class="card"><h3>Standards</h3><p>We are designing Help&amp;I to meet the British standards for
+        lone-worker services and alarm handling. It is not certified yet, and nothing here should be read
+        as if it were.</p></div>
+    </div>
+  </div>
+</section>
 
-  <footer>Help&amp;I is a project of andeye Ltd, registered in Scotland (SC665704).</footer>
-</main>
+<section class="deep" id="open">
+  <div class="wrap">
+    <div class="eyebrow-row"><svg class="eye row-eye" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true">
+<defs><clipPath id="apo"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath>
+</defs>
+<g clip-path="url(#apo)">
+<circle cx="234.59" cy="149.83" r="49.15" fill="#2E7D32"/>
+<path d="M234.59,119.36 L234.59,180.31" stroke="#090b11" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<path d="M204.12,149.83 L265.07,149.83" stroke="#090b11" stroke-width="11.90" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</g>
+<g stroke="#2E7D32" stroke-width="17" stroke-linecap="round" fill="none">
+<path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/>
+<path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/>
+<path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/>
+<path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/>
+</g>
+</svg><p class="eyebrow">Open and shared</p></div>
+    <h2>Built in the open.</h2>
+    <p class="lede">Help&amp;I is free and open-source. The code and design are on GitHub, and help is
+    welcome: with phone and watch apps, with the electronics, with radio testing, or simply by trying it
+    and telling us what confused you.</p>
+    <div class="ctas" style="justify-content:flex-start">
+      <a class="btn btn-primary" href="https://github.com/andeyePro/helpandeye">Help&amp;I on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/andeyePro/helpandeye/discussions">Discussions</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>© 2026 andeye Ltd, registered in Scotland (SC665704).</p>
+    <nav>
+      <a href="https://andeye.com">andeye.com</a>
+      <a href="https://andeye.com/terms/">Terms</a>
+      <a href="https://andeye.com/privacy/">Privacy</a>
+      <a href="https://github.com/andeyePro/helpandeye">GitHub</a>
+      <a href="https://github.com/andeyePro/helpandeye/discussions">Discussions</a>
+    </nav>
+  </div>
+</footer>
 </body>
 </html>
