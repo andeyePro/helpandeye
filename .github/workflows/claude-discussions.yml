@@ -20,7 +20,7 @@ jobs:
       github.event.sender.type != 'Bot' &&
       contains(github.event_name == 'discussion' && github.event.discussion.body || github.event.comment.body, '@claude')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       discussions: write
@@ -63,8 +63,9 @@ jobs:
             done
             printf '\n\n# The discussion thread\n\n'; cat "$RUNNER_TEMP/thread.md"
           } > "$RUNNER_TEMP/prompt.md"
-          # No tools and no MCP servers: Claude only reads the prompt and writes an answer.
-          claude -p --model sonnet --tools "" --strict-mcp-config --max-turns 3 --output-format json \
+          # Web search and fetch only: no shell or file tools, so nothing in the thread can reach the runner.
+          claude -p --model opus --tools "WebSearch,WebFetch" --allowedTools "WebSearch,WebFetch" \
+            --strict-mcp-config --max-turns 20 --output-format json \
             --json-schema '{"type":"object","properties":{"relevant":{"type":"boolean"},"reply":{"type":"string"}},"required":["relevant","reply"],"additionalProperties":false}' \
             < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/result.json"
           jq -e '.structured_output.reply | length > 0 and length < 6000' "$RUNNER_TEMP/result.json" > /dev/null
