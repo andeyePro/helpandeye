@@ -4,6 +4,14 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **The Bluetooth command queue is tested** - the queue that puts a call on the radio lived in
+  the app, where no machine test ran it. It is now `CommandQueue` in HelpAndICore, with six tests:
+  nothing is written before the link is up, one command at a time, a call for help goes ahead of
+  waiting setup, a push is never taken for a reply, a timeout stops all writing so a late reply
+  cannot be taken for the next command, and a dropped link answers everything once. Moving it
+  found an old under-count: a send that timed out was reported as certainly not sent, so its
+  airtime was given back although the packet may have gone on air; only a command never written
+  counts as not sent now. 147 core tests.
 - [x] **Fixes from the sixth code review** - a sixth independent review of the relay's new
   membership rules and of invitee confirmation found 1 blocker and 4 major issues. Fixed: a removal
   made within a minute of another publish could miss the relay for a day (a changed member list

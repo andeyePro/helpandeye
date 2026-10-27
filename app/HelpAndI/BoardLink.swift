@@ -33,15 +33,23 @@ final class BoardLink: NSObject, ObservableObject {
     private var peripheral: CBPeripheral?
     private var rx: CBCharacteristic?
     private var listenChannels: Set<UInt8> = []
-    private var pending: (id: UUID, expect: (MeshCore.Response) -> Bool, done: CheckedContinuation<MeshCore.Response?, Never>)?
-    private var queue: [() async -> Void] = []
-    private var busy = false
+    /// One command at a time, calls for help first (HelpAndICore, tested there).
+    private var commands: CommandQueue!
     private var syncing = false
     private var needsDrain = false
     private var backoff: TimeInterval = 1
 
     override init() {
         super.init()
+        commands = CommandQueue { [weak self] data in
+            guard let self, let p = self.peripheral, let rx = self.rx else { return }
+            p.writeValue(data, for: rx, type: .withResponse)
+        }
+        // After a timeout the queue has stopped; reconnecting starts the conversation afresh.
+        commands.onTimeout = { [weak self] in
+            guard let self, let p = self.peripheral else { return }
+            self.central.cancelPeripheralConnection(p)
+        }
         central = CBCentralManager(delegate: self, queue: .main,
                                    options: [CBCentralManagerOptionRestoreIdentifierKey: "org.andeye.helpandi.central"])
     }
@@ -57,7 +65,7 @@ final class BoardLink: NSObject, ObservableObject {
 
     func connect(_ p: CBPeripheral) {
         central.stopScan()
-        if let old = peripheral, old !== p { peripheral = nil; central.cancelPeripheralConnection(old) }
+        if let old = peripheral, old !== p { peripheral = nil; commands.linkDown(); central.cancelPeripheralConnection(old) }
         Store.boardID = p.identifier
         peripheral = p
         p.delegate = self
@@ -69,6 +77,7 @@ final class BoardLink: NSObject, ObservableObject {
         let p = peripheral
         Store.boardID = nil
         peripheral = nil; rx = nil; selfInfo = nil; helpChannel = nil
+        commands.linkDown()
         if let p { central.cancelPeripheralConnection(p) }
         state = .off
     }
@@ -83,10 +92,11 @@ final class BoardLink: NSObject, ObservableObject {
     func sendText(_ text: String, to key: Data) async -> MeshSendResult {
         guard state == .ready, key.count == 32 else { return .refused("Box not connected") }
         let cmd = MeshCore.Command.sendText(publicKeyPrefix: key.prefix(6), text: text, sentAt: UInt32(Date().timeIntervalSince1970), attempt: 0)
-        switch await run(cmd, expect: { if case .sent = $0 { return true }; if case .error = $0 { return true }; return false }) {
-        case .sent?: return .sent
-        case let .error(code)?: return .refused("Box refused it (error \(code))")
-        default: return rx == nil ? .refused("Box not connected") : .unknown("Box did not answer")
+        switch await commands.send(cmd, expect: { if case .sent = $0 { return true }; if case .error = $0 { return true }; return false }) {
+        case .reply(.sent): return .sent
+        case let .reply(.error(code)): return .refused("Box refused it (error \(code))")
+        case .reply, .timedOut: return .unknown("Box did not answer")
+        case .notWritten: return .refused("Box not connected")
         }
     }
 
@@ -105,62 +115,19 @@ final class BoardLink: NSObject, ObservableObject {
 
     private func sendOn(_ ch: UInt8, _ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
         let cmd = MeshCore.Command.sendChannelData(index: ch, dataType: HelpFrame.meshDataType, payload: frame.encoded())
-        switch await run(cmd, urgent: urgent, expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
-        case .ok?: return .sent
-        case let .error(code)?: return .refused("Box refused it (error \(code))")
-        default: return rx == nil ? .refused("Box not connected") : .unknown("Box did not answer")
+        // Only a command never written certainly did not go on air; a timeout may have.
+        switch await commands.send(cmd, urgent: urgent, expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
+        case .reply(.ok): return .sent
+        case let .reply(.error(code)): return .refused("Box refused it (error \(code))")
+        case .reply, .timedOut: return .unknown("Box did not answer")
+        case .notWritten: return .refused("Box not connected")
         }
     }
 
     // MARK: Command queue
 
-    /// Runs one command and waits for its reply. Calls for help go to the front of the queue, so
-    /// they never wait behind setup or message syncing.
     private func run(_ cmd: MeshCore.Command, urgent: Bool = false, expect: @escaping (MeshCore.Response) -> Bool) async -> MeshCore.Response? {
-        await withCheckedContinuation { (c: CheckedContinuation<MeshCore.Response?, Never>) in
-            let job: () async -> Void = { [weak self] in
-                guard let self else { c.resume(returning: nil); return }
-                c.resume(returning: await self.transmit(cmd, expect: expect))
-            }
-            if urgent { queue.insert(job, at: 0) } else { queue.append(job) }
-            pump()
-        }
-    }
-
-    private func pump() {
-        guard !busy, !queue.isEmpty else { return }
-        busy = true
-        let next = queue.removeFirst()
-        Task { await next(); busy = false; pump() }
-    }
-
-    private func transmit(_ cmd: MeshCore.Command, expect: @escaping (MeshCore.Response) -> Bool) async -> MeshCore.Response? {
-        guard let p = peripheral, let rx, let data = try? cmd.encoded() else { return nil }
-        let id = UUID()
-        return await withCheckedContinuation { c in
-            pending = (id, expect, c)
-            p.writeValue(data, for: rx, type: .withResponse)
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(5))
-                self?.timedOut(id)
-            }
-        }
-    }
-
-    /// Replies carry no command ID, so after a timeout a late reply could be taken for the next
-    /// command's. Reconnecting starts the conversation afresh.
-    private func timedOut(_ id: UUID) {
-        guard pending?.id == id else { return }
-        // Nothing more is written on this link: the next command waits for a fresh handshake.
-        rx = nil
-        finish(nil, only: id)
-        if let p = peripheral { central.cancelPeripheralConnection(p) }
-    }
-
-    private func finish(_ r: MeshCore.Response?, only id: UUID? = nil) {
-        guard let p = pending, id == nil || p.id == id else { return }
-        pending = nil
-        p.done.resume(returning: r)
+        await commands.run(cmd, urgent: urgent, expect: expect)
     }
 
     // MARK: After connecting
@@ -275,7 +242,7 @@ final class BoardLink: NSObject, ObservableObject {
         // Before the handshake has found the group's channel, the handshake's own drain will fetch
         // these; draining now would take them off the board and throw them away.
         if case .messagesWaiting = r { if state == .ready { Task { await drainMessages() } }; return }
-        if let p = pending, p.expect(r) { finish(r); return }
+        if commands.receive(r) { return }
         if case let .channelData(ch, type, payload, _) = r, listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload) {
             onFrame?(f)
         }
@@ -319,7 +286,7 @@ extension BoardLink: @preconcurrency CBCentralManagerDelegate {
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
         guard p === peripheral else { return }
         rx = nil; helpChannel = nil
-        finish(nil)
+        commands.linkDown()
         // Keep a failure on screen, so a box that connects but never answers is not shown as
         // "Connecting…" for ever.
         if case .failed = state {} else { state = .connecting }
@@ -356,6 +323,7 @@ extension BoardLink: @preconcurrency CBPeripheralDelegate {
 
     func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor ch: CBCharacteristic, error: Error?) {
         guard error == nil, ch.isNotifying, rx != nil else { state = .failed("Box would not talk"); return }
+        commands.linkUp()
         Task { await handshake() }
     }
 
