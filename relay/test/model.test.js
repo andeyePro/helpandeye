@@ -26,8 +26,10 @@ test("the app's copy of the membership rules matches the relay", async () => {
     const relay = new GroupRelay(new MapStorage());
     for (const [i, step] of run.steps.entries()) {
       const list = { ...step.list, primary: step.list.primary ?? undefined };
+      if (list.primary === null) delete list.primary;
       let status = 200;
-      try { await relay.setMembers(step.signer, list); } catch (e) { if (!(e instanceof RelayError)) throw e; status = e.status; }
+      const group = step.group ? Uint8Array.from(atob(step.group), (c) => c.charCodeAt(0)) : null;
+      try { await relay.setMembers(step.signer, list, group); } catch (e) { if (!(e instanceof RelayError)) throw e; status = e.status; }
       assert.equal(status, step.status, `seed ${run.seed}, publish ${i}`);
     }
     const final = ((await relay.members())?.members ?? []).map((m) => `${m.key} ${m.role}`).sort();

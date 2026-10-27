@@ -1,5 +1,5 @@
 import { push } from "./apns.js";
-import { GroupRelay, Meter as MeterLogic, RelayError } from "./relay.js";
+import { GroupRelay, Meter as MeterLogic, RelayError, unb64 } from "./relay.js";
 
 // Routes:
 //   PUT  /g/<groupId>/members          coordinator sends the member list (public keys only)
@@ -49,7 +49,8 @@ export class Group {
       });
       const kind = url.pathname.split("/").pop();
       if (kind === "members" && request.method === "PUT") {
-        await this.relay.setMembers(key, JSON.parse(body));
+        const id = url.pathname.split("/")[2].replace(/-/g, "+").replace(/_/g, "/");
+        await this.relay.setMembers(key, JSON.parse(body), unb64(id + "=".repeat((4 - (id.length % 4)) % 4)));
         return json(200, { ok: true });
       }
       if (kind === "messages" && request.method === "POST") {

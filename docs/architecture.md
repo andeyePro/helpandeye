@@ -68,8 +68,9 @@ the member whose unit it names; box keys are signed by their member.
 
 - Each phone has two key pairs, kept in its keychain and never sent: X25519 for receiving sealed
   group secrets, Ed25519 for signing acknowledgements and relay requests.
-- Each group has a MeshCore channel secret (16 bytes), a group key for the internet route (32
-  bytes) and an ID, made at random by the coordinator's phone.
+- Each group has a MeshCore channel secret (16 bytes) and a group key for the internet route (32
+  bytes), made at random by the first coordinator's phone, and an ID made from that coordinator's
+  signing key, which the relay checks.
 - Joining is three QR codes, or the same codes sent as messages with a six-digit safety number read
   aloud. Removing a phone makes new group secrets, handed to every remaining member as an update
   code; the old channel stays readable for seven days while boards change over.

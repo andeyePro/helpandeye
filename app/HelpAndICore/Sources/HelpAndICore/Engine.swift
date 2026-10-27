@@ -33,13 +33,20 @@ public enum MeshSendResult: Equatable, Sendable {
 
 public enum RelayWake: String, Sendable { case call, quiet }
 
+public enum PublishResult: Equatable, Sendable {
+    case accepted
+    /// The relay said no; trying the same list again will not help.
+    case refused
+    /// No answer; worth trying again later.
+    case unreachable
+}
+
 /// The internet route.
 @MainActor public protocol RelayLink: AnyObject {
     var isConfigured: Bool { get }
     var lastProblem: String? { get }
     func configure(group: GroupState?, identity: DeviceIdentity)
-    /// Returns whether the relay took the member list.
-    func publishMembers() async -> Bool
+    func publishMembers() async -> PublishResult
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String?
 }
 
@@ -133,9 +140,14 @@ public final class HelpEngine: ObservableObject {
     private var ackAttempt: [IncomingRequest.Key: UUID] = [:]
     private var lastMembershipRepeat: Date?
     private var answeredBoxes: Set<UInt16> = []
-    /// When this coordinator's phone last got the relay to take the member list; nil until it has.
-    private var membersPublished: Date?
+    /// Number blocks of coordinators just removed, to re-list the people they added.
+    private var previousBlocks: [UInt16: UInt16] = [:]
+    /// The member list the relay last took from this phone, and when; and the last attempt.
+    private var publishedList: RelayProtocol.MemberList?
+    private var publishedAt: Date?
+    private var refusedList: RelayProtocol.MemberList?
     private var lastPublishTry: Date?
+    private var publishBackoff: TimeInterval = 60
     /// An answer is a broadcast every box hears, so one a minute covers a newcomer hearing many.
     private var lastBoxAnswer: Date?
     private var tasks: [UUID: Task<Void, Never>] = [:]
@@ -172,7 +184,7 @@ public final class HelpEngine: ObservableObject {
     // MARK: Group
 
     public func createGroup(name: String, myName: String, call: Bool) {
-        var g = GroupState(name: name, secrets: .random(), members: [])
+        var g = GroupState(name: name, secrets: .forOwner(signingKey: identity.signingPublicKey), members: [])
         g.members.append(Member(number: 1, name: myName, role: .coordinator, publicKey: identity.publicKey,
                                 unit: call ? g.nextUnit : nil, signingKey: identity.signingPublicKey))
         g.highestMember = 1
@@ -206,7 +218,13 @@ public final class HelpEngine: ObservableObject {
     private func announce(membershipOf g: GroupState, added: Set<UInt16>, removed: Set<UInt16>, roles: Set<UInt16> = []) {
         guard let me = saved?.me else { return }
         let gid = g.secrets.groupID
-        let frames = added.sorted().compactMap { g.addedFrame($0) }
+        // Before a coordinator is removed, everyone they added that this phone knows of is listed
+        // again, so those people are confirmed rather than told their inviter left.
+        let theirs = removed.compactMap { r -> [UInt16]? in
+            guard let b = previousBlocks[r], b > 0 else { return nil }
+            return g.members.map(\.number).filter { $0 > b && $0 <= b + 999 }
+        }.flatMap { $0 }
+        let frames = (added.sorted() + theirs.sorted()).compactMap { g.addedFrame($0) }
             + removed.sorted().map { HelpFrame.memberRemoved(member: $0, version: g.membershipVersion) }
             + roles.sorted().compactMap { g.roleFrame($0) }
         for f in frames {
@@ -268,7 +286,6 @@ public final class HelpEngine: ObservableObject {
         if mesh.secrets != listening { mesh.secrets = listening }
         if activity.airtime == nil { bandChanged(mesh.radio?.band) }
         relay.configure(group: group, identity: identity)
-        membersPublished = nil
         publishMembersIfDue()
         checkGaps()
     }
@@ -436,20 +453,7 @@ public final class HelpEngine: ObservableObject {
         activity.boardKeys[myNumber] = key
         for (member, k) in activity.boardKeys where member != myNumber { await mesh.addContact(k, name: "Help&I \(member)") }
         await sendToAll(.signedBoard(member: myNumber, publicKey: key, identity: identity, group: groupID))
-        // A coordinator repeats who is in the group, for members who missed it, at most once a day.
-        if me?.role == .coordinator, let g = group, now().timeIntervalSince(lastMembershipRepeat ?? .distantPast) > 86_400 {
-            lastMembershipRepeat = now()
-            for m in g.members where m.number != myNumber {
-                if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
-                if m.role == .coordinator, let f = g.roleFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
-            }
-            // Removals too, so a phone that missed one stops counting that member's acknowledgements.
-            if myNumber == g.primaryCoordinator {
-                for n in g.removedMembers.sorted() {
-                    await sendToAll(.signing(.memberRemoved(member: n, version: g.membershipVersion), as: myNumber, identity: identity, group: groupID))
-                }
-            }
-        }
+        await repeatMembershipIfDue()
     }
 
     // MARK: Time passing
@@ -461,6 +465,7 @@ public final class HelpEngine: ObservableObject {
 
     public func tick() {
         if let s = saved, !s.confirmed, let at = s.joinedAt, now().timeIntervalSince(at) > Self.confirmationWait { raise(.unconfirmed) }
+        if me?.role == .coordinator { spawn { await self.repeatMembershipIfDue() } }
         pruneInbox()
         publishMembersIfDue()
         checkResends()
@@ -479,17 +484,53 @@ public final class HelpEngine: ObservableObject {
         if mesh.secrets != listening { mesh.secrets = listening }
     }
 
-    /// A coordinator's phone keeps the relay's member list current: after any change, again a minute
-    /// later if the relay could not be reached or refused it, and once a day, so a list lost to a
-    /// dropped connection or a clash between coordinators does not stay wrong.
+    /// A coordinator's phone keeps the relay's member list current. A changed list goes at once,
+    /// whatever else is happening, so a removal never waits. An unchanged one is repeated daily. If
+    /// the relay cannot be reached, it tries again after a growing pause; if it refuses a list, that
+    /// list is not tried again until it changes, so a refusal cannot use up the free allowance.
     private func publishMembersIfDue() {
-        guard me?.role == .coordinator, relay.isConfigured else { return }
+        guard me?.role == .coordinator, relay.isConfigured, let g = group else { return }
+        let list = RelayProtocol.memberList(g)
         let t = now()
-        let due = membersPublished.map { t.timeIntervalSince($0) > 86_400 } ?? (t.timeIntervalSince(lastPublishTry ?? .distantPast) > 60)
+        let changed = list != publishedList
+        if list == refusedList { return }
+        let due = changed ? t.timeIntervalSince(lastPublishTry ?? .distantPast) >= publishBackoff || lastTriedList != list
+            : t.timeIntervalSince(publishedAt ?? .distantPast) > 86_400
         guard due else { return }
         lastPublishTry = t
+        lastTriedList = list
         spawn {
-            if await self.relay.publishMembers() { self.membersPublished = self.now() }
+            switch await self.relay.publishMembers() {
+            case .accepted:
+                // Only the list that was sent counts as published; a change made meanwhile still goes.
+                self.publishedList = list; self.publishedAt = self.now(); self.publishBackoff = 60
+                self.publishMembersIfDue()
+            case .refused:
+                self.refusedList = list
+            case .unreachable:
+                self.publishBackoff = min(self.publishBackoff * 2, 1800)
+            }
+        }
+    }
+
+    private var lastTriedList: RelayProtocol.MemberList?
+
+    /// A coordinator repeats who is in the group, at most once a day, for members who missed it; and
+    /// the first coordinator's repeat is what confirms people other coordinators invited. Runs from
+    /// the box connecting and from every tick, so it happens with no box too.
+    private func repeatMembershipIfDue() async {
+        guard me?.role == .coordinator, let myNumber = saved?.me, let g = group,
+              now().timeIntervalSince(lastMembershipRepeat ?? .distantPast) > 86_400, mesh.isReady || relay.isConfigured else { return }
+        lastMembershipRepeat = now()
+        for m in g.members where m.number != myNumber {
+            if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
+            if m.role == .coordinator, let f = g.roleFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
+        }
+        // Removals too, so a phone that missed one stops counting that member's acknowledgements.
+        if myNumber == g.primaryCoordinator {
+            for n in g.removedMembers.sorted() {
+                await sendToAll(.signing(.memberRemoved(member: n, version: g.membershipVersion), as: myNumber, identity: identity, group: groupID))
+            }
         }
     }
 
@@ -589,7 +630,13 @@ public final class HelpEngine: ObservableObject {
                     s.group.apply(membership: inner, at: now())
                     if s.group != before { setState(s) }
                     // The coordinator who invited this phone has gone before it was confirmed.
-                    if case let .memberRemoved(n, _) = inner, n == s.invitedBy, !s.confirmed { raise(.unconfirmed) }
+                    if case let .memberRemoved(n, _) = inner, n == s.invitedBy, !s.confirmed { raise(.inviterLeft) }
+                    // The first coordinator lists at once anyone it hears another coordinator add, so
+                    // they are confirmed without waiting for the daily repeat.
+                    if case let .memberAdded(n, _, _, _, _, _) = inner, isPrimaryCoordinator, let f = group?.addedFrame(n), let me = saved?.me {
+                        let signed = HelpFrame.signing(f, as: me, identity: identity, group: groupID)
+                        spawn { await self.sendToAll(signed) }
+                    }
                 }
             default: break
             }
@@ -766,7 +813,7 @@ public final class HelpEngine: ObservableObject {
     /// Whether this phone should be showing the notice now.
     public func showing(_ notice: Notice) -> Bool {
         guard let a = notices[notice], let me else { return false }
-        if notice == .unconfirmed { return a.acknowledgedBy == nil }
+        if notice == .unconfirmed || notice == .inviterLeft { return a.acknowledgedBy == nil }
         switch a.audience(at: now()) {
         case .firstCoordinator?: return me.role == .coordinator && group?.members.first(where: { $0.role == .coordinator })?.number == me.number
         case .allCoordinators?: return me.role == .coordinator
@@ -817,6 +864,7 @@ public final class HelpEngine: ObservableObject {
     /// Only the first coordinator removes people: a removal changes the group's keys.
     public func removeMember(_ number: UInt16) {
         guard saved?.me == group?.primaryCoordinator, number != saved?.me else { return }
+        previousBlocks[number] = group?.member(number)?.block
         updateGroup { $0.remove(number, at: now()) }
     }
 

@@ -89,7 +89,8 @@ struct NoticeBanner: View {
         switch n {
         case .rotaGap: "Nobody is available to respond for part of the next 24 hours. See Group."
         case .allowanceLow: "The free internet relay is nearly used up for today. Calls will still go over the local radio."
-        case .unconfirmed: "The coordinator who invited you has left the group, and the others may not know you are in it. Ask another coordinator to check, and to invite you again if needed."
+        case .unconfirmed: "The group's first coordinator has not confirmed you yet, so the others may not know you are in the group. Ask a coordinator to check."
+        case .inviterLeft: "The coordinator who invited you has left the group, and the others may not know you are in it. Ask another coordinator to check, and to invite you again if needed."
         }
     }
 }

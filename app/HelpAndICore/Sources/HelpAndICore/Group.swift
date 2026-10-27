@@ -55,6 +55,23 @@ public struct GroupSecrets: Codable, Equatable, Sendable {
         GroupSecrets(groupID: groupID ?? randomBytes(16), channelSecret: randomNonZero(16), groupKey: randomBytes(32), generation: generation)
     }
 
+    /// A new group's secrets, with an ID made from its first coordinator's signing key: 8 random
+    /// bytes, then the first 8 bytes of SHA-256 over a label, those bytes and the key. The relay
+    /// checks it, so only a list naming that coordinator can register the group (relay.js
+    /// `ownsGroup`).
+    public static func forOwner(signingKey: Data) -> GroupSecrets {
+        let nonce = randomBytes(8)
+        let hash = SHA256.hash(data: Data("HELPANDI-GROUP-1".utf8) + nonce + signingKey)
+        return .random(groupID: nonce + Data(hash.prefix(8)))
+    }
+
+    /// Whether this group's ID was made from the given key.
+    public func isOwned(by signingKey: Data) -> Bool {
+        guard groupID.count == 16 else { return false }
+        let hash = SHA256.hash(data: Data("HELPANDI-GROUP-1".utf8) + groupID.prefix(8) + signingKey)
+        return Data(hash.prefix(8)) == groupID.suffix(8)
+    }
+
     /// New channel secret and group key after a phone is removed; the group keeps its ID.
     public func rotated() -> GroupSecrets { .random(generation: generation + 1, groupID: groupID) }
 

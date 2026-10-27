@@ -26,11 +26,13 @@ not push. The relay cannot read who called, so the push cannot say; the app work
 once awake. Because the push goes to everyone at once, a responder whose turn would come later is
 told early over the internet route: the escalation order still decides the repeated alerts.
 
-The group's first coordinator, whom every member list names as `primary`, owns the group on the
-relay, whoever registers it. Any coordinator's list adds people, as members; nobody comes off
-unless the owner names them in `removed`, and nobody removed is ever listed again. So a list from
-a coordinator who has not yet heard of someone another coordinator added never takes them off.
-Roles are the owner's to set. Each message is its own storage key, at most 512
+The group's first coordinator owns the group on the relay. The group's ID is made from their key
+(8 random bytes, then the first 8 bytes of SHA-256 over `HELPANDI-GROUP-1`, those bytes and the
+key), so the group can be registered only by a list naming them as `primary`, whoever sends it.
+After that, any coordinator's list adds people, as members; only the owner sets roles, from their
+newest list, and removes people, by naming them in `removed`; nobody removed is ever listed
+again. When the owner removes a coordinator, people only that coordinator added, and the owner
+does not list, go too. A list holds at most 256 members, and every key must be a 32-byte key. Each message is its own storage key, at most 512
 characters, kept for seven days, 2,000 at most.
 
 A phone's first read asks for the last 200 messages and acts only on the last quarter of an hour

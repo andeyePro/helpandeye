@@ -36,8 +36,8 @@ public enum RelayProtocol {
         return nil
     }
 
-    public struct MemberList: Codable, Equatable, Sendable {
-        public struct Entry: Codable, Equatable, Sendable { public let key: String; public let role: String }
+    public struct MemberList: Codable, Equatable, Hashable, Sendable {
+        public struct Entry: Codable, Equatable, Hashable, Sendable { public let key: String; public let role: String }
         public let generation: UInt32
         public let members: [Entry]
         /// Keys of people removed from the group. Only these ever come off the relay's list.

@@ -258,7 +258,8 @@ import XCTest
             let steps = w.air.relayLog.map { e -> [String: Any] in
                 ["signer": e.0, "status": e.2,
                  "list": ["generation": Int(e.1.generation), "members": e.1.members.map { ["key": $0.key, "role": $0.role] },
-                          "removed": e.1.removed, "primary": e.1.primary as Any]]
+                          "removed": e.1.removed, "primary": e.1.primary.map { $0 as Any } ?? NSNull()],
+                 "group": e.3.base64EncodedString()]
             }
             let final = w.air.relay.members.map { ["key": $0.key, "role": $0.role] }
             let data = try JSONSerialization.data(withJSONObject: ["seed": Int(seed), "steps": steps, "final": final], options: .sortedKeys)

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { b64, GroupRelay, KEEP_MS, MAX_SKEW_MS, Meter, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS } from "../src/relay.js";
+import { b64, GroupRelay, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS } from "../src/relay.js";
 
 // Behaves like Durable Object storage for the calls the relay makes.
 class MapStorage {
@@ -45,7 +45,7 @@ test("only members can post and read, and a removed phone is refused at once", a
   const relay = new GroupRelay(new MapStorage());
   const coord = await phone(), member = await phone(), stranger = await phone();
   await rejects(relay.post(coord.key, "AA=="), 403);
-  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }] });
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }], primary: coord.key });
   assert.equal(await relay.post(member.key, "AAEC"), 1);
   assert.equal(await relay.post(coord.key, "AwQF"), 2);
   await rejects(relay.post(stranger.key, "AA=="), 403);
@@ -61,7 +61,7 @@ test("messages are kept for a week at most and must be base64 of a sane size", a
   let now = 0;
   const relay = new GroupRelay(new MapStorage(), () => now);
   const coord = await phone();
-  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }] });
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }], primary: coord.key });
   await relay.post(coord.key, "AA==");
   now = KEEP_MS + 1;
   await relay.post(coord.key, "AQ==");
@@ -88,7 +88,7 @@ test("each message is its own key and old ones are deleted", async () => {
   const storage = new MapStorage();
   const relay = new GroupRelay(storage, () => now);
   const coord = await phone();
-  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }] });
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }], primary: coord.key });
   for (let i = 0; i < 3; i++) await relay.post(coord.key, "AA==");
   assert.equal([...storage.m.keys()].filter((k) => k.startsWith("m:")).length, 3);
   now = KEEP_MS + 1;
@@ -99,7 +99,7 @@ test("each message is its own key and old ones are deleted", async () => {
 test("push tokens belong to current members and the sender is not woken", async () => {
   const relay = new GroupRelay(new MapStorage());
   const coord = await phone(), member = await phone(), stranger = await phone();
-  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }] });
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }], primary: coord.key });
   await relay.setPushToken(coord.key, { token: "A".repeat(64), sandbox: true });
   await relay.setPushToken(member.key, { token: "b".repeat(64) });
   await rejects(relay.setPushToken(stranger.key, { token: "c".repeat(64) }), 403);
@@ -114,7 +114,7 @@ test("a first read can ask for the last few messages, and the cursor moves past 
   let now = 0;
   const relay = new GroupRelay(new MapStorage(), () => now);
   const coord = await phone();
-  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }] });
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }], primary: coord.key });
   for (let i = 0; i < 5; i++) await relay.post(coord.key, "AA==");
   assert.deepEqual((await relay.since(coord.key, -2)).messages.map((m) => m.seq), [4, 5]);
   now = KEEP_MS + 1;
@@ -128,7 +128,7 @@ test("posts and pushes are limited per phone per minute, and old push tokens are
   const storage = new MapStorage();
   const relay = new GroupRelay(storage, () => now);
   const coord = await phone(), member = await phone();
-  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }] });
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }], primary: coord.key });
   assert.equal(await relay.limit(member.key, true), true);
   assert.equal(await relay.limit(member.key, true), true);
   assert.equal(await relay.limit(member.key, true), false, "a third push in a minute is not sent");
@@ -148,17 +148,17 @@ test("lists add people; only the owner's named removals take anyone off, for goo
   const owner = await phone(), second = await phone(), x = await phone(), y = await phone(), stranger = await phone();
   const c = (k) => ({ key: k.key, role: "coordinator" }), m = (k) => ({ key: k.key, role: "member" });
   const keys = async () => (await relay.members()).members.map((e) => e.key).sort();
-  await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second), m(x)] });
+  await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second), m(x)], primary: owner.key });
   // The second coordinator adds y; the owner, not yet told, sends a list without y: y stays.
   await relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second), m(x), m(y)] });
   await relay.setMembers(owner.key, { generation: 2, members: [c(owner), c(second), m(x)] });
   assert.deepEqual(await keys(), [owner.key, second.key, x.key, y.key].sort());
   // Only the owner's named removal takes x off, and x can never come back.
-  await relay.setMembers(second.key, { generation: 3, members: [c(owner), c(second), m(y)], removed: [x.key] });
-  assert.equal((await keys()).includes(x.key), true, "a removal named by someone else is ignored");
+  await rejects(relay.setMembers(second.key, { generation: 3, members: [c(owner), c(second), m(y)], removed: [x.key] }), 403);
+  assert.equal((await keys()).includes(x.key), true, "a removal named by someone else does nothing");
   await relay.setMembers(owner.key, { generation: 3, members: [c(owner), c(second), m(y)], removed: [x.key] });
   await relay.setMembers(second.key, { generation: 4, members: [c(owner), c(second), m(x), m(y)] });
-  assert.equal((await keys()).includes(x.key), false);
+  assert.equal((await keys()).includes(x.key), false, "a removed key listed again stays off");
   await rejects(relay.since(x.key, 0), 403);
   // A second coordinator registering first does not become the owner: the list names the first.
   const fresh = new GroupRelay(new MapStorage());
@@ -171,4 +171,45 @@ test("lists add people; only the owner's named removals take anyone off, for goo
   await rejects(relay.setMembers(stranger.key, { generation: 9, members: [c(stranger)] }), 403);
   await rejects(relay.setMembers(owner.key, { generation: 6, members: [c(owner)], removed: [owner.key] }), 409);
   await rejects(relay.setMembers(owner.key, { generation: 6, members: [c(owner), c(owner)] }), 400);
+});
+
+test("only the first coordinator, whose key the group ID is made from, can register a group", async () => {
+  const owner = await phone(), second = await phone(), member = await phone();
+  const c = (k) => ({ key: k.key, role: "coordinator" }), m = (k) => ({ key: k.key, role: "member" });
+  const nonce = crypto.getRandomValues(new Uint8Array(8));
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("HELPANDI-GROUP-1"), ...nonce, ...Uint8Array.from(atob(owner.key), (ch) => ch.charCodeAt(0))])));
+  const id = new Uint8Array([...nonce, ...hash.slice(0, 8)]);
+  assert.equal(await ownsGroup(id, owner.key), true);
+  assert.equal(await ownsGroup(id, member.key), false);
+  // A member who knows the ID cannot register it naming themselves.
+  await rejects(new GroupRelay(new MapStorage()).setMembers(member.key, { generation: 1, members: [c(member)], primary: member.key }, id), 403);
+  // The second coordinator can register it, but only naming the real first coordinator.
+  const relay = new GroupRelay(new MapStorage());
+  await relay.setMembers(second.key, { generation: 1, members: [c(owner), c(second), c(member)], primary: owner.key }, id);
+  assert.equal((await relay.members()).members.find((e) => e.key === member.key).role, "member", "only the owner and signer keep listed roles");
+  await rejects(relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second)], primary: second.key }, id), 409);
+});
+
+test("removing a coordinator takes off people only they added, and owner roles never go backwards", async () => {
+  const relay = new GroupRelay(new MapStorage());
+  const owner = await phone(), second = await phone(), y = await phone(), z = await phone();
+  const c = (k) => ({ key: k.key, role: "coordinator" }), m = (k) => ({ key: k.key, role: "member" });
+  const keys = async () => (await relay.members()).members.map((e) => e.key);
+  await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key });
+  await relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second), m(y), m(z)] });
+  // The owner has heard of z but not y, and removes the second coordinator.
+  await relay.setMembers(owner.key, { generation: 3, members: [c(owner), m(z)], removed: [second.key] });
+  assert.deepEqual((await keys()).sort(), [owner.key, z.key].sort());
+  await relay.setMembers(owner.key, { generation: 5, members: [c(owner), m(z)] });
+  await relay.setMembers(owner.key, { generation: 4, members: [c(owner), c(z)] });
+  assert.equal((await relay.members()).members.find((e) => e.key === z.key).role, "member", "a delayed older list does not promote");
+});
+
+test("keys must be keys, and the list has a size limit", async () => {
+  const relay = new GroupRelay(new MapStorage());
+  const owner = await phone();
+  const c = (k) => ({ key: k.key, role: "coordinator" });
+  await rejects(relay.setMembers(owner.key, { generation: 1, members: [c(owner), { key: "junk", role: "member" }], primary: owner.key }), 400);
+  const many = Array.from({ length: 256 }, (_, i) => ({ key: btoa(String.fromCharCode(...new Uint8Array(32).fill(i % 256).map((b, j) => (b + j * 7) % 256))), role: "member" }));
+  await rejects(relay.setMembers(owner.key, { generation: 1, members: [c(owner), ...many], primary: owner.key }), 413);
 });

@@ -14,7 +14,7 @@ import XCTest
     var directSends: [String] = []
     var violations: [String] = []
     let relay = RelayModel()
-    var relayLog: [(String, RelayProtocol.MemberList, Int)] = []
+    var relayLog: [(String, RelayProtocol.MemberList, Int, Data)] = []
 
     func run() async {
         for _ in 0..<50 {
@@ -67,32 +67,60 @@ final class RelayModel {
     var owner: String?
     var removed: Set<String> = []
     var generation: UInt32 = 0
+    var ownerGeneration: Int64 = -1
     var members: [Entry] = []
+    var addedBy: [String: String] = [:]
     private var started = false
+    static let maxMembers = 256
 
     /// 200, or the status the relay would refuse with.
-    func setMembers(signer: String, generation g: UInt32, members list: [Entry], removed named: [String], primary: String? = nil) -> Int {
+    func setMembers(signer: String, generation g: UInt32, members list: [Entry], removed named: [String], primary: String?, groupID: Data?) -> Int {
+        let isKey: (String) -> Bool = { $0.range(of: #"^[A-Za-z0-9+/]{43}=$"#, options: .regularExpression) != nil }
+        if !named.allSatisfy(isKey) { return 400 }
+        if !list.allSatisfy({ isKey($0.key) && ["coordinator", "member"].contains($0.role) }) { return 400 }
+        if list.count > Self.maxMembers || named.count > 1024 { return 413 }
         if Set(list.map(\.key)).count != list.count { return 400 }
-        let claimed = primary.flatMap { p in list.contains { $0.key == p && $0.role == "coordinator" } ? p : nil } ?? signer
-        let owner = self.owner ?? claimed
-        if started {
+        var owner = self.owner
+        if !started {
+            guard let primary, list.contains(where: { $0.key == primary && $0.role == "coordinator" }) else { return 400 }
+            if let groupID, let key = Data(base64Encoded: primary), !GroupSecrets(groupID: groupID, channelSecret: Data(), groupKey: Data(), generation: 0).isOwned(by: key) { return 403 }
+            if !list.contains(where: { $0.key == signer && $0.role == "coordinator" }) { return 400 }
+            owner = primary
+        } else {
             if !members.contains(where: { $0.key == signer && $0.role == "coordinator" }) { return 403 }
-        } else if !list.contains(where: { $0.key == signer && $0.role == "coordinator" }) {
-            return 400
+            if let primary, primary != owner { return 409 }
         }
         var removed = self.removed
-        if signer == owner {
-            if named.contains(owner) { return 409 }
-            removed.formUnion(named)
-        }
-        var roles = Dictionary(members.map { ($0.key, $0.role) }, uniquingKeysWith: { a, _ in a })
+        if signer != owner && named.contains(where: { !removed.contains($0) }) { return 403 }
+        if let owner, named.contains(owner) { return 409 }
+        let ownerFresh = signer == owner && Int64(g) >= ownerGeneration
         var order = members.map(\.key)
-        for m in list {
-            if roles[m.key] == nil { order.append(m.key) }
-            if signer == owner || !started { roles[m.key] = m.role } else if roles[m.key] == nil { roles[m.key] = "member" }
+        var roles = Dictionary(members.map { ($0.key, $0.role) }, uniquingKeysWith: { a, _ in a })
+        var addedBy = self.addedBy
+        for m in list where !removed.contains(m.key) {
+            if roles[m.key] == nil {
+                let asListed = ownerFresh || (!started && (m.key == owner || m.key == signer))
+                roles[m.key] = asListed ? m.role : "member"
+                order.append(m.key)
+                addedBy[m.key] = signer
+            } else if ownerFresh {
+                roles[m.key] = m.role
+            }
         }
-        for k in removed { roles[k] = nil }
+        if signer == owner {
+            let listed = Set(list.map(\.key))
+            for k in named where !removed.contains(k) {
+                removed.insert(k)
+                if members.contains(where: { $0.key == k && $0.role == "coordinator" }) {
+                    for (key, by) in addedBy where by == k && !listed.contains(key) { roles[key] = nil }
+                }
+            }
+        }
+        for k in removed { roles[k] = nil; addedBy[k] = nil }
+        if roles.count > Self.maxMembers || removed.count > 1024 { return 413 }
         self.owner = owner; self.removed = removed; started = true
+        self.addedBy = addedBy.filter { roles[$0.key] != nil }
+        if ownerFresh { ownerGeneration = Int64(g) }
         generation = max(generation, g)
         members = order.compactMap { k in roles[k].map { Entry(key: k, role: $0) } }
         return 200
@@ -114,13 +142,15 @@ final class RelayModel {
 
     func configure(group: GroupState?, identity: DeviceIdentity) { configured += 1; self.group = group; self.identity = identity }
 
-    func publishMembers() async -> Bool {
-        guard isConfigured, let air, let group, let key else { return false }
+    var publishes = 0
+    func publishMembers() async -> PublishResult {
+        guard isConfigured, let air, let group, let key else { return .unreachable }
+        publishes += 1
         let list = RelayProtocol.memberList(group)
         let status = air.relay.setMembers(signer: key, generation: list.generation, members: list.members.map { .init(key: $0.key, role: $0.role) },
-                                          removed: list.removed, primary: list.primary)
-        air.relayLog.append((key, list, status))
-        return status == 200
+                                          removed: list.removed, primary: list.primary, groupID: group.secrets.groupID)
+        air.relayLog.append((key, list, status, group.secrets.groupID))
+        return status == 200 ? .accepted : .refused
     }
 
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String? {
@@ -428,7 +458,71 @@ final class RelayModel {
         coordinator.mesh.isReady = true
         coordinator.engine.removeMember(second.engine.saved!.me)
         await air.run()
-        XCTAssertTrue(late.engine.showing(.unconfirmed), "told plainly, not left believing it is in")
+        XCTAssertTrue(late.engine.showing(.inviterLeft), "told plainly, not left believing it is in")
+    }
+
+    func testNoFalseAlarmWhenTheFirstCoordinatorKnowsTheInvitee() async {
+        let second = Phone(air: air, clock: clock)
+        join(second, call: false, respond: true)
+        await air.run()
+        coordinator.engine.promote(second.engine.saved!.me)
+        await air.run()
+        let late = Phone(air: air, clock: clock)
+        let invite = Joining.invitation(for: second.engine.group!, coordinator: second.identity)
+        var welcome: Joining.Welcome?
+        second.engine.updateGroup { g in welcome = try! Joining.admit(Joining.request(invite, name: "L", call: true, respond: false, me: late.identity), to: &g, invite: invite, coordinator: second.identity) }
+        late.engine.joined(try! Joining.open(welcome!, invite: invite, me: late.identity), as: welcome!.memberNumber, invitedBy: second.engine.saved!.me)
+        await air.run()
+        XCTAssertTrue(late.engine.saved!.confirmed, "the first coordinator listed them as soon as it heard")
+        coordinator.engine.removeMember(second.engine.saved!.me)
+        await air.run()
+        XCTAssertFalse(late.engine.showing(.inviterLeft))
+        XCTAssertFalse(late.engine.showing(.unconfirmed))
+    }
+
+    func testConfirmationWorksOverTheInternetWithNoBox() async {
+        for p in air.phones { p.mesh.isReady = false; p.relay.isConfigured = true }
+        await relaySetUp()
+        let second = Phone(air: air, clock: clock)
+        second.mesh.isReady = false; second.relay.isConfigured = true
+        join(second, call: false, respond: true)
+        await relaySetUp()
+        coordinator.engine.promote(second.engine.saved!.me)
+        await relaySetUp()
+        let late = Phone(air: air, clock: clock)
+        late.mesh.isReady = false; late.relay.isConfigured = true
+        let invite = Joining.invitation(for: second.engine.group!, coordinator: second.identity)
+        var welcome: Joining.Welcome?
+        second.engine.updateGroup { g in welcome = try! Joining.admit(Joining.request(invite, name: "L", call: true, respond: false, me: late.identity), to: &g, invite: invite, coordinator: second.identity) }
+        late.engine.joined(try! Joining.open(welcome!, invite: invite, me: late.identity), as: welcome!.memberNumber, invitedBy: second.engine.saved!.me)
+        await advance(60)
+        await advance(3 * 86_400)
+        XCTAssertTrue(late.engine.saved!.confirmed)
+        XCTAssertFalse(late.engine.showing(.unconfirmed))
+    }
+
+    func testARemovalReachesTheRelayAtOnceEvenJustAfterAnotherPublish() async {
+        for p in air.phones { p.relay.isConfigured = true }
+        await relaySetUp()
+        let r = responder.engine.saved!.me
+        let rKey = responder.relay.key!
+        XCTAssertTrue(air.relay.isMember(rKey))
+        clock.now = clock.now.addingTimeInterval(5)
+        coordinator.engine.removeMember(r)
+        await air.run()
+        XCTAssertFalse(air.relay.isMember(rKey), "not a day later")
+    }
+
+    func testARefusedListIsNotRetriedOverAndOver() async {
+        for p in air.phones { p.relay.isConfigured = true }
+        // Someone else registered this group on the relay first, so this coordinator is refused.
+        let other = DeviceIdentity()
+        _ = air.relay.setMembers(signer: other.signingPublicKey.base64EncodedString(), generation: 1,
+                                 members: [.init(key: other.signingPublicKey.base64EncodedString(), role: "coordinator")],
+                                 removed: [], primary: other.signingPublicKey.base64EncodedString(), groupID: nil)
+        let before = coordinator.relay.publishes
+        for _ in 0..<60 { await advance(60) }
+        XCTAssertLessThanOrEqual(coordinator.relay.publishes - before, 2, "a refusal is not retried every minute")
     }
 
     func testAnInviteeIsConfirmedWhenTheFirstCoordinatorListsIt() async {

@@ -4,6 +4,21 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Fixes from the sixth code review** - a sixth independent review of the relay's new
+  membership rules and of invitee confirmation found 1 blocker and 4 major issues. Fixed: a removal
+  made within a minute of another publish could miss the relay for a day (a changed member list
+  now goes at once, and only the list actually sent counts as published); the relay's owner could
+  be whoever registered first and removals then silently did nothing (a group's ID is now made from
+  its first coordinator's key, so only a list naming them can register it); people added by a
+  removed coordinator that the first coordinator never knew stayed on the relay for good (they now
+  go with that coordinator); the member list had no size limit and accepted any string as a key
+  (now 256 members and real keys only); a delayed older list from the owner could undo a role
+  change; a refused list was retried every minute (now not until it changes; unreachable relays
+  back off); the confirming repeat needed a box (now runs from every tick); the timeout and the
+  "inviter left" cases have their own wording; and the first coordinator lists anyone it hears
+  another coordinator add straight away, so they are confirmed without waiting a day. The Swift
+  copy of the relay rules follows all of this and is checked against the relay both by recorded
+  fuzz runs and by the same hand-written cases. 141 core tests, 19 relay tests; 200 fuzz seeds pass.
 - [x] **An unconfirmed invitation is said plainly** - someone invited by a second coordinator who was
   removed before the first coordinator heard of the invitation used to believe they were in the
   group while nobody else knew. Their phone now counts itself confirmed only once it hears the
