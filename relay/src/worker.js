@@ -51,7 +51,7 @@ export class Group {
         return json(200, { seq: await this.relay.post(key, JSON.parse(body).sealed) });
       }
       if (kind === "messages" && request.method === "GET") {
-        return json(200, { messages: await this.relay.since(key, url.searchParams.get("after")) });
+        return json(200, await this.relay.since(key, url.searchParams.get("after")));
       }
       return json(405, { error: "method not allowed" });
     } catch (e) {

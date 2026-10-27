@@ -8,9 +8,13 @@
 export const MAX_SKEW_MS = 5 * 60 * 1000;
 export const KEEP_MS = 7 * 24 * 3600 * 1000;
 export const MAX_KEPT = 2000;
-export const MAX_BODY = 4096;
-// Cloudflare's free plan allows 100,000 Worker requests a day. Coordinators are warned well before.
-export const FREE_DAILY_REQUESTS = 100_000;
+// The largest real sealed frame is under 300 characters; anything far bigger is not from the app.
+export const MAX_BODY = 512;
+// Cloudflare's free plan allows 100,000 Worker requests and 100,000 Durable Object requests a
+// day. Each relay request uses two Durable Object requests (its group and the meter), so the
+// Durable Object allowance runs out first, at 50,000 relay requests. Coordinators are warned well
+// before that.
+export const FREE_DAILY_REQUESTS = 50_000;
 export const WARN_FRACTION = 0.8;
 
 const enc = new TextEncoder();
@@ -71,7 +75,9 @@ export class GroupRelay {
   }
 
   /// The first coordinator to register a group owns it. Later member lists must come from a key
-  /// that is a coordinator in the current list, and must not go back a generation.
+  /// that is a coordinator in the current list, and must be newer. Sending the same list again is
+  /// accepted, so a coordinator's phone can republish at every launch; an out-of-date phone's
+  /// different list at the same version is refused, so it cannot drop a newer member.
   async setMembers(signer, list) {
     if (!list || !Array.isArray(list.members) || !Number.isInteger(list.generation)) throw new RelayError(400, "bad member list");
     for (const m of list.members) {
@@ -81,6 +87,11 @@ export class GroupRelay {
     if (current) {
       if (!current.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(403, "only a coordinator can change members");
       if (list.generation < current.generation) throw new RelayError(409, "older member list");
+      if (list.generation === current.generation) {
+        const same = (a) => JSON.stringify(a.map(({ key, role }) => [key, role]).sort());
+        if (same(list.members) !== same(current.members)) throw new RelayError(409, "a different list at the same version");
+        return;
+      }
     }
     if (!list.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(400, "the signer must stay a coordinator");
     await this.storage.put("members", { generation: list.generation, members: list.members.map(({ key, role }) => ({ key, role })) });
@@ -91,27 +102,38 @@ export class GroupRelay {
     if (!current || !current.members.some((m) => m.key === key)) throw new RelayError(403, "not a member of this group");
   }
 
+  /// Each message is its own storage key, so no single value grows with the log.
+  static key(seq) {
+    return "m:" + String(seq).padStart(12, "0");
+  }
+
   async post(sender, sealed) {
     await this.requireMember(sender);
     if (typeof sealed !== "string" || sealed.length === 0 || sealed.length > MAX_BODY) throw new RelayError(400, "bad message");
     unb64(sealed);
-    const log = await this.pruned();
     const seq = ((await this.storage.get("seq")) ?? 0) + 1;
-    log.push({ seq, at: this.now(), sealed });
+    await this.storage.put(GroupRelay.key(seq), { seq, at: this.now(), sealed });
     await this.storage.put("seq", seq);
-    await this.storage.put("log", log);
+    await this.prune(seq);
     return seq;
   }
 
+  /// Messages after `after`, and the latest sequence number, so a phone can tell when its place
+  /// is ahead of the relay (a new group, or a reset relay) and start again from the latest.
   async since(reader, after) {
     await this.requireMember(reader);
-    const from = Number(after) || 0;
-    return (await this.pruned()).filter((m) => m.seq > from);
+    const latest = (await this.storage.get("seq")) ?? 0;
+    const from = Math.max(Number(after) || 0, 0);
+    const cutoff = this.now() - KEEP_MS;
+    const page = await this.storage.list({ prefix: "m:", start: GroupRelay.key(from + 1), limit: 200 });
+    return { latest, messages: [...page.values()].filter((m) => m.at >= cutoff) };
   }
 
-  async pruned() {
+  async prune(latest) {
     const cutoff = this.now() - KEEP_MS;
-    return ((await this.storage.get("log")) ?? []).filter((m) => m.at >= cutoff).slice(-MAX_KEPT);
+    const old = await this.storage.list({ prefix: "m:", limit: 50 });
+    const doomed = [...old.entries()].filter(([, m]) => m.at < cutoff || m.seq <= latest - MAX_KEPT).map(([k]) => k);
+    if (doomed.length) await this.storage.delete(doomed);
   }
 }
 

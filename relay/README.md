@@ -16,14 +16,21 @@ Every request is signed by the phone's Ed25519 key. The headers are:
 |---|---|---|
 | `PUT /g/<group>/members` | a coordinator | `{"generation": n, "members": [{"key": "...", "role": "coordinator" or "member"}]}` |
 | `POST /g/<group>/messages` | a member | `{"sealed": "<base64 ChaCha20-Poly1305 box>"}` |
-| `GET /g/<group>/messages?after=<seq>` | a member | none |
+| `GET /g/<group>/messages?after=<seq>` | a member | none; the reply is `{"latest": n, "messages": [...]}` |
 
 The first coordinator to send a member list owns the group. After that only a coordinator in the
-current list can change it, never to an older generation, and a phone left out of it is refused
-at once. Messages are kept for seven days, 2,000 at most.
+current list can change it, only to a newer version (sending the same list again is accepted),
+and a phone left out of it is refused at once. Each message is its own storage key, at most 512
+characters, kept for seven days, 2,000 at most.
 
-Every response carries `X-HelpAndI-Allowance-Low: 1` once 80% of Cloudflare's free daily
-allowance (100,000 requests) has been used, so coordinators hear before it runs out.
+A phone starts reading from `latest` the first time, so a new member is not alerted for a week of
+old calls; calls still open are repeated by their callers within minutes.
+
+Every response carries `X-HelpAndI-Allowance-Low: 1` once 40,000 relay requests have been made in
+the day, so coordinators hear before the free tier runs out. Each relay request uses two Durable
+Object requests (the group's and the meter's), so the free 100,000 Durable Object requests a day
+are reached at 50,000 relay requests, before the Worker limit. A phone polls every 30 seconds while
+Help&I is open.
 
 ## Run the tests
 

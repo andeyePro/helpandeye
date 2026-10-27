@@ -37,6 +37,10 @@ public enum HelpFrame: Equatable, Sendable {
     case note(unit: UInt32, request: UInt16, part: UInt8, text: String)
     /// Where the caller is, in degrees times 10^7, with accuracy in metres. Personal content too.
     case position(unit: UInt32, request: UInt16, latitudeE7: Int32, longitudeE7: Int32, accuracy: UInt16)
+    /// A caller turned check-ins on, changed them or turned them off (an empty list). Responders'
+    /// phones then watch for a missed one too. A routine is personal, so this goes only over the
+    /// internet or in a key update, never on the group channel.
+    case checkIns(unit: UInt32, since: UInt32, grace: UInt16, times: [UInt16])
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -48,7 +52,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7 }
+    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8 }
 
     /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
     public static let maxNoteBytes = 120
@@ -57,7 +61,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// travel only end-to-end encrypted to the group key over the internet, or (later) as direct
     /// messages under each responder's own key (decision 12).
     public var mayGoOnGroupChannel: Bool {
-        switch self { case .note, .position: false; default: true }
+        switch self { case .note, .position, .checkIns: false; default: true }
     }
 
     /// Makes a note, cutting the text at a character boundary to fit.
@@ -89,6 +93,9 @@ public enum HelpFrame: Equatable, Sendable {
             w.u8(Self.header(.note)); w.u32(unit); w.u16(request); w.u8(part); w.u8(UInt8(bytes.count)); w.bytes(bytes)
         case let .position(unit, request, lat, lon, accuracy):
             w.u8(Self.header(.position)); w.u32(unit); w.u16(request); w.i32(lat); w.i32(lon); w.u16(accuracy)
+        case let .checkIns(unit, since, grace, times):
+            w.u8(Self.header(.checkIns)); w.u32(unit); w.u32(since); w.u16(grace); w.u8(UInt8(min(times.count, 8)))
+            for t in times.prefix(8) { w.u16(t) }
         }
         return w.data
     }
@@ -122,6 +129,14 @@ public enum HelpFrame: Equatable, Sendable {
             guard let unit = r.u32(), let req = r.u16(), let lat = r.i32(), let lon = r.i32(), let acc = r.u16(),
                   abs(lat) <= 900_000_000, abs(lon) <= 1_800_000_000 else { return nil }
             self = .position(unit: unit, request: req, latitudeE7: lat, longitudeE7: lon, accuracy: acc)
+        case .checkIns:
+            guard let unit = r.u32(), let since = r.u32(), let grace = r.u16(), let n = r.u8(), n <= 8 else { return nil }
+            var times: [UInt16] = []
+            for _ in 0..<n {
+                guard let t = r.u16(), t < 1440 else { return nil }
+                times.append(t)
+            }
+            self = .checkIns(unit: unit, since: since, grace: grace, times: times)
         }
         guard r.isAtEnd else { return nil }
     }
@@ -179,4 +194,18 @@ struct ByteReader {
         return Array(bytes[offset..<offset + n])
     }
     mutating func rest() -> [UInt8] { take(remaining) ?? [] }
+}
+
+/// Frames are saved in their wire form.
+extension HelpFrame: Codable {
+    public init(from decoder: Decoder) throws {
+        let data = try decoder.singleValueContainer().decode(Data.self)
+        guard let f = HelpFrame(data) else { throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "not a Help&I frame")) }
+        self = f
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.singleValueContainer()
+        try c.encode(encoded())
+    }
 }

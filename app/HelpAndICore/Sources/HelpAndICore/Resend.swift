@@ -21,8 +21,10 @@ extension OutgoingRequest {
     /// True when the call should go out again now: nobody has acknowledged it and its next
     /// resend time has come. Only an acknowledgement ends resending.
     public func resendDue(at now: Date) -> Bool {
-        guard case .seen = status else { return now >= Resend.due(resends + 1, after: createdAt) }
-        return false
+        if case .seen = status { return false }
+        // "I'm OK now" is repeated a few times against lost packets, then left: it asks for no one.
+        if colour == .green && resends >= Resend.gaps.count { return false }
+        return now >= Resend.due(resends + 1, after: createdAt)
     }
 
     public var nextResend: Date? {
@@ -38,4 +40,16 @@ public func alertTimes(turnAt: Date, every: TimeInterval, from now: Date, count:
     guard count > 0, every > 0 else { return [] }
     let skipped = now > turnAt ? Int(ceil(now.timeIntervalSince(turnAt) / every)) : 0
     return (skipped..<(skipped + count)).map { turnAt.addingTimeInterval(TimeInterval($0) * every) }
+}
+
+/// Alert times that last for hours from a fixed number of notifications: `quick` at `every`,
+/// then the rest every `later`. iOS keeps at most 64 pending notifications, and with the app
+/// asleep nothing can top them up, so the tail must stretch.
+public func alertTimes(turnAt: Date, every: TimeInterval, quick: Int, later: TimeInterval, from now: Date, count: Int) -> [Date] {
+    guard count > 0, every > 0, later > 0 else { return [] }
+    let early = (0..<quick).map { turnAt.addingTimeInterval(TimeInterval($0) * every) }.filter { $0 >= now.addingTimeInterval(-1) }
+    let tailStart = turnAt.addingTimeInterval(TimeInterval(quick) * every)
+    let skipped = now > tailStart ? Int(ceil(now.timeIntervalSince(tailStart) / later)) : 0
+    let tail = (skipped..<(skipped + count)).map { tailStart.addingTimeInterval(TimeInterval($0) * later) }
+    return Array((early + tail).prefix(count))
 }

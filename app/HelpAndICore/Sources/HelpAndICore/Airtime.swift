@@ -50,11 +50,14 @@ public struct Band: Equatable, Sendable {
 /// Keeps this phone's own mesh sending well inside the band's duty cycle. Calls for help may use
 /// the whole legal allowance; follow-ups, text and position only the part left after keeping
 /// half of it free for other people's calls (decision 12, "only when there is airtime to spare").
-public struct AirtimeBudget: Sendable {
+public struct AirtimeBudget: Sendable, Codable {
     public enum Kind: Sendable { case call, optional }
-    public let window: TimeInterval = 3600
+    struct Entry: Codable, Sendable { let id: UUID; let at: Date; let seconds: TimeInterval }
+    public var window: TimeInterval { 3600 }
     public let dutyCycle: Double
-    private var log: [(id: UUID, at: Date, seconds: TimeInterval)] = []
+    /// Saved with the app's activity, so re-pairing the box or relaunching never gives a fresh
+    /// allowance within the hour.
+    private var log: [Entry] = []
 
     public init(dutyCycle: Double) { self.dutyCycle = max(dutyCycle, 0) }
 
@@ -70,9 +73,10 @@ public struct AirtimeBudget: Sendable {
     /// Reserves airtime before sending, so sends that overlap cannot each see the same allowance.
     @discardableResult
     public mutating func record(_ seconds: TimeInterval, at now: Date) -> UUID {
-        log.removeAll { now.timeIntervalSince($0.at) >= window }
+        let w = window
+        log.removeAll { now.timeIntervalSince($0.at) >= w }
         let id = UUID()
-        log.append((id, now, seconds))
+        log.append(Entry(id: id, at: now, seconds: seconds))
         return id
     }
 

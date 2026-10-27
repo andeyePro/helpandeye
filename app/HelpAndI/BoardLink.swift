@@ -65,15 +65,26 @@ final class BoardLink: NSObject, ObservableObject {
         state = .off
     }
 
-    /// Sends a Help&I frame as a datagram on the group's channel. Returns nil on success or the
-    /// reason it failed, which the caller shows next to the cross.
-    func send(_ frame: HelpFrame, urgent: Bool = false) async -> String? {
-        guard state == .ready, let ch = helpChannel else { return "Box not connected" }
+    enum SendResult: Equatable {
+        case sent
+        /// It certainly did not go on air.
+        case refused(String)
+        /// The box did not answer, so it may or may not have gone on air.
+        case unknown(String)
+
+        var failure: String? {
+            switch self { case .sent: nil; case let .refused(why), let .unknown(why): why }
+        }
+    }
+
+    /// Sends a Help&I frame as a datagram on the group's channel.
+    func send(_ frame: HelpFrame, urgent: Bool = false) async -> SendResult {
+        guard state == .ready, let ch = helpChannel else { return .refused("Box not connected") }
         let cmd = MeshCore.Command.sendChannelData(index: ch, dataType: HelpFrame.meshDataType, payload: frame.encoded())
         switch await run(cmd, urgent: urgent, expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
-        case .ok?: return nil
-        case let .error(code)?: return "Box refused it (error \(code))"
-        default: return "Box did not answer"
+        case .ok?: return .sent
+        case let .error(code)?: return .refused("Box refused it (error \(code))")
+        default: return rx == nil ? .refused("Box not connected") : .unknown("Box did not answer")
         }
     }
 
@@ -116,6 +127,8 @@ final class BoardLink: NSObject, ObservableObject {
     /// command's. Reconnecting starts the conversation afresh.
     private func timedOut(_ id: UUID) {
         guard pending?.id == id else { return }
+        // Nothing more is written on this link: the next command waits for a fresh handshake.
+        rx = nil
         finish(nil, only: id)
         if let p = peripheral { central.cancelPeripheralConnection(p) }
     }
@@ -143,6 +156,7 @@ final class BoardLink: NSObject, ObservableObject {
             return
         }
         state = .ready
+        backoff = 1
         await drainMessages()
     }
 
@@ -215,7 +229,9 @@ final class BoardLink: NSObject, ObservableObject {
 
     private func handle(_ data: Data) {
         guard let r = MeshCore.Response(data) else { return }
-        if case .messagesWaiting = r { Task { await drainMessages() }; return }
+        // Before the handshake has found the group's channel, the handshake's own drain will fetch
+        // these; draining now would take them off the board and throw them away.
+        if case .messagesWaiting = r { if state == .ready { Task { await drainMessages() } }; return }
         if let p = pending, p.expect(r) { finish(r); return }
         if case let .channelData(ch, type, payload, _) = r, listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload) {
             onFrame?(f)
@@ -243,7 +259,6 @@ extension BoardLink: @preconcurrency CBCentralManagerDelegate {
 
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         guard p === peripheral else { return }
-        backoff = 1
         p.discoverServices([CBUUID(string: MeshCore.serviceUUID)])
     }
 
@@ -261,7 +276,9 @@ extension BoardLink: @preconcurrency CBCentralManagerDelegate {
         guard p === peripheral else { return }
         rx = nil; helpChannel = nil
         finish(nil)
-        state = .connecting
+        // Keep a failure on screen, so a box that connects but never answers is not shown as
+        // "Connecting…" for ever.
+        if case .failed = state {} else { state = .connecting }
         reconnectLater(p)
     }
 

@@ -19,7 +19,6 @@ final class AppModel: ObservableObject {
     let identity = Store.identity()
     let board = BoardLink()
     let relay = Relay()
-    private var budget: AirtimeBudget?
     private var bag: Set<AnyCancellable> = []
     private var ticker: Timer?
 
@@ -29,9 +28,11 @@ final class AppModel: ObservableObject {
         board.onFrame = { [weak self] in self?.received($0, via: .mesh) }
         relay.onFrame = { [weak self] in self?.received($0, via: .internet) }
         relay.onAllowanceLow = { [weak self] in self?.raise(.allowanceLow) }
-        // A new budget only when the band changes: reconnecting must not forget what was sent.
-        board.$selfInfo.map { $0?.radio.band }.removeDuplicates().sink { [weak self] band in
-            self?.budget = band.map { AirtimeBudget(dutyCycle: $0.dutyCycle) }
+        // A new budget only when the box is on a band with a different limit: reconnecting,
+        // re-pairing or relaunching must not forget what was sent this hour.
+        board.$selfInfo.compactMap { $0?.radio.band }.sink { [weak self] band in
+            guard let self, self.activity.airtime?.dutyCycle != band.dutyCycle else { return }
+            self.activity.airtime = AirtimeBudget(dutyCycle: band.dutyCycle)
         }.store(in: &bag)
         board.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         relay.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
@@ -184,35 +185,43 @@ final class AppModel: ObservableObject {
         // Personal content never goes on the shared group channel (decision 12).
         guard frame.mayGoOnGroupChannel else { return "Only goes over the internet" }
         guard board.state == .ready, let radio = board.radio else { return meshUnavailableReason }
-        guard budget != nil else { return "Box is on a frequency Help&I will not use" }
+        guard radio.band != nil, activity.airtime != nil else { return "Box is on a frequency Help&I will not use" }
         let seconds = radio.airtime(bytes: meshPacketBytes(payload: frame.encoded().count))
-        guard budget!.allows(seconds, kind: kind, at: Date()) else { return "Radio time used up for now" }
-        // Reserve before sending, so overlapping sends cannot each see the same allowance.
-        let reservation = budget!.record(seconds, at: Date())
-        let failure = await board.send(frame, urgent: kind == .call)
-        if failure != nil { budget?.cancel(reservation) }
-        return failure
+        guard activity.airtime!.allows(seconds, kind: kind, at: Date()) else { return "Radio time used up for now" }
+        // Reserve before sending, so overlapping sends cannot each see the same allowance. Give it
+        // back only when the box certainly did not transmit.
+        let reservation = activity.airtime!.record(seconds, at: Date())
+        let result = await board.send(frame, urgent: kind == .call)
+        if case .refused = result { activity.airtime?.cancel(reservation) }
+        return result.failure
     }
 
     /// Runs every 15 seconds while the app runs, and whenever the box or relay wakes it.
     func tick() {
         checkResends()
         checkMissedCheckIn()
+        watchOthersCheckIns()
         topUpAlerts()
+        // Stop listening on the old channel once the changeover after a removal is over.
+        let listening = group?.listening(at: Date()).map(\.channelSecret) ?? []
+        if board.secrets != listening { board.secrets = listening }
     }
 
-    /// Sends the latest call again until a responder acknowledges it (see `Resend`). A route that
-    /// failed before is tried again, so a box that comes back in range still gets the call out.
+    /// Sends every call nobody has acknowledged yet again (see `Resend`), not only the latest, so a
+    /// later press never strands an earlier one. A route that failed before is tried again, so a
+    /// box that comes back in range still gets the call out.
     private func checkResends() {
-        guard let r = current, r.resendDue(at: Date()), let i = activity.outgoing.indices.last else { return }
-        activity.outgoing[i].markResent()
-        let routes = RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false)
-        for route in routes {
-            Task {
-                // Resends count as optional airtime, so they never use up what a new press needs.
-                let failure = await send(r.callFrame, on: route, kind: .optional)
-                guard failure == nil, let j = activity.outgoing.firstIndex(where: { $0.number == r.number && $0.unit == r.unit }) else { return }
-                activity.outgoing[j].update(route, .sent)
+        let now = Date()
+        for i in activity.outgoing.indices where activity.outgoing[i].resendDue(at: now) {
+            activity.outgoing[i].markResent(at: now)
+            let r = activity.outgoing[i]
+            for route in RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false) {
+                Task {
+                    // Resends count as optional airtime, so they never use up what a new press needs.
+                    let failure = await send(r.callFrame, on: route, kind: .optional)
+                    guard failure == nil, let j = activity.outgoing.firstIndex(where: { $0.number == r.number && $0.unit == r.unit }) else { return }
+                    activity.outgoing[j].update(route, .sent)
+                }
             }
         }
     }
@@ -228,21 +237,29 @@ final class AppModel: ObservableObject {
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
             }
-        case .availability:
+        case let .availability(who, _, _, _):
+            // Only for someone who is in the group and can respond.
+            guard group?.member(who)?.canRespond == true else { return }
             activity.rota.apply(frame); checkGaps(); return
         case let .noticeAck(notice, by, _):
+            guard group?.member(by)?.role == .coordinator else { return }
             notices[notice]?.acknowledge(by: by); return
+        case let .checkIns(unit, _, _, _):
+            guard unit != me?.unit, group?.member(unit: unit) != nil else { return }
+            activity.checkInWatch.apply(frame); return
         case let .call(unit, _, _, _), let .followUp(unit, _, _, _), let .note(unit, _, _, _), let .position(unit, _, _, _, _):
             // A phone never alerts for its own calls, however they come back to it.
             if unit == me?.unit { return }
+            activity.checkInWatch.apply(frame)
+            if case .followUp(_, _, _, .missedCheckIn) = frame { activity.checkInWatch.heardRaised(unit: unit, at: Date(), calendar: .current) }
         }
         guard me?.canRespond == true else { return }
         switch activity.inbox.receive(frame, via: route, at: Date()) {
         case let .new(key): scheduleAlerts(for: key)
         case let .updated(key) where activity.inbox.requests[key]?.isAcknowledged == true: cancelAlerts(for: key)
         case .duplicate:
-            // The caller is still sending, so it has not heard an acknowledgement. If this phone
-            // acknowledged, say so again.
+            // The caller is still sending, so it has not heard an acknowledgement. Pass on the
+            // signed acknowledgements this phone has, its own or another responder's.
             if case let .call(unit, request, _, _) = frame { reAck(IncomingRequest.Key(unit: unit, request: request)) }
         default: break
         }
@@ -251,11 +268,15 @@ final class AppModel: ObservableObject {
 
     private var lastReAck: [IncomingRequest.Key: Date] = [:]
 
+    /// The phone that acknowledged repeats its ack at most every 25 seconds; others pass one on
+    /// at most every five minutes, so a crowd of phones does not fill the radio.
     private func reAck(_ key: IncomingRequest.Key) {
-        guard let me = saved?.me, activity.inbox.requests[key]?.acknowledgedBy.contains(me) == true,
-              Date().timeIntervalSince(lastReAck[key] ?? .distantPast) >= 25 else { return }
+        guard let me = saved?.me, let r = activity.inbox.requests[key], !r.acks.isEmpty else { return }
+        let mine = r.acks[me]
+        guard Date().timeIntervalSince(lastReAck[key] ?? .distantPast) >= (mine != nil ? 25 : 300) else { return }
         lastReAck[key] = Date()
-        retryAck(key)
+        let frame = mine ?? r.acks.values.first!
+        Task { _ = await sendOptional(frame); if relay.isConfigured { _ = await sendOnMesh(frame, kind: .optional) } }
     }
 
     // MARK: Responding
@@ -308,10 +329,16 @@ final class AppModel: ObservableObject {
         guard let r = activity.inbox.requests[key], !r.isAcknowledged, let e = escalation(for: r), let me = saved?.me else { return }
         let turn = TimeInterval(e.order.firstIndex(of: me) ?? e.order.count) * e.interval
         let turnAt = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn)
-        // iOS keeps at most 64 pending notifications per app, shared between open requests.
+        // iOS keeps at most 64 pending notifications per app: up to four go to check-in reminders,
+        // the rest are shared between open requests. A long tail keeps alerting with the app asleep.
         let open = max(activity.inbox.requests.values.filter { !$0.isAcknowledged }.count, 1)
-        let times = alertTimes(turnAt: turnAt, every: r.colour == .red || r.colour == nil ? 60 : 300, from: Date(),
-                               count: max(2, min(alertsPerRequest, 56 / open)))
+        let count = max(3, 58 / open)
+        let times: [Date]
+        switch r.colour {
+        case .green?: times = [max(turnAt, Date())]  // "I'm OK now" asks for no one: tell them once, calmly.
+        case .amber?: times = alertTimes(turnAt: turnAt, every: 300, quick: 6, later: 1800, from: Date(), count: count)
+        default: times = alertTimes(turnAt: turnAt, every: 60, quick: 10, later: 600, from: Date(), count: count)
+        }
         let content = UNMutableNotificationContent()
         let who = name(ofUnit: key.unit)
         switch r.colour {
@@ -319,9 +346,10 @@ final class AppModel: ObservableObject {
         case .green?: content.title = "\(who): I'm OK now"
         default: content.title = "\(who): come now"
         }
+        if r.key.request == 0 { content.title = "\(who) missed a check-in" }
         content.body = "Open Help&I to acknowledge."
-        content.sound = .defaultCritical
-        content.interruptionLevel = .timeSensitive
+        content.sound = r.colour == .green ? .default : .defaultCritical
+        content.interruptionLevel = r.colour == .green ? .active : .timeSensitive
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: alertIDs(key))
         for (n, at) in times.enumerated() {
@@ -330,8 +358,6 @@ final class AppModel: ObservableObject {
             center.add(UNNotificationRequest(identifier: "\(alertID(key))-\(n)", content: content, trigger: trigger))
         }
     }
-
-    private let alertsPerRequest = 10
 
     private func cancelAlerts(for key: IncomingRequest.Key) {
         let ids = alertIDs(key)
@@ -410,6 +436,12 @@ final class AppModel: ObservableObject {
         Store.save(s)
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: (0..<1440).map { "checkin-\($0)" })
+        // Responders' phones watch too. A routine is personal, so it goes over the internet only.
+        if let unit = me?.unit {
+            let frame = HelpFrame.checkIns(unit: unit, since: UInt32((s.checkInSince ?? Date()).timeIntervalSince1970),
+                                           grace: UInt16((schedule?.grace ?? 1800) / 60), times: (schedule?.times ?? []).map { UInt16($0) })
+            Task { _ = await relay.send(frame) }
+        }
         for t in schedule?.times ?? [] {
             let content = UNMutableNotificationContent()
             content.title = "Time to check in"
@@ -421,13 +453,32 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// A missed check-in raises an amber request, once per missed time.
+    /// A missed check-in raises an amber request, once per missed time, unless a red or amber call
+    /// is already waiting for a responder: that one matters more and must stay on screen.
     func checkMissedCheckIn() {
         guard let s = saved, let schedule = s.checkIn, let since = s.checkInSince, me?.canCall == true else { return }
+        let waiting = activity.outgoing.contains { r in
+            if case .seen = r.status { return false }
+            return r.colour != .green && Date().timeIntervalSince(r.createdAt) < 86_400
+        }
+        guard !waiting else { return }
         guard let missed = schedule.missed(greens: activity.greens, since: since, now: Date(), calendar: .current),
               UserDefaults.standard.double(forKey: "checkin-raised") < missed.timeIntervalSince1970 else { return }
         UserDefaults.standard.set(missed.timeIntervalSince1970, forKey: "checkin-raised")
         press(.amber)
         add(.missedCheckIn)
+    }
+
+    /// Raises another caller's missed check-in on this phone, if their own phone has not. The
+    /// request is numbered 0, which callers never use, and needs a person to acknowledge it.
+    private func watchOthersCheckIns() {
+        guard me?.canRespond == true else { return }
+        for (unit, missed) in activity.checkInWatch.due(at: Date(), calendar: .current) {
+            let at = UInt32(missed.timeIntervalSince1970)
+            if case let .new(key) = activity.inbox.receive(.call(unit: unit, request: 0, colour: .amber, sentAt: at), via: .internet, at: Date()) {
+                activity.inbox.receive(.followUp(unit: unit, request: 0, part: 1, category: .missedCheckIn), via: .internet, at: Date())
+                scheduleAlerts(for: key)
+            }
+        }
     }
 }

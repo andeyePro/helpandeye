@@ -4,6 +4,27 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Fixes from the second code review** - a second independent review of the send, alert and
+  relay code found 17 issues. Fixed: the relay read position was shared by all groups, so a
+  responder who changed group could silently miss every internet-route call (now per group and
+  relay, and a first read starts from the latest instead of replaying a week as new alerts).
+  Membership has its own version, so an out-of-date coordinator's phone cannot drop a newer member
+  from the relay, and a refused poll is shown. Every unacknowledged call is resent, not only the
+  latest, and a missed check-in is not raised while a red or amber call is waiting. After a long
+  sleep, missed resend slots are skipped rather than sent back to back. A timed-out box command now
+  stops all writes until a fresh handshake, so a late reply cannot mark a call as sent, and airtime
+  is given back only when the box certainly did not transmit; the airtime log is saved across
+  relaunches and re-pairing. Responder alerts have a long tail (red: every minute for ten minutes,
+  then every ten minutes; amber every five, then every thirty) so they last hours with the app
+  asleep; "I'm OK now" alerts once, quietly, and is repeated only four times. The same numbers
+  pressed at a different time are a new call; responders ignore acks from before a call, like the
+  caller. Any phone holding a signed ack passes it on when it hears the call repeated. Messages
+  waiting on the box are not drained before the channel is known; a box that never answers shows
+  its failure instead of "Connecting…" and backs off. Availability and notice acks count only from
+  current members, and the old channel is dropped when the changeover ends. Relay: one storage key
+  per message, 512-character limit, allowance warning at the Durable Object limit, 30-second polls.
+  Responders' phones now also watch callers' check-ins (shared over the internet only) and raise a
+  missed one if the caller's phone did not. 86 core tests, 7 relay tests; manual checks 16 to 18.
 - [x] **Calls repeat until acknowledged** - an independent planning pass found that a call went out
   once per route, so one lost radio packet meant nobody was ever alerted. The latest call is now
   sent again after 30 seconds, 1, 2 and 4 minutes, then every 10 minutes, on every route, until a

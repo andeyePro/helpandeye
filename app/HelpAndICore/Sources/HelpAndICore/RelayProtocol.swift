@@ -43,7 +43,7 @@ public enum RelayProtocol {
     }
 
     public static func memberList(_ group: GroupState) -> MemberList {
-        MemberList(generation: group.secrets.generation, members: group.members.compactMap { m in
+        MemberList(generation: group.membershipVersion, members: group.members.compactMap { m in
             m.signingKey.map { .init(key: $0.base64EncodedString(), role: m.role == .coordinator ? "coordinator" : "member") }
         })
     }

@@ -24,10 +24,12 @@ final class Relay: ObservableObject {
         isConfigured = base != nil && group != nil
         poller?.cancel()
         guard isConfigured else { return }
+        // Every 30 seconds while open: each poll costs two of the free tier's daily Durable Object
+        // requests, shared by every group.
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.poll()
-                try? await Task.sleep(for: .seconds(10))
+                try? await Task.sleep(for: .seconds(30))
             }
         }
     }
@@ -49,21 +51,34 @@ final class Relay: ObservableObject {
         }
     }
 
-    private var after: Int {
-        get { UserDefaults.standard.integer(forKey: "relay-after") }
-        set { UserDefaults.standard.set(newValue, forKey: "relay-after") }
+    /// This phone's place in the group's message log, kept per group and relay address, so
+    /// joining another group or changing relay never skips that group's messages.
+    private var positionKey: String? {
+        guard let group, let base else { return nil }
+        return "relay-after-\(group.secrets.groupID.base64EncodedString())-\(base.absoluteString)"
     }
 
     func poll() async {
-        guard let group else { return }
-        struct Page: Decodable { struct M: Decodable { let seq: Int; let sealed: String }; let messages: [M] }
-        guard case let .some((200, data)) = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(after)", body: Data()),
-              let page = try? JSONDecoder().decode(Page.self, from: data) else { return }
-        let keys = [group.secrets, group.previousSecrets].compactMap { $0 }
-        for m in page.messages {
-            if let f = RelayProtocol.open(m.sealed, with: keys) { onFrame?(f) }
-            after = max(after, m.seq)
+        guard let group, let positionKey else { return }
+        struct Page: Decodable { struct M: Decodable { let seq: Int; let sealed: String }; let latest: Int; let messages: [M] }
+        let stored = UserDefaults.standard.object(forKey: positionKey) as? Int
+        let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(stored ?? 0)", body: Data())
+        if case .some((403, _)) = response { lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return }
+        guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(Page.self, from: data) else { return }
+        // A first poll starts from now rather than replaying a week of old calls as new alerts;
+        // calls still open are sent again by their callers, so they arrive within minutes. A place
+        // ahead of the relay means the relay was reset: start again from its beginning.
+        guard let stored, stored <= page.latest else {
+            UserDefaults.standard.set(stored == nil ? page.latest : 0, forKey: positionKey)
+            return
         }
+        let keys = group.listening(at: Date())
+        var position = stored
+        for m in page.messages.sorted(by: { $0.seq < $1.seq }) {
+            if let f = RelayProtocol.open(m.sealed, with: keys) { onFrame?(f) }
+            position = max(position, m.seq)
+        }
+        UserDefaults.standard.set(position, forKey: positionKey)
     }
 
     private func request(_ method: String, _ path: String, body: Data) async -> (Int, Data)? {
@@ -78,7 +93,7 @@ final class Relay: ObservableObject {
             let (data, response) = try await session.data(for: req)
             guard let http = response as? HTTPURLResponse else { return nil }
             if http.value(forHTTPHeaderField: "X-HelpAndI-Allowance-Low") == "1" { onAllowanceLow?() }
-            lastProblem = nil
+            if http.statusCode != 403 { lastProblem = nil }
             return (http.statusCode, data)
         } catch {
             lastProblem = "No internet"

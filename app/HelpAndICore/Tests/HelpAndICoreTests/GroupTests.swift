@@ -27,6 +27,8 @@ final class GroupTests: XCTestCase {
         XCTAssertEqual(joined, group)
         XCTAssertEqual(joined.member(welcome.memberNumber)?.role, .caller)
         XCTAssertEqual(joined.member(welcome.memberNumber)?.unit, 70001)
+        XCTAssertEqual(joined.membershipVersion, 2, "joining bumps the version the relay compares")
+        XCTAssertEqual(RelayProtocol.memberList(joined).generation, 2)
     }
 
     func testOnlyTheNewMemberCanOpenTheWelcome() throws {

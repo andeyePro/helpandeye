@@ -22,6 +22,10 @@ struct Activity: Codable {
     var rota = Rota()
     var lastAnswered: [UInt16: Date] = [:]
     var greens: [Date] = []
+    /// This phone's own radio use in the last hour (IR 2030), kept across relaunches and re-pairing.
+    var airtime: AirtimeBudget?
+    /// Other callers' check-ins, so this phone notices a missed one too.
+    var checkInWatch = CheckInWatch()
 }
 
 enum Store {

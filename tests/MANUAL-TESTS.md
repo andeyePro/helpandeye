@@ -126,4 +126,22 @@ Pass: within ten minutes of step 2, phone B alerts for the call, although its bo
 
 1. On phone A, press Come now. On phone B, dismiss the notification without opening Help&I.
 
-Pass: phone B alerts again about a minute later, and keeps doing so (once a minute for red, every five minutes for amber) until someone acknowledges. After an acknowledgement, no more alerts arrive, and the ones already showing are cleared.
+Pass: phone B alerts again about a minute later: once a minute for the first ten minutes, then every ten minutes, for red; every five minutes, then every half hour, for amber. It keeps going with phone B locked and Help&I closed for at least three hours (red). After an acknowledgement, no more alerts arrive, and the ones already showing are cleared. An "I'm OK now" alerts once, quietly, and does not repeat.
+
+Known limit: over the internet route alone, with Help&I closed on phone B, alerts continue only as long as the notifications already scheduled, because the relay cannot wake the phone until push notifications are set up (TODO.md). Over the mesh, each repeat of the call wakes the app and tops them up.
+
+## 17. A responder notices a missed check-in when the caller's phone is off
+
+Needs the relay set up and internet on.
+
+1. On phone A, turn on a check-in two minutes from now and tap Save. Wait a minute, then switch phone A off.
+2. Wait 40 minutes.
+
+Pass: about 35 minutes after the check-in time, phone B alerts "<name> missed a check-in" as a come-when-convenient call, which stays until someone acknowledges it. With phone A left on and pressing nothing, phone B gets phone A's own missed-check-in call and does not raise a second one.
+
+## 18. Joining a second group
+
+1. On phone B, leave the group, then join a different group that uses the same relay.
+2. On a phone in the new group, press Come now.
+
+Pass: phone B alerts. (A shared read position used to make it miss the new group's calls.)

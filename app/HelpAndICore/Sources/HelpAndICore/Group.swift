@@ -62,6 +62,9 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var policy: StoredPolicy = .init()
     /// The relay for the internet route, such as https://helprelayandeye.example.workers.dev.
     public var relayURL: String?
+    /// Goes up whenever someone joins or leaves, so the relay can tell a newer member list from
+    /// an out-of-date phone's older one.
+    public var membershipVersion: UInt32 = 1
 
     public struct StoredPolicy: Codable, Equatable, Sendable {
         public var useDistance = false
@@ -90,6 +93,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     public mutating func remove(_ number: UInt16, at now: Date = Date()) {
         guard let m = member(number) else { return }
         members.removeAll { $0.number == number }
+        membershipVersion += 1
         if let u = m.unit { removedUnits.insert(u) }
         previousSecrets = secrets
         previousUntil = now.addingTimeInterval(Self.changeoverPeriod)
@@ -191,6 +195,7 @@ public enum Joining {
         guard invite.groupID == group.secrets.groupID else { throw Failure.wrongGroup }
         let role: Member.Role = request.wantsToCall && request.wantsToRespond ? .both : (request.wantsToCall ? .caller : .responder)
         let number = group.nextMemberNumber
+        group.membershipVersion += 1
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,
                                     unit: request.wantsToCall ? group.nextUnit : nil, phone: request.phone,
                                     signingKey: request.signingKey))
