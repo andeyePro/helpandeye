@@ -1,33 +1,33 @@
-name: HelpAndI
+name: helpandeye
 options:
-  bundleIdPrefix: org.andeye
+  bundleIdPrefix: com.andeye
   deploymentTarget:
     iOS: "17.0"
     watchOS: "10.0"
 packages:
-  HelpAndICore:
-    path: HelpAndICore
+  helpandeyeCore:
+    path: helpandeyeCore
 settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
-  HelpAndI:
+  helpandeye:
     type: application
     platform: iOS
-    sources: [HelpAndI]
+    sources: [helpandeye]
     dependencies:
-      - package: HelpAndICore
-      - target: HelpAndIWatch
-      - target: HelpAndINotify
+      - package: helpandeyeCore
+      - target: helpandeyeWatch
+      - target: helpandeyeNotify
     entitlements:
-      path: HelpAndI/HelpAndI.entitlements
+      path: helpandeye/helpandeye.entitlements
       properties:
         com.apple.developer.usernotifications.time-sensitive: true
         aps-environment: development
     info:
-      path: HelpAndI/Info.plist
+      path: helpandeye/Info.plist
       properties:
         CFBundleDisplayName: "Help&I"
         UILaunchScreen: {}
@@ -37,22 +37,22 @@ targets:
         UIBackgroundModes: [bluetooth-central, remote-notification]
         NSBluetoothAlwaysUsageDescription: "Help&I uses Bluetooth to talk to your Help&I box, so a call for help can go over the local radio network."
         NSCameraUsageDescription: "Help&I uses the camera to scan a group's joining code."
-        # Set to "$(AppIdentifierPrefix)org.andeye.helpandi.shared" with a matching keychain-access-groups
+        # Set to "$(AppIdentifierPrefix)com.andeye.help.shared" with a matching keychain-access-groups
         # entitlement once signed, so the notification extension can name callers.
         HelpAndIKeychainGroup: ""
         NSLocationWhenInUseUsageDescription: "When you choose to share where you are, Help&I sends it to your responders, encrypted, over the internet."
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.andeye.helpandi
+        PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help
         TARGETED_DEVICE_FAMILY: "1"
-  HelpAndINotify:
+  helpandeyeNotify:
     type: app-extension
     platform: iOS
-    sources: [HelpAndINotify]
+    sources: [helpandeyeNotify]
     dependencies:
-      - package: HelpAndICore
+      - package: helpandeyeCore
     info:
-      path: HelpAndINotify/Info.plist
+      path: helpandeyeNotify/Info.plist
       properties:
         CFBundleDisplayName: "Help&I"
         HelpAndIKeychainGroup: ""
@@ -61,24 +61,24 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.andeye.helpandi.notify
+        PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.notify
         TARGETED_DEVICE_FAMILY: "1"
-  HelpAndIWatch:
+  helpandeyeWatch:
     type: application
     platform: watchOS
-    sources: [HelpAndIWatch]
+    sources: [helpandeyeWatch]
     info:
-      path: HelpAndIWatch/Info.plist
+      path: helpandeyeWatch/Info.plist
       properties:
         CFBundleDisplayName: "Help&I"
         WKApplication: true
-        WKCompanionAppBundleIdentifier: org.andeye.helpandi
+        WKCompanionAppBundleIdentifier: com.andeye.help
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: org.andeye.helpandi.watchkitapp
+        PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
 schemes:
-  HelpAndI:
+  helpandeye:
     build:
       targets:
-        HelpAndI: all
+        helpandeye: all

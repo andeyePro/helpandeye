@@ -7,9 +7,9 @@ For contributors. What each part does and where its code is. The rules it follow
 
 | Part | Where | What it does |
 |---|---|---|
-| Core logic | `app/HelpAndICore` | Swift package with no UI: message frames, request state, escalation, rota, check-ins, airtime, group keys, the MeshCore and relay protocols, and `HelpEngine`, which applies the rules. All tests are here (`swift test`), including end-to-end tests that run several engines over a fake radio and relay. |
+| Core logic | `app/helpandeyeCore` | Swift package with no UI: message frames, request state, escalation, rota, check-ins, airtime, group keys, the MeshCore and relay protocols, and `HelpEngine`, which applies the rules. All tests are here (`swift test`), including end-to-end tests that run several engines over a fake radio and relay. |
 | Phone app | `app/HelpAndI` | SwiftUI screens, and the real box (`BoardLink`), relay (`Relay`), notifications and storage plugged into the engine. |
-| Watch app | `app/HelpAndIWatch` | Three buttons. Sends through the paired phone. |
+| Watch app | `app/helpandeyeWatch` | Three buttons. Sends through the paired phone. |
 | Box | any Heltec LoRa board | MeshCore's standard companion firmware, unchanged. The app writes the group's private channel into it. |
 | Relay | `relay/` | Cloudflare Worker. Stores and forwards sealed messages for the internet route. |
 

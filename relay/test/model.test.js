@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { GroupRelay, RelayError } from "../src/relay.js";
 
-// The fuzz test of the app (app/HelpAndICore, EngineFuzzTests) uses a Swift copy of the relay's
+// The fuzz test of the app (app/helpandeyeCore, EngineFuzzTests) uses a Swift copy of the relay's
 // membership rules. These are the member-list publishes from some of its runs, with what that copy
 // said; the real relay must say the same and end with the same list.
 // Regenerate: HELPANDI_RELAY_LOG=<file> HELPANDI_FUZZ_SEEDS=4 swift test --filter EngineFuzzTests

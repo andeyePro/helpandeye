@@ -55,7 +55,7 @@ npm test
 ```
 
 `test/interop.test.js` checks a request signed by the app's Swift code
-(`app/HelpAndICore`, `RelayVectorTests`). `test/model.test.js` replays member-list publishes
+(`app/helpandeyeCore`, `RelayVectorTests`). `test/model.test.js` replays member-list publishes
 recorded from the app's fuzz test, checking the app's copy of these rules gives the same results.
 
 ## Deploy
@@ -66,6 +66,6 @@ npx wrangler deploy
 
 Push notifications stay off until these secrets are set (`npx wrangler secret put <name>`):
 `APNS_KEY` (the contents of the `.p8` key from Apple Developer, Certificates, Keys), `APNS_KEY_ID`,
-`APNS_TEAM_ID` and `APNS_TOPIC` (`org.andeye.helpandi`).
+`APNS_TEAM_ID` and `APNS_TOPIC` (`com.andeye.help`).
 
 Then, in the app, open Group, Internet route, and enter the Worker's `https://` address.

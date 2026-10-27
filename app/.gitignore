@@ -3,7 +3,7 @@ DerivedData/
 *.xcodeproj/
 .swiftpm/
 Package.resolved
-HelpAndI/Info.plist
-HelpAndI/HelpAndI.entitlements
-HelpAndIWatch/Info.plist
-HelpAndINotify/Info.plist
+helpandeye/Info.plist
+helpandeye/helpandeye.entitlements
+helpandeyeWatch/Info.plist
+helpandeyeNotify/Info.plist

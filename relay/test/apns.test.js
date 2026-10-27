@@ -8,7 +8,7 @@ async function env() {
   // A key made for this test only. The PEM label is built from parts so no key-shaped text is committed.
   const label = ["PRIVATE", "KEY"].join(" ");
   const pem = `-----BEGIN ${label}-----\n${btoa(String.fromCharCode(...der))}\n-----END ${label}-----\n`;
-  return { pair, env: { APNS_KEY: pem, APNS_KEY_ID: "ABC123DEFG", APNS_TEAM_ID: "TEAM123456", APNS_TOPIC: "org.andeye.helpandi" } };
+  return { pair, env: { APNS_KEY: pem, APNS_KEY_ID: "ABC123DEFG", APNS_TEAM_ID: "TEAM123456", APNS_TOPIC: "com.andeye.help" } };
 }
 
 const token = { token: "a".repeat(64), sandbox: true };
@@ -39,7 +39,7 @@ test("a call is a visible time-sensitive push that names nobody; quiet only wake
   assert.equal(await push(e, { ...token, sandbox: false }, "quiet", { fetchImpl, now: 1_793_000_000_000 }), 200);
   assert.equal(seen[0].url, `https://api.sandbox.push.apple.com/3/device/${"a".repeat(64)}`);
   assert.equal(seen[0].init.headers["apns-push-type"], "alert");
-  assert.equal(seen[0].init.headers["apns-topic"], "org.andeye.helpandi");
+  assert.equal(seen[0].init.headers["apns-topic"], "com.andeye.help");
   assert.equal(JSON.parse(seen[0].init.body).aps["interruption-level"], "time-sensitive");
   assert.equal(seen[1].url.startsWith("https://api.push.apple.com/"), true);
   assert.equal(seen[1].init.headers["apns-push-type"], "background");

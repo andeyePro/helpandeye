@@ -11,7 +11,7 @@ request is merged, and record the commit you tested.
 
 **Bluetooth code.** A Heltec V3 or V4 has a screen: MeshCore shows a fresh random pairing code on it each time the box starts, so pair using the code on the screen. A box without a screen uses MeshCore's fixed code, 123456 (MeshCore FAQ, 6.5); Help&I replaces that with a random code, keeps it, and shows it in the Box tab. The new code takes effect the next time the box is switched on.
 
-**The app.** On a Mac with Xcode: `cd app && xcodegen generate && open HelpAndI.xcodeproj`. Choose your own team under Signing for both targets (HelpAndI and HelpAndIWatch), change the bundle identifier prefix if `org.andeye.helpandi` is taken in your account, and run on each phone. Allow Bluetooth and notifications when asked. Time-sensitive alerts and push need the matching capabilities in your team.
+**The app.** On a Mac with Xcode (install XcodeGen once with `brew install xcodegen`): `cd app && xcodegen generate && open helpandeye.xcodeproj`. Under Signing & Capabilities, choose your team for all three targets (helpandeye, helpandeyeNotify and helpandeyeWatch); the bundle IDs are `com.andeye.help`, `.notify` and `.watchkitapp`. Plug in the iPhone, choose it in Xcode and press Run; the first time, turn on Developer Mode in the iPhone's Settings, Privacy & Security. Allow Bluetooth, notifications and the camera when asked.
 
 **Recording a run.** Note the commit (`git rev-parse --short HEAD`), the boards and firmware version, the phones and iOS versions, and which sections passed, failed or were skipped, in the pull request. A change made after your run voids it (AGENTS.md).
 

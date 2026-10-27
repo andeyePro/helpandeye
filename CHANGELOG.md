@@ -4,6 +4,7 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **The app follows the andeye naming** - the Xcode project, targets, folders and Swift package are now `helpandeye`, `helpandeyeNotify`, `helpandeyeWatch` and `helpandeyeCore`, and the bundle IDs `com.andeye.help` (plus `.notify` and `.watchkitapp`), in line with `com.andeye.money`. The app is still shown as Help&I. 165 core tests, 20 relay tests, device build succeeds.
 - [x] **Three small fixes to reading the relay** - a narrow review of the relay-reading change found
   nothing that loses or falsely confirms a call, and three small issues, now fixed with tests:
   after a relay reset, the fifteen-minute first-read rule now applies, so old calls are not

@@ -126,13 +126,13 @@ sold to others will need UKCA/RED conformity before release.
 
 ## App
 
-`app/` holds the iOS and watchOS app (SwiftUI) and `app/HelpAndICore`, a Swift package with all of
+`app/` holds the iOS and watchOS app (SwiftUI) and `app/helpandeyeCore`, a Swift package with all of
 its logic and tests. The Xcode project is generated from `app/project.yml` with
 [XcodeGen](https://github.com/yonaskolb/XcodeGen):
 
 ```
-cd app && xcodegen generate && open HelpAndI.xcodeproj
-cd app/HelpAndICore && swift test
+cd app && xcodegen generate && open helpandeye.xcodeproj
+cd app/helpandeyeCore && swift test
 ```
 
 The app talks over Bluetooth to a Heltec board running MeshCore's standard companion firmware.
