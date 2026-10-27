@@ -39,6 +39,16 @@ final class MeshCoreTests: XCTestCase {
         XCTAssertThrowsError(try MeshCore.Command.addContact(publicKey: Data(count: 6), name: "x").encoded())
     }
 
+    func testSetPinAndReadItBack() throws {
+        XCTAssertEqual(try MeshCore.Command.setPin(654_321).encoded(), hex("25f1fb0900"))
+        XCTAssertThrowsError(try MeshCore.Command.setPin(12_345).encoded())
+        XCTAssertThrowsError(try MeshCore.Command.setPin(1_000_000).encoded())
+        var d = Data([0x0D, 9, 50, 8]); var w = ByteWriter(); w.u32(123_456); d.append(w.data)
+        d.append(Data(count: 12)); d.append(Data("Heltec V4".utf8) + Data(count: 31)); d.append(Data("v1.12.0".utf8) + Data(count: 13))
+        guard case let .deviceInfo(info)? = MeshCore.Response(d) else { return XCTFail() }
+        XCTAssertEqual(info.blePin, 123_456); XCTAssertEqual(info.maxChannels, 8); XCTAssertEqual(info.model, "Heltec V4")
+    }
+
     func testDatagramLimit() {
         XCTAssertNoThrow(try MeshCore.Command.sendChannelData(index: 1, dataType: 1, payload: Data(count: 165)).encoded())
         XCTAssertThrowsError(try MeshCore.Command.sendChannelData(index: 1, dataType: 1, payload: Data(count: 166)).encoded())

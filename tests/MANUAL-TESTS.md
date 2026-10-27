@@ -9,7 +9,7 @@ request is merged, and record the commit you tested.
 
 **Radio settings.** Set every box to the same UK preset, inside 869.40–869.65 MHz (or 868.0–868.6 MHz). Help&I does not change radio settings, and refuses to send on a box outside those bands; the Box tab shows the frequency and band. Use the preset your local mesh uses, set with MeshCore's own app or the flasher's console.
 
-**Bluetooth PIN.** MeshCore's default pairing code is 123456 (MeshCore FAQ, 6.5). Change it on each box before real use, so a stranger's phone cannot pair. The app spec says Help&I will set a random PIN at setup; it does not yet (TODO.md).
+**Bluetooth PIN.** MeshCore's default pairing code is 123456 (MeshCore FAQ, 6.5). Pair with that the first time; Help&I then replaces it with a random six-digit code and shows it once in the Box tab. Write it down: pairing a phone again needs it.
 
 **The app.** On a Mac with Xcode: `cd app && xcodegen generate && open HelpAndI.xcodeproj`. Choose your own team under Signing for both targets (HelpAndI and HelpAndIWatch), change the bundle identifier prefix if `org.andeye.helpandi` is taken in your account, and run on each phone. Allow Bluetooth and notifications when asked. Time-sensitive alerts and push need the matching capabilities in your team.
 
@@ -39,7 +39,7 @@ Pass: phone A shows the Help, Group and Box tabs; phone B lists phone A's person
 
 1. On each phone, open Box, tap Look for boxes, and tap your own board. Accept the Bluetooth pairing request and enter the PIN shown on the board.
 
-Pass: each phone says "Connected. Calls can go over the local radio.", shows a frequency of 869.618 MHz and the band "869.4–869.65 MHz, 10% of the time", and a box battery voltage. Repeat with a board set to a frequency outside the UK bands: the phone must say it will not send on it.
+Pass: each phone shows a new six-digit Bluetooth code under New Bluetooth code (the box had the default 123456), and after forgetting the box in iPhone Settings, pairing again needs the new code, not 123456. Each phone says "Connected. Calls can go over the local radio.", shows a frequency of 869.618 MHz and the band "869.4–869.65 MHz, 10% of the time", and a box battery voltage. Repeat with a board set to a frequency outside the UK bands: the phone must say it will not send on it.
 
 ## 3. A red call over the mesh, acknowledged by hand
 

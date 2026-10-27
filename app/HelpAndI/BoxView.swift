@@ -9,6 +9,12 @@ struct BoxView: View {
     var body: some View {
         NavigationStack {
             List {
+                if let pin = model.board.newPin {
+                    Section("New Bluetooth code") {
+                        Text("Your box's Bluetooth code is now \(String(pin)). Write it down: you will need it to pair a phone with this box again.")
+                        Button("I have written it down") { model.board.newPin = nil }
+                    }
+                }
                 Section("Status") {
                     Text(statusText)
                     if let info = model.board.selfInfo {

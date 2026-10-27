@@ -25,6 +25,8 @@ public enum MeshCore {
         /// Adds another member's board as a chat contact, so direct messages can be sent to it.
         /// With no known path, the board floods the first message and learns the path from the reply.
         case addContact(publicKey: Data, name: String)
+        /// The six-digit Bluetooth pairing code (CMD_SET_DEVICE_PIN, 37 in the firmware source).
+        case setPin(UInt32)
 
         public func encoded() throws -> Data {
             var w = ByteWriter()
@@ -52,6 +54,9 @@ public enum MeshCore {
                 w.u8(0x0A)
             case .getBattery:
                 w.u8(0x14)
+            case let .setPin(pin):
+                guard (100_000...999_999).contains(pin) else { throw MeshCoreError.badPin }
+                w.u8(0x25); w.u32(pin)
             case let .addContact(key, name):
                 guard key.count == 32 else { throw MeshCoreError.badContact }
                 var n = Data(name.utf8.prefix(31)); n.append(Data(count: 32 - n.count))
@@ -72,6 +77,8 @@ public enum MeshCore {
     public struct DeviceInfo: Equatable, Sendable {
         public let firmwareVersion: Int
         public let maxChannels: Int
+        /// The Bluetooth pairing code; 123456 is MeshCore's default.
+        public let blePin: UInt32
         public let model: String
         public let version: String
     }
@@ -125,11 +132,11 @@ public enum MeshCore {
                 self = .battery(millivolts: Int(mv))
             case 0x0D:
                 guard let ver = r.u8() else { return nil }
-                guard ver >= 3, let _ = r.u8(), let maxCh = r.u8(), let _ = r.take(4), let _ = r.take(12),
+                guard ver >= 3, let _ = r.u8(), let maxCh = r.u8(), let pin = r.u32(), let _ = r.take(12),
                       let model = r.take(40), let version = r.take(20) else {
-                    self = .deviceInfo(DeviceInfo(firmwareVersion: Int(ver), maxChannels: 0, model: "", version: "")); return
+                    self = .deviceInfo(DeviceInfo(firmwareVersion: Int(ver), maxChannels: 0, blePin: 0, model: "", version: "")); return
                 }
-                self = .deviceInfo(DeviceInfo(firmwareVersion: Int(ver), maxChannels: Int(maxCh),
+                self = .deviceInfo(DeviceInfo(firmwareVersion: Int(ver), maxChannels: Int(maxCh), blePin: pin,
                                               model: cString(model), version: cString(version)))
             case 0x12:
                 guard let i = r.u8(), let name = r.take(32), let secret = r.take(16) else { return nil }
@@ -147,7 +154,7 @@ public enum MeshCore {
 }
 
 public enum MeshCoreError: Error, Equatable {
-    case badSecret, payloadTooLarge, badContact
+    case badSecret, payloadTooLarge, badContact, badPin
 }
 
 private func cString(_ bytes: [UInt8]) -> String {

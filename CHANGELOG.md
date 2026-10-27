@@ -4,6 +4,10 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **A random Bluetooth code on every box** - MeshCore's default pairing code, 123456, is the same on
+  every box. The app now reads the box's code and, if it is the default, sets a random six-digit
+  one with the firmware's set-PIN command (37, found in MeshCore's source) and shows it once to
+  write down. Manual check 2 covers it.
 - [x] **How to bring up the hardware** - `tests/MANUAL-TESTS.md` now opens with what to flash (MeshCore
   Companion (BLE) firmware, from MeshCore's web flasher), radio settings, the default Bluetooth
   PIN and why to change it, building and signing the app, how to record a run, and the order to run
