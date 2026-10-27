@@ -18,6 +18,8 @@ public struct Member: Codable, Equatable, Sendable, Identifiable {
     public var phone: String?
     /// Ed25519 key the phone signs relay requests with.
     public var signingKey: Data?
+    /// The MeshCore public key of the member's box, once it has been heard.
+    public var boardKey: Data?
 
     public init(number: UInt16, name: String, role: Role, publicKey: Data, unit: UInt32? = nil, phone: String? = nil, signingKey: Data? = nil) {
         self.number = number; self.name = name; self.role = role; self.publicKey = publicKey; self.unit = unit

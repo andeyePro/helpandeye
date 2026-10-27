@@ -117,7 +117,7 @@ struct FollowUps: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Tell them more (optional)").font(.headline)
-            if model.relay.isConfigured {
+            if model.canSendPersonal {
                 HStack {
                     TextField("Type a short message", text: $typed)
                         .textFieldStyle(.roundedBorder)

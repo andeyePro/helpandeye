@@ -101,3 +101,32 @@ final class PersonalContentTests: XCTestCase {
         XCTAssertEqual(r.notes, ["hip"])
     }
 }
+
+final class MeshTextTests: XCTestCase {
+    func testNotesAndPositionsFitADirectMessage() {
+        let long = HelpFrame.note(unit: 70001, request: 9, part: 2, text: String(repeating: "a", count: 120))
+        let text = MeshText.encode(long)!
+        XCTAssertLessThanOrEqual(text.count, MeshText.maxCharacters)
+        guard case let .note(_, _, _, cut)? = MeshText.decode(text) else { return XCTFail() }
+        XCTAssertEqual(cut.utf8.count, MeshText.maxNoteBytes)
+        let pos = HelpFrame.position(unit: 70001, request: 9, latitudeE7: 554_000_000, longitudeE7: -45_000_000, accuracy: 12)
+        XCTAssertEqual(MeshText.decode(MeshText.encode(pos)!), pos)
+    }
+
+    func testOtherTextIsIgnored() {
+        XCTAssertNil(MeshText.decode("hello"))
+        XCTAssertNil(MeshText.decode("HI1:%%%"))
+    }
+
+    func testBoardKeyFrameIsSignedPublicAndRoundTrips() {
+        let me = DeviceIdentity()
+        let f = HelpFrame.signedBoard(member: 3, publicKey: Data(repeating: 9, count: 32), identity: me)
+        XCTAssertEqual(HelpFrame(f.encoded()), f)
+        XCTAssertTrue(f.mayGoOnGroupChannel)
+        XCTAssertEqual(f.encoded().count, 99)
+        XCTAssertTrue(f.isValidBoard(signedBy: me.signingPublicKey))
+        XCTAssertFalse(f.isValidBoard(signedBy: DeviceIdentity().signingPublicKey))
+        guard case let .board(_, k, s) = f else { return XCTFail() }
+        XCTAssertFalse(HelpFrame.board(member: 4, publicKey: k, signature: s).isValidBoard(signedBy: me.signingPublicKey))
+    }
+}

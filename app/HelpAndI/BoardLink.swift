@@ -17,6 +17,8 @@ final class BoardLink: NSObject, ObservableObject {
     @Published private(set) var helpChannel: UInt8?
 
     var onFrame: ((HelpFrame) -> Void)?
+    /// A direct text message: the sender's key prefix (6 bytes) and the text.
+    var onText: ((Data, String) -> Void)?
     /// The channel secrets to listen on: the current one first, then the previous one while boards
     /// move to new secrets.
     var secrets: [Data] = [] { didSet { if state == .ready { Task { await setUpChannels() } } } }
@@ -63,6 +65,23 @@ final class BoardLink: NSObject, ObservableObject {
         peripheral = nil; rx = nil; selfInfo = nil; helpChannel = nil
         if let p { central.cancelPeripheralConnection(p) }
         state = .off
+    }
+
+    /// Adds another member's box as a contact, so direct messages can go to it.
+    func addContact(_ key: Data, name: String) async {
+        guard state == .ready, key.count == 32, key != selfInfo?.publicKey else { return }
+        _ = await run(.addContact(publicKey: key, name: name), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false })
+    }
+
+    /// Sends a direct message, which MeshCore encrypts to the receiving box's own key.
+    func sendText(_ text: String, to key: Data) async -> SendResult {
+        guard state == .ready, key.count == 32 else { return .refused("Box not connected") }
+        let cmd = MeshCore.Command.sendText(publicKeyPrefix: key.prefix(6), text: text, sentAt: UInt32(Date().timeIntervalSince1970), attempt: 0)
+        switch await run(cmd, expect: { if case .sent = $0 { return true }; if case .error = $0 { return true }; return false }) {
+        case .sent?: return .sent
+        case let .error(code)?: return .refused("Box refused it (error \(code))")
+        default: return rx == nil ? .refused("Box not connected") : .unknown("Box did not answer")
+        }
     }
 
     enum SendResult: Equatable {
@@ -221,7 +240,8 @@ final class BoardLink: NSObject, ObservableObject {
             switch r {
             case let .channelData(ch, type, payload, _)?:
                 if listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload) { onFrame?(f) }
-            case .channelText?, .contactText?: continue
+            case let .contactText(prefix, text, _)?: onText?(prefix, text)
+            case .channelText?: continue
             default: return
             }
         }
@@ -236,6 +256,7 @@ final class BoardLink: NSObject, ObservableObject {
         if case let .channelData(ch, type, payload, _) = r, listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload) {
             onFrame?(f)
         }
+        if case let .contactText(prefix, text, _) = r { onText?(prefix, text) }
     }
 }
 

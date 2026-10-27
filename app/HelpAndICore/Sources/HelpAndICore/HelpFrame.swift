@@ -41,6 +41,10 @@ public enum HelpFrame: Equatable, Sendable {
     /// phones then watch for a missed one too. A routine is personal, so this goes only over the
     /// internet or in a key update, never on the group channel.
     case checkIns(unit: UInt32, since: UInt32, grace: UInt16, times: [UInt16])
+    /// A member's box: its MeshCore public key, so other boards can add it as a contact and send it
+    /// direct messages. A public key is not personal, so this may go on the group channel. Signed by
+    /// the member's own key, so nobody can point a member's private messages at another box.
+    case board(member: UInt16, publicKey: Data, signature: Data)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -52,7 +56,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8 }
+    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9 }
 
     /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
     public static let maxNoteBytes = 120
@@ -96,6 +100,9 @@ public enum HelpFrame: Equatable, Sendable {
         case let .checkIns(unit, since, grace, times):
             w.u8(Self.header(.checkIns)); w.u32(unit); w.u32(since); w.u16(grace); w.u8(UInt8(min(times.count, 8)))
             for t in times.prefix(8) { w.u16(t) }
+        case let .board(member, key, signature):
+            w.u8(Self.header(.board)); w.u16(member); w.bytes(key.count == 32 ? key : Data(count: 32))
+            w.bytes(signature.count == 64 ? signature : Data(count: 64))
         }
         return w.data
     }
@@ -137,6 +144,9 @@ public enum HelpFrame: Equatable, Sendable {
                 times.append(t)
             }
             self = .checkIns(unit: unit, since: since, grace: grace, times: times)
+        case .board:
+            guard let member = r.u16(), let key = r.take(32), let sig = r.take(64) else { return nil }
+            self = .board(member: member, publicKey: Data(key), signature: Data(sig))
         }
         guard r.isAtEnd else { return nil }
     }
@@ -153,6 +163,24 @@ public enum HelpFrame: Equatable, Sendable {
         let t = UInt32(max(at.timeIntervalSince1970, 0))
         let sig = (try? identity.signingKey.signature(for: ackInput(unit: unit, request: request, responder: responder, ackedAt: t))) ?? Data(count: 64)
         return .ack(unit: unit, request: request, responder: responder, ackedAt: t, signature: sig)
+    }
+
+    static func boardInput(member: UInt16, key: Data) -> Data {
+        var w = ByteWriter()
+        w.bytes(Data("HELPANDI-BOARD-1".utf8)); w.u16(member); w.bytes(key)
+        return w.data
+    }
+
+    public static func signedBoard(member: UInt16, publicKey: Data, identity: DeviceIdentity) -> HelpFrame {
+        let sig = (try? identity.signingKey.signature(for: boardInput(member: member, key: publicKey))) ?? Data(count: 64)
+        return .board(member: member, publicKey: publicKey, signature: sig)
+    }
+
+    /// True only for a box key signed by the given member's key.
+    public func isValidBoard(signedBy key: Data?) -> Bool {
+        guard case let .board(member, boardKey, sig) = self, let key,
+              let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key) else { return false }
+        return pub.isValidSignature(sig, for: Self.boardInput(member: member, key: boardKey))
     }
 
     /// True only for an acknowledgement signed by the given member's key.
@@ -207,5 +235,39 @@ extension HelpFrame: Codable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         try c.encode(encoded())
+    }
+}
+
+/// Help&I frames sent as MeshCore direct text messages, for personal content that must not go on
+/// the group channel (decision 12). MeshCore encrypts each direct message to the receiving board's
+/// own key. A text message holds about 150 characters, so the frame goes as base64 after a short
+/// prefix, and notes are cut to fit.
+public enum MeshText {
+    public static let prefix = "HI1:"
+    public static let maxCharacters = 150
+    /// The longest note that still fits once framed and base64 encoded.
+    public static let maxNoteBytes = 96
+
+    public static func encode(_ frame: HelpFrame) -> String? {
+        var f = frame
+        if case let .note(unit, request, part, text) = frame {
+            f = .note(unit: unit, request: request, part: part, text: fit(text, bytes: maxNoteBytes))
+        }
+        let s = prefix + f.encoded().base64EncodedString()
+        return s.count <= maxCharacters ? s : nil
+    }
+
+    public static func decode(_ text: String) -> HelpFrame? {
+        guard text.hasPrefix(prefix), let data = Data(base64Encoded: String(text.dropFirst(prefix.count))) else { return nil }
+        return HelpFrame(data)
+    }
+
+    static func fit(_ text: String, bytes: Int) -> String {
+        var out = ""
+        for ch in text {
+            if (out + String(ch)).utf8.count > bytes { break }
+            out.append(ch)
+        }
+        return out
     }
 }

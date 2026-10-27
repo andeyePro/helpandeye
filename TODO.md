@@ -15,7 +15,6 @@
 
 ## Open (work)
 
-- [ ] Caller's typed text and position over the mesh as direct messages to each responder's board (decision 12). They go over the internet already. Needs each member's board public key in the group, and adding responders' boards as MeshCore contacts.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).
 - [ ] Sign availability and notice-acknowledgement frames as acknowledgements are, so a removed phone cannot fake them during the seven-day changeover. Today they are accepted only from current member numbers.
 - [ ] Share check-in schedules over the mesh too, or in key updates, so responders without internet also watch them.

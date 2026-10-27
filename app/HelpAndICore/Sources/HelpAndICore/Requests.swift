@@ -209,7 +209,7 @@ public struct ResponderInbox: Sendable, Codable {
             r.heardOn.insert(route)
             requests[key] = r
             return isNew ? .new(key) : (changed ? .updated(key) : .duplicate)
-        case .availability, .noticeAck, .checkIns:
+        case .availability, .noticeAck, .checkIns, .board:
             return .ignored
         }
     }

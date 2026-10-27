@@ -45,9 +45,13 @@ Integers are little-endian.
 | 6 | note | unit u32, request u16, part u8, length u8, UTF-8 text (up to 120) | no |
 | 7 | position | unit u32, request u16, latitude i32 and longitude i32 (degrees × 10⁷), accuracy u16 | no |
 | 8 | check-ins | unit u32, since u32, grace in minutes u16, count u8, minutes after midnight u16 each | no |
+| 9 | box key | member u16, MeshCore public key (32), Ed25519 signature (64) | yes |
 
 Frames marked "no" carry personal content and never go on the shared group channel (decision 12).
-Today they travel only over the internet route, sealed with the group key.
+They travel over the internet route, sealed with the group key, or else, for notes and positions,
+as MeshCore direct messages to each responder's box (`HI1:` and the frame in base64), which
+MeshCore encrypts to that box's own key. A direct message counts only if it came from the box of
+the member whose unit it names; box keys are signed by their member.
 
 ## Keys
 

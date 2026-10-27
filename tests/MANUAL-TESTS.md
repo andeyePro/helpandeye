@@ -105,14 +105,14 @@ Pass: the cross and "Not sent. Nobody has been told." appear at once, not "Sendi
 
 Pass: the reminder arrives at the set time. About 30 minutes later (within a minute of that, with Help&I open) phone B gets a come-when-convenient call showing "Missed a check-in". Repeat, pressing I'm OK now when the reminder comes: phone B gets the green call and no missed check-in.
 
-## 14. Typed messages and location (internet route)
+## 14. Typed messages and location
 
 Needs the relay set up (Group, Internet route) on both phones, with internet on.
 
 1. On phone A, press Come now, type "Back door is open" and tap Send, then tap Share where I am and allow location.
 2. Turn phone A's internet off and try to send another message.
 
-Pass: phone B shows the message in quotes and an Open their location in Maps link that opens near phone A. In step 2 nothing typed goes over the local radio: phone B does not receive it, and the call buttons still work over the mesh.
+Pass: phone B shows the message in quotes and an Open their location in Maps link that opens near phone A. In step 2, with both boxes connected, the second message reaches phone B as a direct message between the boxes, cut to 96 bytes if longer. A third board on the same group channel, logging what it hears, never shows the text: it is encrypted to phone B's box alone.
 
 ## 15. Calls keep going until someone acknowledges
 

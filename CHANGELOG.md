@@ -4,6 +4,13 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Typed messages and location over the radio** - with no internet, a caller's typed message
+  (cut to 96 bytes) and position now go as MeshCore direct messages to each responder's box, which
+  MeshCore encrypts to that box alone, never on the group channel (decision 12). Each phone tells
+  the group its box's public key in a frame signed by the member's own key, so nobody can redirect
+  a member's private messages, and adds the other boxes as contacts. A direct message counts only
+  if it came from the box of the member whose unit it names. Sent only within the optional half of
+  the airtime allowance. 89 core tests.
 - [x] **Push notifications from the relay** - phones register their APNs token with the relay
   (per member, dropped with the member). A call's first send asks the relay for a visible,
   time-sensitive push to every other member that names nobody, since the relay cannot read who

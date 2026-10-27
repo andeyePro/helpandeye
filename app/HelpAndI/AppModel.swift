@@ -26,6 +26,10 @@ final class AppModel: ObservableObject {
         saved = Store.loadState()
         activity = Store.loadActivity()
         board.onFrame = { [weak self] in self?.received($0, via: .mesh) }
+        board.onText = { [weak self] in self?.receivedText(from: $0, $1) }
+        board.$state.removeDuplicates().sink { [weak self] state in
+            if state == .ready { Task { @MainActor in await self?.boardReady() } }
+        }.store(in: &bag)
         relay.onFrame = { [weak self] in self?.received($0, via: .internet) }
         relay.onAllowanceLow = { [weak self] in self?.raise(.allowanceLow) }
         // A new budget only when the box is on a band with a different limit: reconnecting,
@@ -142,21 +146,57 @@ final class AppModel: ObservableObject {
         Task { _ = await sendOptional(frame) }
     }
 
-    /// Typed text goes only over the internet route, sealed with the group key (decision 12).
+    /// Typed text and position never go on the group channel (decision 12): over the internet,
+    /// sealed with the group key, or else as direct messages to each responder's box.
+    var canSendPersonal: Bool { relay.isConfigured || board.state == .ready }
+
     func addNote(_ text: String) -> String? {
-        guard relay.isConfigured else { return "Typed messages need the internet route, which is not set up." }
+        guard canSendPersonal else { return "Typed messages need the internet or your box." }
         guard var r = activity.outgoing.popLast() else { return nil }
         let frame = r.addNote(text)
         activity.outgoing.append(r)
-        Task { _ = await relay.send(frame) }
+        Task { await sendPersonal(frame) }
         return nil
     }
 
     func sharePosition(latitude: Double, longitude: Double, accuracy: Double) {
-        guard relay.isConfigured, let r = current else { return }
+        guard canSendPersonal, let r = current else { return }
         let frame = HelpFrame.position(unit: r.unit, request: r.number, latitudeE7: Int32(latitude * 1e7),
                                        longitudeE7: Int32(longitude * 1e7), accuracy: UInt16(clamping: Int(accuracy)))
-        Task { _ = await relay.send(frame) }
+        Task { await sendPersonal(frame) }
+    }
+
+    private func sendPersonal(_ frame: HelpFrame) async {
+        if relay.isConfigured, await relay.send(frame) == nil { return }
+        guard let text = MeshText.encode(frame), let radio = board.radio, activity.airtime != nil else { return }
+        let seconds = radio.airtime(bytes: meshPacketBytes(payload: text.utf8.count + 8))
+        for m in group?.members ?? [] where m.canRespond && m.number != saved?.me {
+            guard let key = activity.boardKeys[m.number], activity.airtime!.allows(seconds, kind: .optional, at: Date()) else { continue }
+            let reservation = activity.airtime!.record(seconds, at: Date())
+            if case .refused = await board.sendText(text, to: key) { activity.airtime?.cancel(reservation) }
+        }
+    }
+
+    /// Tells the group which box is this phone's, and adds the other members' boxes as contacts.
+    private func boardReady() async {
+        guard let me = saved?.me, let key = board.selfInfo?.publicKey else { return }
+        activity.boardKeys[me] = key
+        for (member, k) in activity.boardKeys where member != me { await board.addContact(k, name: "Help&I \(member)") }
+        let frame = HelpFrame.signedBoard(member: me, publicKey: key, identity: identity)
+        if relay.isConfigured { _ = await relay.send(frame) }
+        _ = await sendOnMesh(frame, kind: .optional)
+    }
+
+    /// A direct message counts only if it came from the box of the member whose unit it names.
+    private func receivedText(from prefix: Data, _ text: String) {
+        guard let frame = MeshText.decode(text) else { return }
+        let unit: UInt32
+        switch frame {
+        case let .note(u, _, _, _), let .position(u, _, _, _, _): unit = u
+        default: return
+        }
+        guard let sender = group?.member(unit: unit), let key = activity.boardKeys[sender.number], key.prefix(6) == prefix else { return }
+        received(frame, via: .mesh)
     }
 
     var availableRoutes: Set<Route> {
@@ -244,6 +284,12 @@ final class AppModel: ObservableObject {
         case let .noticeAck(notice, by, _):
             guard group?.member(by)?.role == .coordinator else { return }
             notices[notice]?.acknowledge(by: by); return
+        case let .board(member, key, _):
+            guard member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey),
+                  activity.boardKeys[member] != key else { return }
+            activity.boardKeys[member] = key
+            Task { await board.addContact(key, name: "Help&I \(member)") }
+            return
         case let .checkIns(unit, _, _, _):
             guard unit != me?.unit, group?.member(unit: unit) != nil else { return }
             activity.checkInWatch.apply(frame); return

@@ -26,6 +26,8 @@ struct Activity: Codable {
     var airtime: AirtimeBudget?
     /// Other callers' check-ins, so this phone notices a missed one too.
     var checkInWatch = CheckInWatch()
+    /// Members' boxes, by member number, for direct messages over the mesh.
+    var boardKeys: [UInt16: Data] = [:]
 }
 
 enum Store {
