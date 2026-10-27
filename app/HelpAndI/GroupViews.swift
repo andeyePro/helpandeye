@@ -88,7 +88,8 @@ struct JoinGroupView: View {
                 CodeReader(prompt: "Then scan the welcome code they show you") { code in
                     do {
                         let w = try Joining.decode(Joining.Welcome.self, from: code)
-                        model.joined(try Joining.open(w, invite: invite, me: model.identity), as: w.memberNumber)
+                        let group = try Joining.open(w, invite: invite, me: model.identity)
+                        model.joined(group, as: w.memberNumber, invitedBy: group.members.first { $0.publicKey == invite.coordinatorKey }?.number)
                     } catch { self.error = "That welcome code could not be opened. Ask the coordinator to make a new one." }
                 }
             }

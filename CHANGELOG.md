@@ -4,6 +4,13 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **An unconfirmed invitation is said plainly** - someone invited by a second coordinator who was
+  removed before the first coordinator heard of the invitation used to believe they were in the
+  group while nobody else knew. Their phone now counts itself confirmed only once it hears the
+  first coordinator list it (the first coordinator repeats the list daily). If that has not happened
+  within two days, or it hears its inviter was removed, it shows a notice asking them to check with
+  another coordinator. The fuzz test checks every such phone is told. 134 core tests; manual check
+  27.
 - [x] **The fuzz test uses the relay's real membership rules** - the fake relay used to deliver to
   everyone, so the relay's refusals never happened in the fuzz. It now follows a Swift copy of the
   relay's rules, checked against the real relay by replaying member-list publishes recorded from

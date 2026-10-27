@@ -25,6 +25,10 @@ lists what is still open. Items marked **Proposed** are not yet agreed.
   out member and unit numbers from their own block, so two adding people at once never clash. If
   the first coordinator's phone is lost, nobody can remove anyone; what should happen then is a
   decision for Martin (TODO.md).
+- Someone invited by a coordinator other than the first is confirmed when their phone hears the
+  first coordinator list them, which it does daily. If that has not happened within two days, or
+  the coordinator who invited them is removed first, their phone says plainly that the others may
+  not know they are in the group, and to ask another coordinator.
 - If someone is removed after their acknowledgement reached a caller, the caller is told plainly
   that nobody has seen their call now, it goes out again, and responders are alerted again.
 - Groups are on a free or a Pro tier. See [Tiers and cost](#tiers-and-cost).

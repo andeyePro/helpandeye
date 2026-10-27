@@ -56,7 +56,7 @@ final class AppModel: ObservableObject {
     func name(ofMember n: UInt16) -> String { engine.name(ofMember: n) }
 
     func createGroup(name: String, myName: String, call: Bool) { engine.createGroup(name: name, myName: myName, call: call) }
-    func joined(_ group: GroupState, as number: UInt16) { engine.joined(group, as: number) }
+    func joined(_ group: GroupState, as number: UInt16, invitedBy: UInt16?) { engine.joined(group, as: number, invitedBy: invitedBy) }
     func updateGroup(_ change: (inout GroupState) -> Void) { engine.updateGroup(change) }
     func leave() { engine.leave() }
     func setRelay(_ url: String) { engine.setRelay(url) }

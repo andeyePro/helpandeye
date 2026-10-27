@@ -15,6 +15,9 @@ public enum CallCategory: UInt8, Sendable, CaseIterable, Codable {
 /// Things a coordinator is told about and must acknowledge.
 public enum Notice: UInt8, Sendable, Codable, CaseIterable {
     case rotaGap = 1, allowanceLow = 2
+    /// For this phone only: the coordinator who invited it left before the first coordinator
+    /// heard of it, so the rest of the group may not know it is in.
+    case unconfirmed = 3
 }
 
 /// One Help&I message on the MeshCore group channel, sent as a channel data datagram.

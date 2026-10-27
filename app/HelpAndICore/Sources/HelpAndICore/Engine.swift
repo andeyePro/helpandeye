@@ -81,6 +81,11 @@ public struct SavedState: Codable, Equatable, Sendable {
     public var checkInRaised: Date?
     /// When this caller's check-ins were last sent to responders, so a relaunch does not resend.
     public var checkInSharedAt: Date?
+    /// The coordinator who invited this phone, and whether the first coordinator has since been
+    /// heard listing it, so the whole group knows it is in.
+    public var invitedBy: UInt16?
+    public var confirmed = true
+    public var joinedAt: Date?
 
     public init(group: GroupState, me: UInt16) { self.group = group; self.me = me }
 }
@@ -174,7 +179,15 @@ public final class HelpEngine: ObservableObject {
         setState(SavedState(group: g, me: 1))
     }
 
-    public func joined(_ group: GroupState, as number: UInt16) { setState(SavedState(group: group, me: number)) }
+    /// `invitedBy` is the coordinator whose code was scanned. Invited by anyone but the first
+    /// coordinator, a phone is not confirmed until it hears the first coordinator list it.
+    public func joined(_ group: GroupState, as number: UInt16, invitedBy: UInt16? = nil) {
+        var s = SavedState(group: group, me: number)
+        s.invitedBy = invitedBy
+        s.confirmed = invitedBy == nil || invitedBy == group.primaryCoordinator
+        s.joinedAt = now()
+        setState(s)
+    }
 
     /// Changes the group. On a coordinator's phone, everyone is told who joined or left, signed,
     /// so their acknowledgements count (or stop counting) on every phone at once.
@@ -442,7 +455,12 @@ public final class HelpEngine: ObservableObject {
     // MARK: Time passing
 
     /// Runs every 15 seconds while the app runs, and whenever the box or relay wakes it.
+    /// How long a phone waits to hear the first coordinator list it before saying so: the first
+    /// coordinator repeats the member list daily, so two days covers a day away from the radio.
+    public static let confirmationWait: TimeInterval = 2 * 86_400
+
     public func tick() {
+        if let s = saved, !s.confirmed, let at = s.joinedAt, now().timeIntervalSince(at) > Self.confirmationWait { raise(.unconfirmed) }
         pruneInbox()
         publishMembersIfDue()
         checkResends()
@@ -554,6 +572,9 @@ public final class HelpEngine: ObservableObject {
                 if sender.canRespond { activity.rota.apply(inner); checkGaps() }
             case let .checkIns(unit, _, _, _):
                 if sender.unit == unit, unit != me?.unit { activity.checkInWatch.apply(inner) }
+            case let .memberAdded(n, _, _, _, _, _) where n == saved?.me && signer == group?.primaryCoordinator:
+                // The first coordinator lists this phone: the whole group knows it is in.
+                if var s = saved, !s.confirmed { s.confirmed = true; saved = s; store.save(s); activity.notices[.unconfirmed] = nil }
             case .memberAdded, .memberRemoved, .memberName, .memberRole:
                 // Any coordinator can add people; only the first can remove people or change roles,
                 // so the group can never be split onto different keys or numbers.
@@ -567,6 +588,8 @@ public final class HelpEngine: ObservableObject {
                     let before = s.group
                     s.group.apply(membership: inner, at: now())
                     if s.group != before { setState(s) }
+                    // The coordinator who invited this phone has gone before it was confirmed.
+                    if case let .memberRemoved(n, _) = inner, n == s.invitedBy, !s.confirmed { raise(.unconfirmed) }
                 }
             default: break
             }
@@ -743,6 +766,7 @@ public final class HelpEngine: ObservableObject {
     /// Whether this phone should be showing the notice now.
     public func showing(_ notice: Notice) -> Bool {
         guard let a = notices[notice], let me else { return false }
+        if notice == .unconfirmed { return a.acknowledgedBy == nil }
         switch a.audience(at: now()) {
         case .firstCoordinator?: return me.role == .coordinator && group?.members.first(where: { $0.role == .coordinator })?.number == me.number
         case .allCoordinators?: return me.role == .coordinator
@@ -878,6 +902,9 @@ extension SavedState {
         checkInSince = try c.decodeIfPresent(Date.self, forKey: .checkInSince)
         checkInRaised = try c.decodeIfPresent(Date.self, forKey: .checkInRaised)
         checkInSharedAt = try c.decodeIfPresent(Date.self, forKey: .checkInSharedAt)
+        invitedBy = try c.decodeIfPresent(UInt16.self, forKey: .invitedBy)
+        confirmed = try c.value(.confirmed, or: true)
+        joinedAt = try c.decodeIfPresent(Date.self, forKey: .joinedAt)
     }
 }
 

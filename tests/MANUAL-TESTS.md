@@ -222,3 +222,10 @@ Needs the relay set up with push (TODO.md) and the app signed with the shared ke
 1. Lock phone B. On phone A, with the local radio off, press Come now.
 
 Pass: phone B's notification reads "<name>: come now", not the relay's generic "A call for help in your group". It never says help is coming.
+
+## 27. An invitation that was never confirmed
+
+1. Make phone C a coordinator. Put phone B (the first coordinator) out of range. On phone C, invite phone D.
+2. On phone B, still out of range of C and D, remove phone C. Bring phone B back only near phone A.
+
+Pass: within two days (move the clock on to check sooner), phone D shows a notice that the coordinator who invited it has left and the others may not know it is in the group, asking it to check with another coordinator. With phone B in range of phone D instead, phone D is confirmed within a day and shows no notice.

@@ -410,6 +410,45 @@ final class RelayModel {
         XCTAssertEqual(caller.engine.group?.member(n2)?.role, .coordinator)
     }
 
+    func testAnInviteeWhoseCoordinatorLeftBeforeBeingConfirmedIsTold() async {
+        let second = Phone(air: air, clock: clock)
+        join(second, call: false, respond: true)
+        await air.run()
+        coordinator.engine.promote(second.engine.saved!.me)
+        await air.run()
+        // The second coordinator invites someone while the first is out of touch.
+        coordinator.mesh.isReady = false
+        let late = Phone(air: air, clock: clock)
+        let invite = Joining.invitation(for: second.engine.group!, coordinator: second.identity)
+        var welcome: Joining.Welcome?
+        second.engine.updateGroup { g in welcome = try! Joining.admit(Joining.request(invite, name: "L", call: true, respond: false, me: late.identity), to: &g, invite: invite, coordinator: second.identity) }
+        late.engine.joined(try! Joining.open(welcome!, invite: invite, me: late.identity), as: welcome!.memberNumber, invitedBy: second.engine.saved!.me)
+        await air.run()
+        XCTAssertFalse(late.engine.saved!.confirmed)
+        coordinator.mesh.isReady = true
+        coordinator.engine.removeMember(second.engine.saved!.me)
+        await air.run()
+        XCTAssertTrue(late.engine.showing(.unconfirmed), "told plainly, not left believing it is in")
+    }
+
+    func testAnInviteeIsConfirmedWhenTheFirstCoordinatorListsIt() async {
+        let second = Phone(air: air, clock: clock)
+        join(second, call: false, respond: true)
+        await air.run()
+        coordinator.engine.promote(second.engine.saved!.me)
+        await air.run()
+        let late = Phone(air: air, clock: clock)
+        let invite = Joining.invitation(for: second.engine.group!, coordinator: second.identity)
+        var welcome: Joining.Welcome?
+        second.engine.updateGroup { g in welcome = try! Joining.admit(Joining.request(invite, name: "L", call: true, respond: false, me: late.identity), to: &g, invite: invite, coordinator: second.identity) }
+        late.engine.joined(try! Joining.open(welcome!, invite: invite, me: late.identity), as: welcome!.memberNumber, invitedBy: second.engine.saved!.me)
+        await air.run()
+        coordinator.engine.resetMembershipRepeatForTesting()
+        await coordinator.engine.boxReady()
+        await air.run()
+        XCTAssertTrue(late.engine.saved!.confirmed)
+    }
+
     func testAReplayedMemberAddedCannotLetARemovedPhoneBackIn() async {
         let lost = Phone(air: air, clock: clock)
         join(lost, call: false, respond: true)

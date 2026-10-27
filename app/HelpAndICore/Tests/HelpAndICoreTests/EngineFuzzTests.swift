@@ -134,7 +134,7 @@ import XCTest
                     var welcome: Joining.Welcome?
                     inviter.engine.updateGroup { g in welcome = try? Joining.admit(req, to: &g, invite: invite, coordinator: inviter.identity) }
                     if let welcome, let opened = try? Joining.open(welcome, invite: invite, me: newcomer.identity) {
-                        newcomer.engine.joined(opened, as: welcome.memberNumber)
+                        newcomer.engine.joined(opened, as: welcome.memberNumber, invitedBy: inviter.engine.saved!.me)
                         w.invitedBy[ObjectIdentifier(newcomer)] = inviter.engine.saved!.me
                         w.log.append("\(step): \(inviter.engine.saved!.me) invites \(welcome.memberNumber)")
                         await newcomer.engine.boxReady()
@@ -244,6 +244,10 @@ import XCTest
             }
         }
         let stayed = w.phones.filter { !w.gone.contains(ObjectIdentifier($0)) && $0.engine.me != nil && !orphan($0) }
+        // ...and each one is told so, rather than left believing it is in.
+        for p in w.phones where orphan(p) && !w.gone.contains(ObjectIdentifier(p)) {
+            XCTAssertTrue(p.engine.showing(.unconfirmed), "seed \(seed): member \(p.engine.saved!.me) was never told it may not be in the group")
+        }
         let versions = Set(stayed.map { $0.engine.group!.membershipVersion })
         let orphans = Set(w.phones.filter(orphan).map { $0.engine.saved!.me })
         let rosters = Set(stayed.map { Set($0.engine.group!.members.map(\.number)).subtracting(orphans) })
