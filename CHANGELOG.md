@@ -4,6 +4,10 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Signed availability and notice acknowledgements** - both now count only inside a frame signed
+  by the member they are about, so a removed phone that still knows the old channel key cannot
+  take responders off the rota (delaying their alerts) or clear a coordinator's notice. 91 core
+  tests.
 - [x] **Typed messages and location over the radio** - with no internet, a caller's typed message
   (cut to 96 bytes) and position now go as MeshCore direct messages to each responder's box, which
   MeshCore encrypts to that box alone, never on the group channel (decision 12). Each phone tells

@@ -45,6 +45,10 @@ public enum HelpFrame: Equatable, Sendable {
     /// direct messages. A public key is not personal, so this may go on the group channel. Signed by
     /// the member's own key, so nobody can point a member's private messages at another box.
     case board(member: UInt16, publicKey: Data, signature: Data)
+    /// Another frame signed by the member who sent it. Availability changes and notice
+    /// acknowledgements count only inside one, so a removed phone that still knows the old channel
+    /// key cannot take responders off the rota or clear a coordinator's notice.
+    case signed(signer: UInt16, inner: Data, signature: Data)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -56,7 +60,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9 }
+    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10 }
 
     /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
     public static let maxNoteBytes = 120
@@ -103,6 +107,9 @@ public enum HelpFrame: Equatable, Sendable {
         case let .board(member, key, signature):
             w.u8(Self.header(.board)); w.u16(member); w.bytes(key.count == 32 ? key : Data(count: 32))
             w.bytes(signature.count == 64 ? signature : Data(count: 64))
+        case let .signed(signer, inner, signature):
+            w.u8(Self.header(.signed)); w.u16(signer); w.u8(UInt8(min(inner.count, 80))); w.bytes(inner.prefix(80))
+            w.bytes(signature.count == 64 ? signature : Data(count: 64))
         }
         return w.data
     }
@@ -147,6 +154,9 @@ public enum HelpFrame: Equatable, Sendable {
         case .board:
             guard let member = r.u16(), let key = r.take(32), let sig = r.take(64) else { return nil }
             self = .board(member: member, publicKey: Data(key), signature: Data(sig))
+        case .signed:
+            guard let signer = r.u16(), let n = r.u8(), n <= 80, let inner = r.take(Int(n)), let sig = r.take(64) else { return nil }
+            self = .signed(signer: signer, inner: Data(inner), signature: Data(sig))
         }
         guard r.isAtEnd else { return nil }
     }
@@ -174,6 +184,33 @@ public enum HelpFrame: Equatable, Sendable {
     public static func signedBoard(member: UInt16, publicKey: Data, identity: DeviceIdentity) -> HelpFrame {
         let sig = (try? identity.signingKey.signature(for: boardInput(member: member, key: publicKey))) ?? Data(count: 64)
         return .board(member: member, publicKey: publicKey, signature: sig)
+    }
+
+    static func signedInput(signer: UInt16, inner: Data) -> Data {
+        var w = ByteWriter()
+        w.bytes(Data("HELPANDI-SIGNED-1".utf8)); w.u16(signer); w.bytes(inner)
+        return w.data
+    }
+
+    /// Wraps a frame in the sender's signature. Only small frames that carry no personal content.
+    public static func signing(_ frame: HelpFrame, as signer: UInt16, identity: DeviceIdentity) -> HelpFrame {
+        let inner = frame.encoded()
+        let sig = (try? identity.signingKey.signature(for: signedInput(signer: signer, inner: inner))) ?? Data(count: 64)
+        return .signed(signer: signer, inner: inner, signature: sig)
+    }
+
+    /// The wrapped frame, if the signature is the given key's and the frame is about the signer
+    /// themselves: their own availability, or a notice they acknowledged.
+    public func verifiedInner(signedBy key: Data?) -> HelpFrame? {
+        guard case let .signed(signer, inner, sig) = self, let key,
+              let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
+              pub.isValidSignature(sig, for: Self.signedInput(signer: signer, inner: inner)),
+              let frame = HelpFrame(inner) else { return nil }
+        switch frame {
+        case let .availability(who, _, _, _) where who == signer: return frame
+        case let .noticeAck(_, by, _) where by == signer: return frame
+        default: return nil
+        }
     }
 
     /// True only for a box key signed by the given member's key.

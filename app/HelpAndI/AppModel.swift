@@ -277,13 +277,20 @@ final class AppModel: ObservableObject {
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
             }
-        case let .availability(who, _, _, _):
-            // Only for someone who is in the group and can respond.
-            guard group?.member(who)?.canRespond == true else { return }
-            activity.rota.apply(frame); checkGaps(); return
-        case let .noticeAck(notice, by, _):
-            guard group?.member(by)?.role == .coordinator else { return }
-            notices[notice]?.acknowledge(by: by); return
+        case .availability, .noticeAck:
+            // Counted only when signed (below), so a removed phone cannot fake them.
+            return
+        case let .signed(signer, _, _):
+            switch frame.verifiedInner(signedBy: group?.member(signer)?.signingKey) {
+            case let inner? where group?.member(signer)?.canRespond == true:
+                if case let .noticeAck(notice, by, _) = inner {
+                    if group?.member(by)?.role == .coordinator { notices[notice]?.acknowledge(by: by) }
+                } else {
+                    activity.rota.apply(inner); checkGaps()
+                }
+            default: break
+            }
+            return
         case let .board(member, key, _):
             guard member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey),
                   activity.boardKeys[member] != key else { return }
@@ -432,7 +439,7 @@ final class AppModel: ObservableObject {
         checkGaps()
         let frame = HelpFrame.availability(responder: me, from: UInt32(from.timeIntervalSince1970),
                                            until: UInt32(until.timeIntervalSince1970), available: available)
-        Task { _ = await sendOptional(frame) }
+        Task { _ = await sendOptional(.signing(frame, as: me, identity: identity)) }
     }
 
     var gaps: [DateInterval] { rota.gaps(from: Date()) }
@@ -461,7 +468,8 @@ final class AppModel: ObservableObject {
     func acknowledge(_ notice: Notice) {
         guard let me = saved?.me else { return }
         notices[notice]?.acknowledge(by: me)
-        Task { _ = await sendOptional(.noticeAck(notice: notice, by: me, at: UInt32(Date().timeIntervalSince1970))) }
+        let frame = HelpFrame.noticeAck(notice: notice, by: me, at: UInt32(Date().timeIntervalSince1970))
+        Task { _ = await sendOptional(.signing(frame, as: me, identity: identity)) }
     }
 
     func setRelay(_ url: String) {

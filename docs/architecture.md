@@ -46,6 +46,10 @@ Integers are little-endian.
 | 7 | position | unit u32, request u16, latitude i32 and longitude i32 (degrees × 10⁷), accuracy u16 | no |
 | 8 | check-ins | unit u32, since u32, grace in minutes u16, count u8, minutes after midnight u16 each | no |
 | 9 | box key | member u16, MeshCore public key (32), Ed25519 signature (64) | yes |
+| 10 | signed | signer u16, length u8, inner frame, Ed25519 signature (64) | yes |
+
+Availability (4) and notice acknowledgements (5) count only inside a signed frame (10) from the
+member they are about.
 
 Frames marked "no" carry personal content and never go on the shared group channel (decision 12).
 They travel over the internet route, sealed with the group key, or else, for notes and positions,

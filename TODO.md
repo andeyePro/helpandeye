@@ -16,5 +16,4 @@
 ## Open (work)
 
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).
-- [ ] Sign availability and notice-acknowledgement frames as acknowledgements are, so a removed phone cannot fake them during the seven-day changeover. Today they are accepted only from current member numbers.
 - [ ] Share check-in schedules over the mesh too, or in key updates, so responders without internet also watch them.
