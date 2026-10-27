@@ -18,10 +18,11 @@ lists what is still open. Items marked **Proposed** are not yet agreed.
 - **Responders** enter their availability. The coordinator is told when the rota has a gap.
 - **Peer-to-peer groups** are allowed: every member is both caller and responder, as on a street
   or a works team.
-- A group can have more than one coordinator, so that it does not depend on one person. A
-  coordinator makes someone else one; every phone hears it in a signed, versioned message. Each
-  coordinator hands out member and unit numbers from their own block, so two coordinators adding
-  people while out of touch never give out the same number.
+- A group can have more than one coordinator, so that it does not depend on one person. Any
+  coordinator can invite people and handles rota gaps and notices. Only the group's first
+  coordinator removes people (which changes the keys) or makes new coordinators, so two
+  coordinators out of touch can never split the group onto different keys. Each coordinator hands
+  out member and unit numbers from their own block, so two adding people at once never clash.
 - Groups are on a free or a Pro tier. See [Tiers and cost](#tiers-and-cost).
 
 ## Who is alerted

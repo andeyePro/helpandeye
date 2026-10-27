@@ -255,6 +255,8 @@ public enum HelpFrame: Equatable, Sendable {
         case let .noticeAck(_, by, _) where by == signer: return frame
         // The caller of this checks that the signer is a coordinator.
         case .memberAdded, .memberRemoved, .memberName, .memberRole: return frame
+        // The caller of this checks that the signer owns the unit.
+        case .checkIns: return frame
         default: return nil
         }
     }

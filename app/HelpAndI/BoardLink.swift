@@ -15,8 +15,9 @@ final class BoardLink: NSObject, ObservableObject {
     @Published private(set) var selfInfo: MeshCore.SelfInfo?
     @Published private(set) var batteryMillivolts: Int?
     @Published private(set) var helpChannel: UInt8?
-    /// Set when this app has just replaced the box's default Bluetooth code, to show the user once.
-    @Published var newPin: UInt32?
+    /// The Bluetooth code this app set on the connected box, kept in the keychain and shown in the
+    /// Box tab, so it is never lost even if the app closes before anyone sees it.
+    @Published private(set) var boxPin: UInt32?
     /// The previous channel during a changeover after a removal. Sends go on both, so members who
     /// have not scanned their update yet still hear calls and acknowledgements.
     private var previousChannel: UInt8?
@@ -186,13 +187,17 @@ final class BoardLink: NSObject, ObservableObject {
     /// Finds the group's channel on the board, or writes it into the first free slot.
     private func setUpChannels() async {
         guard case .deviceInfo(let dev)? = await run(.deviceQuery, expect: { if case .deviceInfo = $0 { return true }; return false }) else { return }
-        // MeshCore's default code is the same on every box, so a stranger's phone could pair.
-        // Replace it with a random one, and show it so the user can pair again later.
-        if dev.blePin == 123_456 {
-            let pin = UInt32.random(in: 100_000...999_999)
-            if case .ok? = await run(.setPin(pin), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
-                newPin = pin
+        // A box without a screen uses MeshCore's fixed code, 123456, the same on every box, so a
+        // stranger's phone could pair. Replace it with a random one. (A box with a screen shows a
+        // fresh random code at each start, and reports 0; that is left alone.) The code is saved
+        // before it is sent, so a dropped link cannot leave a code nobody knows.
+        if let id = peripheral?.identifier {
+            if dev.blePin == 123_456 {
+                let pin = Store.boxPin(id) ?? UInt32.random(in: 100_000...999_999)
+                Store.setBoxPin(pin, for: id)
+                _ = await run(.setPin(pin), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false })
             }
+            boxPin = Store.boxPin(id).flatMap { $0 == dev.blePin || dev.blePin == 123_456 ? $0 : nil }
         }
         var slots: [UInt8: Data] = [:]
         var free: [UInt8] = []

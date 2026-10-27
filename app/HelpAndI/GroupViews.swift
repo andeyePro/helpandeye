@@ -131,9 +131,10 @@ struct GroupView: View {
                             Text(roleText(m)).font(.footnote).foregroundStyle(.secondary)
                         }
                         .swipeActions {
-                            if model.me?.role == .coordinator, m.number != model.saved?.me {
-                                Button("Remove", role: .destructive) { model.updateGroup { $0.remove(m.number) } }
-                                if m.role != .coordinator {
+                            // Only the group's first coordinator removes people or makes coordinators.
+                            if model.engine.isPrimaryCoordinator, m.number != model.saved?.me {
+                                Button("Remove", role: .destructive) { model.engine.removeMember(m.number) }
+                                if m.role == .responder || m.role == .both {
                                     Button("Make coordinator") { model.engine.promote(m.number) }.tint(.blue)
                                 }
                             }
@@ -146,7 +147,7 @@ struct GroupView: View {
                 if model.me?.role == .coordinator {
                     RelaySection()
                 }
-                if model.me?.role == .coordinator, model.group?.previousSecrets != nil {
+                if model.engine.isPrimaryCoordinator, model.group?.previousSecrets != nil {
                     KeyUpdatesSection()
                 } else if model.me?.role != .coordinator {
                     ReceiveUpdateSection()

@@ -152,3 +152,13 @@ test("posts and pushes are limited per phone per minute, and old push tokens are
   await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }] });
   assert.equal(storage.m.has("p:" + member.key), false);
 });
+
+test("a merged list at the same version is accepted if it keeps everyone", async () => {
+  const relay = new GroupRelay(new MapStorage());
+  const coord = await phone(), a = await phone(), b = await phone();
+  const base = [{ key: coord.key, role: "coordinator" }];
+  await relay.setMembers(coord.key, { generation: 3, members: [...base, { key: a.key, role: "member" }] });
+  await relay.setMembers(coord.key, { generation: 3, members: [...base, { key: a.key, role: "member" }, { key: b.key, role: "member" }] });
+  assert.equal((await relay.members()).members.length, 3);
+  await rejects(relay.setMembers(coord.key, { generation: 3, members: [...base, { key: b.key, role: "member" }] }), 409);
+});

@@ -9,7 +9,7 @@ request is merged, and record the commit you tested.
 
 **Radio settings.** Set every box to the same UK preset, inside 869.40–869.65 MHz (or 868.0–868.6 MHz). Help&I does not change radio settings, and refuses to send on a box outside those bands; the Box tab shows the frequency and band. Use the preset your local mesh uses, set with MeshCore's own app or the flasher's console.
 
-**Bluetooth PIN.** MeshCore's default pairing code is 123456 (MeshCore FAQ, 6.5). Pair with that the first time; Help&I then replaces it with a random six-digit code and shows it once in the Box tab. Write it down: pairing a phone again needs it.
+**Bluetooth code.** A Heltec V3 or V4 has a screen: MeshCore shows a fresh random pairing code on it each time the box starts, so pair using the code on the screen. A box without a screen uses MeshCore's fixed code, 123456 (MeshCore FAQ, 6.5); Help&I replaces that with a random code, keeps it, and shows it in the Box tab. The new code takes effect the next time the box is switched on.
 
 **The app.** On a Mac with Xcode: `cd app && xcodegen generate && open HelpAndI.xcodeproj`. Choose your own team under Signing for both targets (HelpAndI and HelpAndIWatch), change the bundle identifier prefix if `org.andeye.helpandi` is taken in your account, and run on each phone. Allow Bluetooth and notifications when asked. Time-sensitive alerts and push need the matching capabilities in your team.
 
@@ -39,7 +39,7 @@ Pass: phone A shows the Help, Group and Box tabs; phone B lists phone A's person
 
 1. On each phone, open Box, tap Look for boxes, and tap your own board. Accept the Bluetooth pairing request and enter the PIN shown on the board.
 
-Pass: each phone shows a new six-digit Bluetooth code under New Bluetooth code (the box had the default 123456), and after forgetting the box in iPhone Settings, pairing again needs the new code, not 123456. Each phone says "Connected. Calls can go over the local radio.", shows a frequency of 869.618 MHz and the band "869.4–869.65 MHz, 10% of the time", and a box battery voltage. Repeat with a board set to a frequency outside the UK bands: the phone must say it will not send on it.
+Pass: with a box that has a screen, pairing uses the code on the screen and the Box tab shows no code. With a box without a screen, the Box tab shows a six-digit Bluetooth code, still shown after closing and reopening the app; after switching the box off and on and forgetting it in iPhone Settings, pairing needs that code, not 123456. Each phone says "Connected. Calls can go over the local radio.", shows a frequency of 869.618 MHz and the band "869.4–869.65 MHz, 10% of the time", and a box battery voltage. Repeat with a board set to a frequency outside the UK bands: the phone must say it will not send on it.
 
 ## 3. A red call over the mesh, acknowledged by hand
 
@@ -199,4 +199,4 @@ Pass: every word on the Help tab can be read without cutting off; Come when conv
 1. On phone B (coordinator), open Group, swipe left on phone C's person, and tap Make coordinator.
 2. On phone C, invite a fourth phone, D, as a responder. Then press Come now on phone A and acknowledge on phone D.
 
-Pass: phone C shows the coordinator's tools (Invite someone, gaps, Internet route). Phone A shows phone D's person as having seen the call, although phone B never touched phone D. Phone D's member number is above 1000.
+Pass: phone C shows the coordinator's tools (Invite someone, gaps, Internet route) but no Remove or Make coordinator: only the first coordinator removes people or makes coordinators. Phone A shows phone D's person as having seen the call, although phone B never touched phone D. Phone D's member number is above 1000.

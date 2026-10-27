@@ -91,9 +91,13 @@ export class GroupRelay {
       if (!current.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(403, "only a coordinator can change members");
       if (list.generation < current.generation) throw new RelayError(409, "older member list");
       if (list.generation === current.generation) {
-        const same = (a) => JSON.stringify(a.map(({ key, role }) => [key, role]).sort());
-        if (same(list.members) !== same(current.members)) throw new RelayError(409, "a different list at the same version");
-        return;
+        // The same version from two coordinators who each added someone while out of touch: take
+        // a list that keeps everyone already listed (the phones' merged list). Anything that drops
+        // someone must come with a newer version.
+        const pairs = (a) => new Set(a.map(({ key, role }) => key + " " + role));
+        const now = pairs(list.members);
+        if (![...pairs(current.members)].every((p) => now.has(p))) throw new RelayError(409, "a different list at the same version");
+        if (now.size === current.members.length) return;
       }
     }
     if (!list.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(400, "the signer must stay a coordinator");

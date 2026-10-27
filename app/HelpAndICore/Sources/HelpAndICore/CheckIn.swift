@@ -64,6 +64,11 @@ public struct CheckInWatch: Codable, Equatable, Sendable {
 
     public init() {}
 
+    /// Stops watching anyone no longer in the group.
+    public mutating func keepOnly(units: Set<UInt32>) {
+        callers = callers.filter { units.contains($0.key) }
+    }
+
     public mutating func apply(_ frame: HelpFrame) {
         switch frame {
         case let .checkIns(unit, since, grace, times):

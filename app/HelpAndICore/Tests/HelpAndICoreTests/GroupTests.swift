@@ -131,7 +131,32 @@ final class GroupTests: XCTestCase {
         XCTAssertFalse(callersCopy.acceptsAck(ack))
         var coordCopy = group
         coordCopy.remove(w.memberNumber)
-        XCTAssertGreaterThan(coordCopy.nextMemberNumber, w.memberNumber, "member numbers are never reused")
+        XCTAssertGreaterThan(coordCopy.nextMemberNumber!, w.memberNumber, "member numbers are never reused")
+    }
+
+    func testAGroupSavedByAnEarlierVersionStillLoads() throws {
+        let coord = DeviceIdentity()
+        let g = newGroup(coord)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(g)) as! [String: Any]
+        for k in ["roleVersions", "removedMembers", "highestMember", "membershipVersion", "roleBlocksSeen", "removedUnits"] { json[k] = nil }
+        let old = try JSONSerialization.data(withJSONObject: json)
+        let back = try JSONDecoder().decode(GroupState.self, from: old)
+        XCTAssertEqual(back.members, g.members)
+        XCTAssertEqual(back.membershipVersion, 1)
+    }
+
+    func testBlocksAreNeverReusedAndRunOut() {
+        let coord = DeviceIdentity()
+        var g = newGroup(coord)
+        for n in 2...4 { g.members.append(Member(number: UInt16(n), name: "R", role: .responder, publicKey: Data())) }
+        _ = g.promote(2)
+        XCTAssertEqual(g.member(2)?.block, 1000)
+        g.remove(2)
+        _ = g.promote(3)
+        XCTAssertEqual(g.member(3)?.block, 2000, "a removed coordinator's block is not handed out again")
+        XCTAssertEqual(g.nextMemberNumber(by: 3), 2001)
+        for n in 2001...2999 { g.members.append(Member(number: UInt16(n), name: "x", role: .responder, publicKey: Data())) }
+        XCTAssertNil(g.nextMemberNumber(by: 3), "a full block gives no number rather than a duplicate")
     }
 
     func testBadCodesAreRejected() {

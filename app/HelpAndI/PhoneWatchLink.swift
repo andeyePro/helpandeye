@@ -57,9 +57,8 @@ extension PhoneWatchLink: WCSessionDelegate {
             Task { @MainActor in
                 guard let u = UInt32(exactly: unit), let r = UInt16(exactly: request) else { replyHandler(["ok": false]); return }
                 let key = IncomingRequest.Key(unit: u, request: r)
-                let known = self.model?.inbox.requests[key] != nil
-                if known { self.model?.acknowledge(key) }
-                replyHandler(["ok": known])
+                // The watch is told whether an acknowledgement was really made.
+                replyHandler(["ok": self.model?.acknowledge(key) == true])
             }
             return
         }

@@ -68,7 +68,7 @@ final class AppModel: ObservableObject {
         engine.sharePosition(latitude: latitude, longitude: longitude, accuracy: accuracy)
     }
 
-    func acknowledge(_ key: IncomingRequest.Key) { engine.acknowledge(key) }
+    @discardableResult func acknowledge(_ key: IncomingRequest.Key) -> Bool { engine.acknowledge(key) }
     func retryAck(_ key: IncomingRequest.Key) { engine.retryAck(key) }
     func ackSendStatus(_ key: IncomingRequest.Key) -> CallerStatus? { engine.ackSendStatus(key) }
 

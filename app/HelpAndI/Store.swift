@@ -57,6 +57,16 @@ enum Store {
         try? JSONEncoder().encode(activity).write(to: activityURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
+    /// The Bluetooth code this app set on a box, by the box's Bluetooth identifier.
+    static func boxPin(_ id: UUID) -> UInt32? {
+        guard case let .success(d) = read("pin-\(id.uuidString)"), d.count == 4 else { return nil }
+        return d.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
+    }
+
+    static func setBoxPin(_ pin: UInt32, for id: UUID) {
+        _ = write("pin-\(id.uuidString)", withUnsafeBytes(of: pin) { Data($0) })
+    }
+
     static var boardID: UUID? {
         get { UserDefaults.standard.string(forKey: "board").flatMap(UUID.init) }
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: "board") }

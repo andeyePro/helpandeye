@@ -4,6 +4,20 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Fixes from the fourth code review** - a fourth independent review of the multi-coordinator,
+  check-in, Bluetooth-code and watch changes found 1 blocker and 7 major issues. Two coordinators
+  out of touch could hand out the same number block, or each remove someone and split the group
+  onto different keys, after which a red call reached only half the responders: now only the
+  group's first coordinator removes people or makes coordinators (other coordinators invite), and
+  blocks are never reused. Groups saved by earlier versions load again instead of being silently
+  lost. The box's new Bluetooth code is saved before it is sent and always shown in the Box tab, and
+  is set only on boxes without a screen (MeshCore's firmware shows a random code on screened boxes
+  such as the Heltec V3 and V4). Only responders can be made coordinators, so a caller who cannot
+  come out is never sent alerts. Removals are repeated with the member list, so a phone that missed
+  one catches up. A removed caller's check-ins stop being watched. Check-ins over the internet are
+  signed by the caller. A phone that hears a new box answers with its own, so late joiners learn
+  everyone's box. The watch is told whether an acknowledgement was really made. The relay accepts a
+  merged member list at the same version if it keeps everyone. 124 core tests, 15 relay tests.
 - [x] **More than one coordinator** - a coordinator can now make someone else a coordinator, so a
   group does not depend on one person. The change goes to every phone in a signed role-change
   message carrying the membership version, so an old one replayed cannot undo a newer one. Every

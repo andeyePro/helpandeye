@@ -75,6 +75,8 @@ public struct SavedState: Codable, Equatable, Sendable {
     public var checkInSince: Date?
     /// The last missed check-in this phone raised for its own caller.
     public var checkInRaised: Date?
+    /// When this caller's check-ins were last sent to responders, so a relaunch does not resend.
+    public var checkInSharedAt: Date?
 
     public init(group: GroupState, me: UInt16) { self.group = group; self.me = me }
 }
@@ -121,7 +123,7 @@ public final class HelpEngine: ObservableObject {
     private var lastTopUp: [IncomingRequest.Key: Date] = [:]
     private var ackAttempt: [IncomingRequest.Key: UUID] = [:]
     private var lastMembershipRepeat: Date?
-    private var lastCheckInShare: Date?
+    private var answeredBoxes: Set<UInt16> = []
     private var tasks: [UUID: Task<Void, Never>] = [:]
 
     public init(identity: DeviceIdentity, mesh: MeshLink, relay: RelayLink, alerts: AlertScheduler, store: EngineStore,
@@ -223,6 +225,8 @@ public final class HelpEngine: ObservableObject {
         if activity.boardKeys.keys.contains(where: { !current.contains($0) }) { activity.boardKeys = activity.boardKeys.filter { current.contains($0.key) } }
         if activity.lastAnswered.keys.contains(where: { !current.contains($0) }) { activity.lastAnswered = activity.lastAnswered.filter { current.contains($0.key) } }
         if activity.rota.entries.contains(where: { !current.contains($0.responder) }) { activity.rota.keepOnly(current) }
+        let units = Set(group?.members.compactMap(\.unit) ?? [])
+        if activity.checkInWatch.callers.keys.contains(where: { !units.contains($0) }) { activity.checkInWatch.keepOnly(units: units) }
         let listening = group?.listening(at: now()).map(\.channelSecret) ?? []
         if mesh.secrets != listening { mesh.secrets = listening }
         if activity.airtime == nil { bandChanged(mesh.radio?.band) }
@@ -401,6 +405,12 @@ public final class HelpEngine: ObservableObject {
                 if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
                 if m.role == .coordinator, let f = g.roleFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
             }
+            // Removals too, so a phone that missed one stops counting that member's acknowledgements.
+            if myNumber == g.primaryCoordinator {
+                for n in g.removedMembers.sorted() {
+                    await sendToAll(.signing(.memberRemoved(member: n, version: g.membershipVersion), as: myNumber, identity: identity, group: groupID))
+                }
+            }
         }
     }
 
@@ -411,8 +421,10 @@ public final class HelpEngine: ObservableObject {
         pruneInbox()
         checkResends()
         // Repeat this caller's check-ins once a day, for responders who missed them.
-        if saved?.checkInSince != nil, now().timeIntervalSince(lastCheckInShare ?? .distantPast) > 86_400 {
-            lastCheckInShare = now()
+        if var s = saved, s.checkInSince != nil, now().timeIntervalSince(s.checkInSharedAt ?? .distantPast) > 86_400 {
+            s.checkInSharedAt = now()
+            saved = s
+            store.save(s)
             spawn { await self.shareCheckIns(to: nil) }
         }
         checkMissedCheckIn()
@@ -461,6 +473,12 @@ public final class HelpEngine: ObservableObject {
 
     /// A direct message counts only if it came from the box of the member whose unit it names.
     public func receiveText(from prefix: Data, _ text: String) {
+        if case let .checkIns(unit, _, _, _)? = MeshText.decode(text) {
+            guard let sender = group?.member(unit: unit), unit != me?.unit, let key = activity.boardKeys[sender.number],
+                  key.prefix(6) == prefix else { return }
+            activity.checkInWatch.apply(MeshText.decode(text)!)
+            return
+        }
         guard let frame = MeshText.decode(text) else { return }
         let unit: UInt32
         switch frame {
@@ -494,9 +512,18 @@ public final class HelpEngine: ObservableObject {
                 }
             case .availability:
                 if sender.canRespond { activity.rota.apply(inner); checkGaps() }
+            case let .checkIns(unit, _, _, _):
+                if sender.unit == unit, unit != me?.unit { activity.checkInWatch.apply(inner) }
             case .memberAdded, .memberRemoved, .memberName, .memberRole:
-                // Only a coordinator changes who is in the group. Nothing changes, nothing is redone.
-                if sender.role == .coordinator, signer != saved?.me, var s = saved {
+                // Any coordinator can add people; only the first can remove people or change roles,
+                // so the group can never be split onto different keys or numbers.
+                let allowed: Bool
+                switch inner {
+                case .memberRemoved, .memberRole: allowed = signer == group?.primaryCoordinator
+                default: allowed = sender.role == .coordinator
+                }
+                // Nothing changes, nothing is redone.
+                if allowed, signer != saved?.me, var s = saved {
                     let before = s.group
                     s.group.apply(membership: inner, at: now())
                     if s.group != before { setState(s) }
@@ -510,13 +537,17 @@ public final class HelpEngine: ObservableObject {
             activity.boardKeys[member] = key
             spawn {
                 await self.mesh.addContact(key, name: "Help&I \(member)")
-                // A box this phone has not heard before: tell it this caller's check-ins.
+                // A box this phone has not heard before may not know this phone's box either (it
+                // joined later): answer with ours, once per new box, then tell it our check-ins.
+                if let mine = self.mesh.boxPublicKey, let me = self.saved?.me, !self.answeredBoxes.contains(member) {
+                    self.answeredBoxes.insert(member)
+                    await self.sendToAll(.signedBoard(member: me, publicKey: mine, identity: self.identity, group: self.groupID))
+                }
                 await self.shareCheckIns(to: member)
             }
             return
-        case let .checkIns(unit, _, _, _):
-            guard unit != me?.unit, group?.member(unit: unit) != nil else { return }
-            activity.checkInWatch.apply(frame)
+        case .checkIns:
+            // Counted only signed by the caller (below) or as a direct message from their box.
             return
         case let .call(unit, _, _, _), let .followUp(unit, _, _, _), let .note(unit, _, _, _), let .position(unit, _, _, _, _):
             // A phone never alerts for its own calls, however they come back to it.
@@ -550,11 +581,15 @@ public final class HelpEngine: ObservableObject {
 
     // MARK: Responding
 
-    public func acknowledge(_ key: IncomingRequest.Key) {
-        guard let me = saved?.me, let frame = activity.inbox.acknowledge(key, by: me, at: now(), identity: identity, group: groupID) else { return }
+    /// Returns whether an acknowledgement was made.
+    @discardableResult
+    public func acknowledge(_ key: IncomingRequest.Key) -> Bool {
+        guard me?.canRespond == true, let me = saved?.me,
+              let frame = activity.inbox.acknowledge(key, by: me, at: now(), identity: identity, group: groupID) else { return false }
         activity.lastAnswered[me] = now()
         alerts.cancel(key)
         sendAck(frame, for: key)
+        return true
     }
 
     public func retryAck(_ key: IncomingRequest.Key) {
@@ -683,9 +718,19 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// Makes a member a coordinator too, so the group does not depend on one person.
+    /// Only the first coordinator makes new coordinators.
     public func promote(_ number: UInt16) {
+        guard saved?.me == group?.primaryCoordinator else { return }
         updateGroup { _ = $0.promote(number) }
     }
+
+    /// Only the first coordinator removes people: a removal changes the group's keys.
+    public func removeMember(_ number: UInt16) {
+        guard saved?.me == group?.primaryCoordinator, number != saved?.me else { return }
+        updateGroup { $0.remove(number, at: now()) }
+    }
+
+    public var isPrimaryCoordinator: Bool { saved?.me != nil && saved?.me == group?.primaryCoordinator }
 
     public func setRelay(_ url: String) {
         let trimmed = url.trimmingCharacters(in: .whitespaces)
@@ -704,7 +749,9 @@ public final class HelpEngine: ObservableObject {
         saved = s
         store.save(s)
         alerts.setCheckInReminders(schedule?.times ?? [])
-        lastCheckInShare = now()
+        s.checkInSharedAt = now()
+        saved = s
+        store.save(s)
         spawn { await self.shareCheckIns(to: nil, evenIfOff: true) }
     }
 
@@ -715,7 +762,11 @@ public final class HelpEngine: ObservableObject {
         guard let unit = me?.unit, let s = saved, s.checkInSince != nil || evenIfOff else { return }
         let frame = HelpFrame.checkIns(unit: unit, since: UInt32((s.checkInSince ?? now()).timeIntervalSince1970),
                                        grace: UInt16((s.checkIn?.grace ?? 1800) / 60), times: (s.checkIn?.times ?? []).map { UInt16($0) })
-        if only == nil, relay.isConfigured { _ = await relay.send(frame, wake: nil) }
+        // Signed over the internet, where anyone with the group key could otherwise set or clear
+        // someone else's check-ins; the direct message is tied to this phone's box instead.
+        if only == nil, relay.isConfigured, let me = saved?.me {
+            _ = await relay.send(.signing(frame, as: me, identity: identity, group: groupID), wake: nil)
+        }
         await sendDirect(frame, to: only)
     }
 

@@ -323,11 +323,20 @@ import XCTest
         XCTAssertNotNil(coordinator.engine.group?.member(n3), "and so does the first coordinator")
         XCTAssertEqual(coordinator.engine.group?.membershipVersion, second.engine.group?.membershipVersion,
                        "versions agree, so either coordinator's member list is accepted by the relay")
-        // The second coordinator removes a responder: the caller stops counting their acks.
+        // Only the first coordinator removes people or makes coordinators, so the keys and numbers
+        // can never split. The second coordinator's attempts change nothing anywhere.
         let r = responder.engine.saved!.me
-        second.engine.updateGroup { $0.remove(r, at: clock.now) }
+        second.engine.removeMember(r)
+        second.engine.promote(r)
         await air.run()
-        XCTAssertNil(caller.engine.group?.member(r))
+        XCTAssertNotNil(caller.engine.group?.member(r))
+        XCTAssertEqual(caller.engine.group?.member(r)?.role, .responder)
+        // A forged removal signed by the second coordinator is refused by other phones too.
+        caller.engine.receive(.signing(.memberRemoved(member: r, version: 999), as: n2, identity: second.identity, group: gid), via: .mesh)
+        XCTAssertNotNil(caller.engine.group?.member(r))
+        coordinator.engine.removeMember(r)
+        await air.run()
+        XCTAssertNil(caller.engine.group?.member(r), "the first coordinator's removal is followed")
         // An old role change, replayed, does not undo a newer one.
         let demote = HelpFrame.memberRole(member: n2, role: .responder, block: 0, version: 1)
         caller.engine.receive(.signing(demote, as: 1, identity: coordinator.identity, group: gid), via: .mesh)
@@ -449,7 +458,8 @@ import XCTest
         caller.engine.setCheckIn(CheckInSchedule(times: [(hour * 60 + 120) % 1440]))
         await air.run()
         XCTAssertNotNil(responder.engine.activity.checkInWatch.callers[caller.engine.me!.unit!], "the schedule reached the responder over the mesh")
-        XCTAssertFalse(air.groupSends.contains { if case .checkIns = $0 { return true }; return false }, "never on the group channel")
+        XCTAssertTrue(air.directSends.contains { if case .checkIns? = MeshText.decode($0) { return true }; return false }, "sent as direct messages")
+        XCTAssertFalse(air.groupSends.contains { !$0.mayGoOnGroupChannel }, "never on the group channel")
         caller.mesh.isReady = false  // the caller's phone goes flat
         await advance(2 * 3600 + 36 * 60)
         XCTAssertTrue(responder.engine.activity.inbox.requests.values.contains { $0.key.request == 0 && $0.orderedCategories.contains(.missedCheckIn) })
@@ -460,6 +470,65 @@ import XCTest
         let forged = HelpFrame.checkIns(unit: unit, since: 0, grace: 30, times: [0])
         responder.engine.receiveText(from: Data(repeating: 7, count: 6), MeshText.encode(forged)!)
         XCTAssertNil(responder.engine.activity.checkInWatch.callers[unit])
+    }
+
+    func testAPhoneThatMissedARemovalCatchesUp() async {
+        let r = responder.engine.saved!.me
+        caller.mesh.isReady = false
+        coordinator.engine.removeMember(r)
+        await air.run()
+        XCTAssertNotNil(caller.engine.group?.member(r), "the caller's box was off")
+        caller.mesh.isReady = true
+        coordinator.engine.resetMembershipRepeatForTesting()
+        await coordinator.engine.boxReady()
+        await air.run()
+        XCTAssertNil(caller.engine.group?.member(r), "the repeated removal reached it")
+    }
+
+    func testARemovedCallersCheckInsAreNoLongerWatched() async {
+        let hour = Calendar(identifier: .gregorian).component(.hour, from: clock.now)
+        caller.engine.setCheckIn(CheckInSchedule(times: [(hour * 60 + 120) % 1440]))
+        await air.run()
+        let unit = caller.engine.me!.unit!
+        XCTAssertNotNil(responder.engine.activity.checkInWatch.callers[unit])
+        coordinator.engine.removeMember(caller.engine.saved!.me)
+        await air.run()
+        XCTAssertNil(responder.engine.activity.checkInWatch.callers[unit])
+        await advance(4 * 3600)
+        XCTAssertFalse(responder.engine.activity.inbox.requests.values.contains { $0.key.unit == unit })
+    }
+
+    func testCheckInsOverTheInternetCountOnlyFromTheCaller() async {
+        for p in air.phones { p.mesh.isReady = false; p.relay.isConfigured = true }
+        let unit = caller.engine.me!.unit!
+        caller.engine.setCheckIn(CheckInSchedule(times: [600]))
+        await air.run()
+        XCTAssertEqual(responder.engine.activity.checkInWatch.callers[unit]?.schedule.times, [600])
+        // Another member tries to clear it.
+        let clear = HelpFrame.checkIns(unit: unit, since: 0, grace: 30, times: [])
+        responder.engine.receive(.signing(clear, as: coordinator.engine.saved!.me, identity: coordinator.identity, group: gid), via: .internet)
+        responder.engine.receive(clear, via: .internet)
+        XCTAssertEqual(responder.engine.activity.checkInWatch.callers[unit]?.schedule.times, [600])
+    }
+
+    func testANewBoxHearsTheCallersCheckIns() async {
+        caller.engine.setCheckIn(CheckInSchedule(times: [600]))
+        await air.run()
+        let late = Phone(air: air, clock: clock)
+        join(late, call: false, respond: true)
+        await air.run()
+        air.directSends = []
+        await late.engine.boxReady()
+        await air.run()
+        XCTAssertTrue(air.directSends.contains { if case .checkIns? = MeshText.decode($0) { return true }; return false })
+        XCTAssertNotNil(late.engine.activity.checkInWatch.callers[caller.engine.me!.unit!])
+    }
+
+    func testOnlyRespondersCanBePromoted() async {
+        let callerNumber = caller.engine.saved!.me
+        coordinator.engine.promote(callerNumber)
+        await air.run()
+        XCTAssertEqual(coordinator.engine.group?.member(callerNumber)?.role, .caller, "a caller who cannot come out is not given alerts")
     }
 
     func testAMissedCheckInIsRaisedEndToEnd() async {

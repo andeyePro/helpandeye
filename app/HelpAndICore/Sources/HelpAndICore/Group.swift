@@ -17,7 +17,7 @@ public struct Member: Codable, Equatable, Sendable, Identifiable {
     public var name: String
     public var role: Role
     /// X25519 public key of the member's phone, used to send them group secrets.
-    public let publicKey: Data
+    public var publicKey: Data
     /// The member's unit number, if they can call for help.
     public var unit: UInt32?
     /// Optional, for the ready-written text when nothing else gets through. Kept on members'
@@ -78,6 +78,12 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var highestMember: UInt16 = 0
     /// The membership version of each member's last role change, so an old one replayed is ignored.
     public var roleVersions: [UInt16: UInt32] = [:]
+    /// The highest number block ever given to a coordinator.
+    public var highestBlock: UInt16 {
+        get { max(members.compactMap(\.block).max() ?? 0, roleBlocksSeen) }
+        set { roleBlocksSeen = newValue }
+    }
+    var roleBlocksSeen: UInt16 = 0
     public var policy: StoredPolicy = .init()
     /// The relay for the internet route, such as https://helprelayandeye.example.workers.dev.
     public var relayURL: String?
@@ -96,6 +102,37 @@ public struct GroupState: Codable, Equatable, Sendable {
         self.name = name; self.secrets = secrets; self.members = members
     }
 
+    enum CodingKeys: String, CodingKey {
+        case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, highestMember, roleVersions
+        case policy, relayURL, membershipVersion, roleBlocksSeen
+    }
+
+    /// Fields added after the first release are optional when reading, so a group saved by an
+    /// earlier version of the app still loads instead of being silently lost.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        secrets = try c.decode(GroupSecrets.self, forKey: .secrets)
+        members = try c.decode([Member].self, forKey: .members)
+        previousSecrets = try c.decodeIfPresent(GroupSecrets.self, forKey: .previousSecrets)
+        previousUntil = try c.decodeIfPresent(Date.self, forKey: .previousUntil)
+        removedUnits = try c.decodeIfPresent(Set<UInt32>.self, forKey: .removedUnits) ?? []
+        removedMembers = try c.decodeIfPresent(Set<UInt16>.self, forKey: .removedMembers) ?? []
+        highestMember = try c.decodeIfPresent(UInt16.self, forKey: .highestMember) ?? 0
+        roleVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .roleVersions) ?? [:]
+        policy = try c.decodeIfPresent(StoredPolicy.self, forKey: .policy) ?? .init()
+        relayURL = try c.decodeIfPresent(String.self, forKey: .relayURL)
+        membershipVersion = try c.decodeIfPresent(UInt32.self, forKey: .membershipVersion) ?? 1
+        roleBlocksSeen = try c.decodeIfPresent(UInt16.self, forKey: .roleBlocksSeen) ?? 0
+    }
+
+    /// The group's first coordinator: the only one who removes people (which changes the keys) or
+    /// makes new coordinators, so two coordinators out of touch can never split the group onto
+    /// different keys or hand out the same numbers. Any coordinator can invite.
+    public var primaryCoordinator: UInt16? {
+        members.filter { $0.role == .coordinator && ($0.block ?? 0) == 0 }.map(\.number).min()
+    }
+
     public func member(_ number: UInt16) -> Member? { members.first { $0.number == number } }
     public func member(unit: UInt32) -> Member? { members.first { $0.unit == unit } }
 
@@ -104,13 +141,15 @@ public struct GroupState: Codable, Equatable, Sendable {
     public func block(of coordinator: UInt16?) -> UInt16 { coordinator.flatMap { member($0)?.block } ?? 0 }
 
     /// The next member number this coordinator hands out. Numbers are never reused.
-    public func nextMemberNumber(by coordinator: UInt16?) -> UInt16 {
+    /// Nil when this coordinator's block of 999 numbers is used up.
+    public func nextMemberNumber(by coordinator: UInt16?) -> UInt16? {
         let base = block(of: coordinator)
-        let used = (members.map(\.number) + removedMembers + [highestMember]).filter { $0 > base && $0 <= base &+ 999 }
-        return (used.max() ?? base) + 1
+        let used = (members.map(\.number) + removedMembers + [highestMember]).filter { $0 > base && $0 <= base + 999 }
+        let next = (used.max() ?? base) + 1
+        return next <= base + 999 ? next : nil
     }
 
-    public var nextMemberNumber: UInt16 { nextMemberNumber(by: nil) }
+    public var nextMemberNumber: UInt16? { nextMemberNumber(by: nil) }
 
     /// The next unit number this coordinator hands out. Unit numbers are never reused either.
     public func nextUnit(by coordinator: UInt16?) -> UInt32 {
@@ -123,11 +162,15 @@ public struct GroupState: Codable, Equatable, Sendable {
 
     /// Makes a member a coordinator, with their own block of numbers. Returns the signed-ready
     /// frame that tells everyone.
+    /// Only for someone who already responds: a coordinator responds too, and a caller who cannot
+    /// come out must not start getting red alerts. Blocks are never reused, and there are at most
+    /// 64 of them.
     public mutating func promote(_ number: UInt16) -> HelpFrame? {
-        guard let i = members.firstIndex(where: { $0.number == number }), members[i].role != .coordinator else { return nil }
-        let blocks = members.compactMap(\.block) + [0]
+        guard let i = members.firstIndex(where: { $0.number == number }), members[i].role == .responder || members[i].role == .both,
+              highestBlock < 63_000 else { return nil }
         members[i].role = .coordinator
-        members[i].block = (blocks.max() ?? 0) + 1000
+        highestBlock += 1000
+        members[i].block = highestBlock
         membershipVersion += 1
         roleVersions[number] = membershipVersion
         return roleFrame(number)
@@ -178,6 +221,10 @@ public struct GroupState: Codable, Equatable, Sendable {
         switch frame {
         case let .memberAdded(number, role, unit, key, sealKey, version):
             let u: UInt32? = role == .responder || unit == 0 ? nil : unit
+            // A member first heard of before sealing keys were sent gets theirs now.
+            if let i = members.firstIndex(where: { $0.number == number }), members[i].publicKey.isEmpty, sealKey.contains(where: { $0 != 0 }) {
+                members[i].publicKey = sealKey
+            }
             guard member(number) == nil, !removedMembers.contains(number), u.map({ !removedUnits.contains($0) }) ?? true else { return }
             members.append(Member(number: number, name: "Member \(number)", role: role, publicKey: sealKey, unit: u, signingKey: key))
             highestMember = max(highestMember, number)
@@ -192,6 +239,7 @@ public struct GroupState: Codable, Equatable, Sendable {
             guard let i = members.firstIndex(where: { $0.number == number }), version > (roleVersions[number] ?? 0) else { return }
             members[i].role = role
             members[i].block = role == .coordinator ? block : nil
+            roleBlocksSeen = max(roleBlocksSeen, block)
             roleVersions[number] = version
             membershipVersion = max(membershipVersion, version)
         case let .memberName(number, name):
@@ -257,7 +305,7 @@ public enum Joining {
         public let name: String
         public let wantsToCall: Bool
         public let wantsToRespond: Bool
-        public let publicKey: Data
+        public var publicKey: Data
         public var phone: String? = nil
         public var signingKey: Data? = nil
     }
@@ -268,7 +316,7 @@ public enum Joining {
         public let sealed: Data
     }
 
-    public enum Failure: Error, Equatable { case wrongToken, wrongGroup, cannotOpen, badCode }
+    public enum Failure: Error, Equatable { case wrongToken, wrongGroup, cannotOpen, badCode, groupFull }
 
     public static func invitation(for group: GroupState, coordinator: DeviceIdentity) -> Invitation {
         Invitation(groupID: group.secrets.groupID, groupName: group.name, coordinatorKey: coordinator.publicKey, token: randomBytes(16))
@@ -285,7 +333,7 @@ public enum Joining {
         guard invite.groupID == group.secrets.groupID else { throw Failure.wrongGroup }
         let role: Member.Role = request.wantsToCall && request.wantsToRespond ? .both : (request.wantsToCall ? .caller : .responder)
         let me = group.members.first { $0.publicKey == coordinator.publicKey }?.number
-        let number = group.nextMemberNumber(by: me)
+        guard let number = group.nextMemberNumber(by: me) else { throw Failure.groupFull }
         group.membershipVersion += 1
         group.highestMember = max(group.highestMember, number)
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,

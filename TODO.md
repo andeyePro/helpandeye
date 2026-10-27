@@ -4,6 +4,7 @@
 
 ### Decisions for Martin
 
+- [ ] **If the first coordinator is lost.** Only the group's first coordinator can remove people or make coordinators, so two coordinators can never split the group onto different keys. If that phone is lost, nobody can remove it. Should another coordinator be able to take over (say, with a second coordinator's confirmation), or should the group be started again?
 - [ ] **Buttons on a plain Heltec.** Standard MeshCore companion firmware has no red, amber or green button behaviour: a Heltec v4 has one user button (PRG) and no buzzer, and the companion firmware only relays what the phone app sends. So the prototype is app-driven, and "the buttons work alone" (AGENTS.md) needs either Help&I firmware on the board or buttons wired to it, which decision 8 currently rules out. Which?
 - [ ] **Signing.** The app is built unsigned for the simulator. Running it on real phones needs an Apple team in Xcode on MBP08L (claude account) and a bundle ID prefix; `org.andeye.helpandi` is used for now.
 - [ ] **MeshCore data_type.** Help&I frames use `0xFF48` from MeshCore's testing range, which needs no registration. Register a permanent value in MeshCore's `docs/number_allocations.md` before release?
