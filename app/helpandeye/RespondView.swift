@@ -48,9 +48,9 @@ struct RequestRow: View {
             case .sending?: Text("Sending your acknowledgement…")
             case .notSent?:
                 HStack {
-                    Image(systemName: "xmark").foregroundStyle(.red).accessibilityLabel("Not sent")
+                    Image(systemName: "xmark").foregroundStyle(Color.warning).accessibilityLabel("Not sent")
                     Text("Your acknowledgement did not go out, so the caller has not seen it.")
-                    Button("Try again") { model.retryAck(request.key) }.buttonStyle(.bordered)
+                    Button("Try again") { model.retryAck(request.key) }.buttonStyle(.secondaryAction)
                 }
             default: EmptyView()
             }
@@ -58,7 +58,7 @@ struct RequestRow: View {
                 Button { model.acknowledge(request.key) } label: {
                     Text("Acknowledge: I'm dealing with it").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.action)
             }
         }
         .padding(.vertical, 6)

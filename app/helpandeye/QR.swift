@@ -33,10 +33,10 @@ struct CodeReader: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(prompt).font(.headline)
             if DataScannerViewController.isSupported {
-                Button("Scan with the camera") { scanning = true }.buttonStyle(.borderedProminent)
+                Button("Scan with the camera") { scanning = true }.buttonStyle(.action)
             }
             TextField("Or paste the code here", text: $pasted, axis: .vertical).textFieldStyle(.roundedBorder)
-            Button("Use pasted code") { onCode(pasted) }.disabled(pasted.isEmpty)
+            Button("Use pasted code") { if !pasted.isEmpty { onCode(pasted) } }
         }
         .sheet(isPresented: $scanning) {
             Scanner { code in scanning = false; onCode(code) }.ignoresSafeArea()

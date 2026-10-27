@@ -90,7 +90,7 @@ struct CallButtonStyle: ButtonStyle {
     let colour: Colour
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .foregroundStyle(.white)
+            .foregroundStyle(colour.onColor)
             .multilineTextAlignment(.center)
             .background(colour.color.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: 24))
     }
@@ -105,7 +105,7 @@ struct StatusCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 if words.cross {
-                    Image(systemName: "xmark").font(.title.bold()).foregroundStyle(.red).accessibilityLabel("Not sent")
+                    Image(systemName: "xmark").font(.title.bold()).foregroundStyle(Color.warning).accessibilityLabel("Not sent")
                 }
                 Text(headline).font(.title3.bold())
             }
@@ -115,10 +115,10 @@ struct StatusCard: View {
             }
             if request.status == .notSent {
                 HStack {
-                    Button("Try again") { model.press(request.colour) }.buttonStyle(.borderedProminent)
+                    Button("Try again") { model.press(request.colour) }.buttonStyle(.action)
                     if RoutePlan.offerManualSMS(for: request, smsAvailable: MFMessageComposeViewController.canSendText(), smsIsAutomatic: false,
                                                 recipients: RoutePlan.smsRecipients(in: model.group, me: model.saved?.me)) {
-                        Button("Send as a text") { composingSMS = true }.buttonStyle(.bordered)
+                        Button("Send as a text") { composingSMS = true }.buttonStyle(.secondaryAction)
                     }
                 }
                 if words.call999 { Text("If you need help now, call 999.").font(.callout.bold()) }
@@ -126,7 +126,8 @@ struct StatusCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        // Solid, not see-through: words over a blurred background lose contrast.
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .combine)
         // Someone who cannot see the screen hears each change, such as a responder seeing the call.
         .onChange(of: headline) { _, new in UIAccessibility.post(notification: .announcement, argument: new) }
@@ -170,8 +171,7 @@ struct FollowUps: View {
                         Label(c.label, systemImage: chosen ? "checkmark.circle.fill" : "circle")
                             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(chosen ? .accentColor : .primary)
+                    .buttonStyle(ActionButtonStyle(prominent: chosen))
                     .accessibilityAddTraits(chosen ? .isSelected : [])
                     .accessibilityHint(chosen ? "Tells your responders to ignore this" : "Tells your responders")
                 }
@@ -183,7 +183,7 @@ struct FollowUps: View {
                         .focused($typing)
                         .submitLabel(.send)
                         .onSubmit(sendNote)
-                    Button("Send", action: sendNote).buttonStyle(.borderedProminent).disabled(typed.isEmpty)
+                    Button("Send", action: sendNote).buttonStyle(.action)
                 }
                 Button {
                     location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) }
@@ -191,7 +191,7 @@ struct FollowUps: View {
                     Label(location.state == .finding ? "Finding where you are…" : "Share where I am", systemImage: "location.fill")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.secondaryAction)
                 .disabled(location.state == .finding)
                 if location.state == .shared { Text("Where you are was sent.") }
                 if location.state == .denied { Text("Help&I is not allowed to use your location. You can allow it in Settings.") }

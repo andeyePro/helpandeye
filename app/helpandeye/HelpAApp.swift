@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 /// Applies the reader's chosen text size to every screen.
 struct SizedRoot: View {
     @AppStorage(TextSize.key) private var size = TextSize.asPhone
-    var body: some View { RootView().dynamicTypeSize(size.sizes) }
+    var body: some View { RootView().dynamicTypeSize(size.sizes).tint(.link) }
 }
 
 struct RootView: View {
@@ -82,7 +82,7 @@ struct NoticeBanner: View {
                 ForEach(Notice.allCases.filter(model.showing), id: \.self) { n in
                     HStack {
                         Text(text(n)).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
-                        Button("Acknowledge") { model.acknowledge(n) }.buttonStyle(.borderedProminent)
+                        Button("Acknowledge") { model.acknowledge(n) }.buttonStyle(.action)
                     }
                     .padding()
                     .background(Color.orange.opacity(0.2))
@@ -106,13 +106,23 @@ struct NotA999Notice: View {
     var body: some View {
         Text("Help&I does not replace 999 or telecare. In an emergency, call 999 first if you can.")
             .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal)
     }
 }
 
 extension Colour {
     var color: Color {
-        switch self { case .red: .red; case .amber: .orange; case .green: Color(red: 0, green: 0.6, blue: 0.27) }
+        // Dark enough for white words on red and green, light enough for black on amber: every
+        // button's words are at least 5:1 against it.
+        switch self {
+        case .red: Color(red: 0xC0 / 255, green: 0x10 / 255, blue: 0x1A / 255)
+        case .amber: Color(red: 1, green: 0xB0 / 255, blue: 0)
+        case .green: Color(red: 0, green: 0x7A / 255, blue: 0x33 / 255)
+        }
+    }
+
+    var onColor: Color { self == .amber ? .black : .white
     }
     var label: String {
         switch self { case .red: "Come now"; case .amber: "Come when convenient"; case .green: "I'm OK now" }

@@ -81,8 +81,22 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
+  helpandeyeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [helpandeyeUITests]
+    dependencies:
+      - target: helpandeye
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.uitests
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   helpandeye:
     build:
       targets:
         helpandeye: all
+    test:
+      targets:
+        - helpandeyeUITests

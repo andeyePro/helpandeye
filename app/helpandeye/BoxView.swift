@@ -10,11 +10,11 @@ struct BoxView: View {
         NavigationStack {
             List {
                 if let pin = model.board.boxPin {
-                    Section("Bluetooth code") {
+                    Section(header: Header("Bluetooth code")) {
                         Text("Your box's Bluetooth code is \(String(pin)). You need it to pair a phone with this box. It takes effect the next time the box is switched on.")
                     }
                 }
-                Section("Status") {
+                Section(header: Header("Status")) {
                     Text(statusText)
                     if let info = model.board.selfInfo {
                         LabeledContent("Name", value: info.name)
@@ -23,14 +23,14 @@ struct BoxView: View {
                             LabeledContent("Band", value: "\(band.name), \(Int(band.dutyCycle * 100))% of the time")
                         } else {
                             Text("This box is on a frequency outside the UK licence-exempt bands Help&I uses, so Help&I will not send on it.")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(Color.warning)
                         }
                     }
                     if let mv = model.board.batteryMillivolts {
                         LabeledContent("Box battery", value: String(format: "%.2f V", Double(mv) / 1000))
                     }
                 }
-                Section("Boxes nearby") {
+                Section(header: Header("Boxes nearby")) {
                     Button(model.board.searching ? "Looking…" : "Look for boxes") { model.board.startSearch() }
                         .disabled(model.board.searching)
                     ForEach(model.board.found, id: \.identifier) { p in

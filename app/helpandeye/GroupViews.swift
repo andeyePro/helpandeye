@@ -11,10 +11,11 @@ struct WelcomeView: View {
             Spacer()
             Text("Help&I").font(.largeTitle.bold())
             Text("Get help, even when the power and phones are down.").multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
             Button { mode = .join } label: { Text("Join a group").frame(maxWidth: .infinity, minHeight: 50) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.action)
             Button { mode = .create } label: { Text("Start a group").frame(maxWidth: .infinity, minHeight: 50) }
-                .buttonStyle(.bordered)
+                .buttonStyle(.secondaryAction)
             Spacer()
             NotA999Notice()
         }
@@ -31,19 +32,25 @@ struct CreateGroupView: View {
     @State private var myName = ""
     @State private var call = false
     @State private var phone = ""
+    @State private var missing = false
 
     var body: some View {
         Form {
-            Section("Group") { TextField("Group name, such as your street", text: $name) }
-            Section("You") {
-                TextField("Your name, as the group will see it", text: $myName)
-                TextField("Mobile number (optional)", text: $phone).keyboardType(.phonePad)
-                Toggle("I may also call for help", isOn: $call)
+            Section(header: Header("Group")) { LabeledField(label: "Group name, such as your street", text: $name) }
+            Section(header: Header("You")) {
+                LabeledField(label: "Your name, as the group will see it", text: $myName)
+                LabeledField(label: "Mobile number (optional)", text: $phone, keyboard: .phonePad)
+                Toggle(isOn: $call) { Text("I may also call for help").font(.body) }
             }
             Section {
                 Text("You will coordinate this group: invite people, and be told when nobody is available to respond.")
-                Button("Start the group") { model.createGroup(name: name, myName: myName, call: call, phone: phone.isEmpty ? nil : phone) }
-                    .disabled(name.isEmpty || myName.isEmpty)
+                // Never greyed out: a faded button is hard to read and does not say what is missing.
+                Button("Start the group") {
+                    missing = name.isEmpty || myName.isEmpty
+                    if !missing { model.createGroup(name: name, myName: myName, call: call, phone: phone.isEmpty ? nil : phone) }
+                }
+                .buttonStyle(.action)
+                if missing { Text("Please enter the group's name and your name first.").foregroundStyle(Color.warning) }
             }
         }
         .navigationTitle("Start a group")
@@ -56,6 +63,7 @@ struct JoinGroupView: View {
     @EnvironmentObject var model: AppModel
     @State private var invite: Joining.Invitation?
     @State private var name = ""
+    @State private var missing = false
     @State private var phone = ""
     @State private var call = true
     @State private var respond = false
@@ -69,19 +77,22 @@ struct JoinGroupView: View {
                     do { invite = try Joining.decode(Joining.Invitation.self, from: code); error = nil } catch { self.error = "That is not a Help&I joining code." }
                 }
             } else if requestCode == nil, let invite {
-                Section("Joining \(invite.groupName)") {
-                    TextField("Your name, as the group will see it", text: $name)
-                    TextField("Mobile number (optional)", text: $phone).keyboardType(.phonePad)
-                    Toggle("I may call for help", isOn: $call)
-                    Toggle("I can respond to others", isOn: $respond)
+                Section(header: Header("Joining \(invite.groupName)")) {
+                    LabeledField(label: "Your name, as the group will see it", text: $name)
+                    LabeledField(label: "Mobile number (optional)", text: $phone, keyboard: .phonePad)
+                    Toggle(isOn: $call) { Text("I may call for help").font(.body) }
+                    Toggle(isOn: $respond) { Text("I can respond to others").font(.body) }
                     Button("Next") {
+                        missing = name.isEmpty || !(call || respond)
+                        guard !missing else { return }
                         let r = Joining.request(invite, name: name, call: call, respond: respond, phone: phone.isEmpty ? nil : phone, me: model.identity)
                         requestCode = try? Joining.code(r)
                     }
-                    .disabled(name.isEmpty || !(call || respond))
+                    .buttonStyle(.action)
+                    if missing { Text("Please enter your name, and choose calling for help, responding, or both.").foregroundStyle(Color.warning) }
                 }
             } else if let invite, let requestCode {
-                Section("Show this to the coordinator") {
+                Section(header: Header("Show this to the coordinator")) {
                     QRCode(text: requestCode).frame(maxWidth: 260).frame(maxWidth: .infinity)
                     ShareLink(item: requestCode) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
                     Text("If you are not together, read this number to each other on a call: \(Joining.safetyNumber(invite.coordinatorKey, model.identity.publicKey)). It must match on both phones.")
@@ -94,7 +105,7 @@ struct JoinGroupView: View {
                     } catch { self.error = "That welcome code could not be opened. Ask the coordinator to make a new one." }
                 }
             }
-            if let error { Text(error).foregroundStyle(.red) }
+            if let error { Text(error).foregroundStyle(Color.warning) }
         }
         .navigationTitle("Join a group")
         .keyboardDismissable()
@@ -109,7 +120,7 @@ struct GroupView: View {
         NavigationStack {
             List {
                 if let me = model.me, me.canRespond {
-                    Section("Your availability") {
+                    Section(header: Header("Your availability")) {
                         let available = model.rota.isAvailable(me.number, at: Date())
                         Text(available ? "You are available to respond." : "You are not available.")
                         Button(available ? "I'm not available for the next 12 hours" : "I'm available for the next 12 hours") {
@@ -123,15 +134,15 @@ struct GroupView: View {
                     CheckInSection()
                 }
                 if model.me?.role == .coordinator {
-                    Section("Gaps in the next 24 hours") {
+                    Section(header: Header("Gaps in the next 24 hours")) {
                         if model.gaps.isEmpty { Text("Someone is available all the time.") }
                         ForEach(model.gaps, id: \.start) { g in
                             Text("\(g.start.formatted(date: .omitted, time: .shortened)) to \(g.end.formatted(date: .omitted, time: .shortened)): nobody available")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(Color.warning)
                         }
                     }
                 }
-                Section("Members") {
+                Section(header: Header("Members")) {
                     ForEach(model.group?.members ?? []) { m in
                         VStack(alignment: .leading) {
                             Text(m.name + (m.number == model.saved?.me ? " (you)" : "")).font(.headline)
@@ -142,7 +153,7 @@ struct GroupView: View {
                             if model.engine.isPrimaryCoordinator, m.number != model.saved?.me {
                                 Button("Remove", role: .destructive) { model.engine.removeMember(m.number) }
                                 if m.role == .responder || m.role == .both {
-                                    Button("Make coordinator") { model.engine.promote(m.number) }.tint(.blue)
+                                    Button("Make coordinator") { model.engine.promote(m.number) }.tint(.action)
                                 }
                             }
                         }
@@ -197,7 +208,7 @@ struct InviteView: View {
     var body: some View {
         Form {
             if let invite, let code = try? Joining.code(invite), request == nil {
-                Section("Ask them to scan this") {
+                Section(header: Header("Ask them to scan this")) {
                     QRCode(text: code).frame(maxWidth: 260).frame(maxWidth: .infinity)
                     ShareLink(item: code) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
                 }
@@ -205,7 +216,7 @@ struct InviteView: View {
                     do { request = try Joining.decode(Joining.JoinRequest.self, from: c); error = nil } catch { self.error = "That is not their joining code." }
                 }
             } else if let invite, let request, welcomeCode == nil {
-                Section("Add \(request.name)?") {
+                Section(header: Header("Add \(request.name)?")) {
                     Text(request.wantsToCall && request.wantsToRespond ? "Calls for help and responds" : (request.wantsToCall ? "Calls for help" : "Responds"))
                     Text("If you are not together, the number on their phone must be \(Joining.safetyNumber(model.identity.publicKey, request.publicKey)).")
                     Button("Add them") {
@@ -216,13 +227,13 @@ struct InviteView: View {
                     }
                 }
             } else if let welcomeCode {
-                Section("Ask them to scan this welcome code") {
+                Section(header: Header("Ask them to scan this welcome code")) {
                     QRCode(text: welcomeCode).frame(maxWidth: 320).frame(maxWidth: .infinity)
                     ShareLink(item: welcomeCode) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
                     Button("Done") { dismiss() }
                 }
             }
-            if let error { Text(error).foregroundStyle(.red) }
+            if let error { Text(error).foregroundStyle(Color.warning) }
         }
         .navigationTitle("Invite someone")
         .keyboardDismissable()
@@ -236,7 +247,7 @@ struct KeyUpdatesSection: View {
     @State private var shown: Member?
 
     var body: some View {
-        Section("New keys to hand out") {
+        Section(header: Header("New keys to hand out")) {
             Text("A phone was removed, so the group has new keys. Show each member their update code.")
             ForEach((model.group?.members ?? []).filter { $0.number != model.saved?.me }) { m in
                 Button("Update code for \(m.name)") { shown = m }
@@ -260,7 +271,7 @@ struct ReceiveUpdateSection: View {
     @State private var message: String?
 
     var body: some View {
-        Section("Key update") {
+        Section(header: Header("Key update")) {
             CodeReader(prompt: "If your coordinator shows you an update code, scan it here") { code in
                 guard let g = model.group, let w = try? Joining.decode(Joining.Welcome.self, from: code),
                       let updated = try? Joining.openUpdate(w, current: g, me: model.identity) else {
@@ -279,7 +290,7 @@ struct ShareEveryCallSection: View {
     @AppStorage(ShareEveryCall.key) private var on = false
 
     var body: some View {
-        Section("When you call") {
+        Section(header: Header("When you call")) {
             Toggle("Send where I am with every Come now or Come when convenient", isOn: $on)
             Text("It goes only to your responders, encrypted, after the call itself.")
         }
@@ -293,8 +304,8 @@ struct MyPhoneSection: View {
     @State private var saved = false
 
     var body: some View {
-        Section("Your mobile number") {
-            TextField("Mobile number", text: $phone).keyboardType(.phonePad)
+        Section(header: Header("Your mobile number")) {
+            LabeledField(label: "Mobile number", text: $phone, keyboard: .phonePad)
             Button("Save") { model.setMyPhone(phone); saved = true }
             Text(saved ? "Saved. Members with the internet route get it now; others when they next scan a code."
                        : "If a call cannot go any other way, the caller can send it to responders as a text.")
@@ -308,8 +319,8 @@ struct RelaySection: View {
     @State private var url = ""
 
     var body: some View {
-        Section("Internet route") {
-            TextField("Relay address, starting https://", text: $url).textInputAutocapitalization(.never).keyboardType(.URL)
+        Section(header: Header("Internet route")) {
+            LabeledField(label: "Relay address, starting https://", text: $url, keyboard: .URL)
             Button("Save") { model.setRelay(url) }
             Text(model.relay.isConfigured ? "Calls also go over the internet." : "Not set up: calls go over the local radio only.")
             Text("Members get the address the next time they join or scan a key update.")
@@ -327,7 +338,7 @@ struct CheckInSection: View {
     @State private var twice = true
 
     var body: some View {
-        Section("Check-ins") {
+        Section(header: Header("Check-ins")) {
             Toggle("Check in at set times", isOn: $on)
             if on {
                 DatePicker("First check-in", selection: $morning, displayedComponents: .hourAndMinute)
