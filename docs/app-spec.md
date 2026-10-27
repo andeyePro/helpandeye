@@ -98,11 +98,48 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
 - Sends through the phone, or directly over the watch's own mobile data if it has it.
 - Does not replace the watch's own fall detection or emergency calling.
 
+## Keys and setting up a group
+
+Decided for now, following common practice for end-to-end encrypted apps (Martin, 2026-10-27:
+"use best practice, we can change later").
+
+- Every phone makes its own identity key pair the first time the app opens. The private key stays
+  in that phone's keychain, marked "this device only", and is never backed up or sent anywhere.
+  Each Heltec board makes its own MeshCore identity in firmware.
+- When a coordinator creates a group, their app makes three random secrets: a 16-byte MeshCore
+  channel secret, a 32-byte group key for the internet route, and the group's ID. Nothing is
+  built into the app or the firmware.
+- Joining is by invitation. In person, the new member scans a QR code on the coordinator's phone.
+  At a distance, the coordinator sends a one-time link and both phones show the same six-digit
+  code, which they read to each other over the phone before the coordinator approves. The group
+  secrets then go to the new member encrypted to their phone's public key.
+- The app writes the channel secret into its paired board over Bluetooth, and sets a random
+  six-digit Bluetooth PIN on the board, so that a stranger's phone cannot pair with it.
+- Relays hold members' public keys only. Every request to a relay is signed with the phone's own
+  key.
+
+## Removing a lost phone
+
+- The coordinator, or the member from a new phone, removes the lost phone. The relays refuse it at
+  once.
+- The coordinator's app then makes new group secrets and sends them to every remaining member,
+  encrypted to each phone's key. Each app writes the new channel secret into its board the next
+  time it connects. While that happens, boards listen on both the old and the new channel and send
+  on the new one.
+- A removed phone's unit number is never reused.
+
+## Rota gaps without internet
+
+- Every member's app holds a copy of the rota and works out gaps for itself, so a coordinator
+  learns of a gap from their own phone with no network at all, as long as their copy is current.
+- When a responder changes their availability and there is no internet, the change goes over the
+  mesh as a short group-channel message: their member number in the group and the times, with no
+  name.
+- A gap in the next 24 hours raises an alert that the coordinator must acknowledge. If they do not
+  within an hour, the group's other coordinators are alerted, then its responders.
+
 ## Open questions
 
 - Which provider runs the Pro second relay, and the Pro price.
-- How the coordinator learns about rota gaps when they have no internet.
-- How a unit's credentials and the group's encryption keys are created and shared at
-  provisioning, and how a lost phone is removed.
 - How distance-based priority works for callers who move, such as walkers, using the position
   they send.

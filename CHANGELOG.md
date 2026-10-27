@@ -4,6 +4,11 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Keys, lost phones and rota gaps decided for now** - `docs/app-spec.md` settles its three
+  open questions with common practice: per-phone keys that never leave the phone, group secrets
+  made by the coordinator's app and shared by QR or a verified link, relays that hold public keys
+  only, key rotation when a phone is removed, and rota gaps worked out on every phone and sent
+  over the mesh without names. `TODO.md` lists the decisions only Martin can make.
 - [x] **Caller's text and position may go over the mesh** - decision 12, AGENTS, CONTRIBUTING,
   README and the app spec now allow short typed text and the caller's position on air, as
   encrypted direct messages to each responder after the call for help, when airtime allows. Calls

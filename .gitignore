@@ -11,3 +11,10 @@
 .vibe-allow-op
 .vibe-allow-codex
 # <<< vibe-managed <<<
+
+# /vsss runtime state (session audits in .vss/sessions/ are committed)
+.vss/auto-resume
+.vss/auto-resume.tmp
+.vss/heartbeat
+.vss/rate-limit
+.vss/last-plan.md
