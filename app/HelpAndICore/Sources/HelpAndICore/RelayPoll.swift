@@ -24,6 +24,17 @@ public enum RelayPoll {
     public struct Position: Codable, Equatable, Sendable {
         public let epoch: String?
         public let seq: Int
+        /// Messages up to this one belong to a first read (after a reset): only recent ones count.
+        public var firstUntil: Int?
+
+        public init(epoch: String?, seq: Int, firstUntil: Int? = nil) { self.epoch = epoch; self.seq = seq; self.firstUntil = firstUntil }
+
+        /// A saved place: this form, or the plain number earlier versions saved.
+        public static func saved(_ value: Any?) -> Position? {
+            if let d = value as? Data { return try? JSONDecoder().decode(Position.self, from: d) }
+            if let n = value as? Int { return Position(epoch: nil, seq: n) }
+            return nil
+        }
     }
 
     /// A first read asks for this many of the latest messages...
@@ -47,15 +58,21 @@ public enum RelayPoll {
     public static func read(_ page: Page, from position: Position?, at now: Date, keys: [GroupSecrets]) -> Outcome {
         // The relay was reset (a new log name, or a place past its end): this phone's place means
         // nothing. Start again as a first read, from the beginning of the new log.
-        let reset = position.map { ($0.epoch != nil && $0.epoch != page.epoch) || $0.seq > page.latest } ?? false
-        let first = position == nil || reset
-        if reset { return Outcome(frames: [], position: Position(epoch: page.epoch, seq: max(page.latest - firstRead, 0)), more: true) }
+        // A log name the relay does not give is unknown, not changed.
+        let renamed = position.map { $0.epoch != nil && page.epoch != nil && $0.epoch != page.epoch } ?? false
+        let reset = renamed || (position.map { $0.seq > page.latest } ?? false)
+        if reset {
+            let start = max(page.latest - firstRead, 0)
+            return Outcome(frames: [], position: Position(epoch: page.epoch, seq: start, firstUntil: page.latest), more: true)
+        }
+        let firstUntil = position == nil ? page.latest : position?.firstUntil
         let recent = now.addingTimeInterval(-recentWindow).timeIntervalSince1970 * 1000
         let frames = page.messages.sorted { $0.seq < $1.seq }
-            .filter { !first || $0.at >= recent }
+            .filter { m in firstUntil.map { m.seq > $0 } ?? true || m.at >= recent }
             .compactMap { RelayProtocol.open($0.sealed, with: keys) }
         let next = max(position?.seq ?? 0, page.next)
-        return Outcome(frames: frames, position: Position(epoch: page.epoch, seq: next),
-                       more: page.messages.count >= pageSize && next < page.latest)
+        let stillFirst = firstUntil.flatMap { next < $0 ? $0 : nil }
+        return Outcome(frames: frames, position: Position(epoch: page.epoch ?? position?.epoch, seq: next, firstUntil: stillFirst),
+                       more: next < page.latest)
     }
 }

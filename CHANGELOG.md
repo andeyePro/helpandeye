@@ -4,6 +4,12 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Three small fixes to reading the relay** - a narrow review of the relay-reading change found
+  nothing that loses or falsely confirms a call, and three small issues, now fixed with tests:
+  after a relay reset, the fifteen-minute first-read rule now applies, so old calls are not
+  alerted as new; a relay that gives no log name is no longer taken as reset; a place saved by an
+  earlier version is kept; and a page thinned by expired messages no longer stops a read early.
+  165 core tests.
 - [x] **Reading the relay, and the caller's words, are tested** - how a phone reads the group's
   messages from the relay is now `RelayPoll` in HelpAndICore, with seven tests: a first read hears
   calls still open (every open call is resent more often than the fifteen-minute window it uses)

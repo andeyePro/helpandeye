@@ -5,7 +5,7 @@ open work and decisions, `TODO.md`.
 
 ## What works, as far as a machine can check
 
-- **The app's rules** (`app/HelpAndICore`), with 161 tests including a fuzz test that runs groups of
+- **The app's rules** (`app/HelpAndICore`), with 165 tests including a fuzz test that runs groups of
   phones through random presses, acknowledgements, removals, lost packets, links going down and
   clock jumps, checking the safety rules after every step:
   - a red press goes out at once on every route and is sent again until a person acknowledges it;

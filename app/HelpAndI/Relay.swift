@@ -100,7 +100,7 @@ final class Relay: ObservableObject, RelayLink {
     func poll() async {
         guard let group, let positionKey else { return }
         for _ in 0..<5 {
-            let stored = (UserDefaults.standard.data(forKey: positionKey)).flatMap { try? JSONDecoder().decode(RelayPoll.Position.self, from: $0) }
+            let stored = RelayPoll.Position.saved(UserDefaults.standard.object(forKey: positionKey))
             let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(RelayPoll.after(stored))", body: Data())
             if case .some((403, _)) = response { lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return }
             guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(RelayPoll.Page.self, from: data) else { return }
