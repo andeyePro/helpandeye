@@ -24,6 +24,7 @@ final class Relay: ObservableObject {
         isConfigured = base != nil && group != nil
         poller?.cancel()
         guard isConfigured else { return }
+        Task { await publishPushToken() }
         // Every 30 seconds while open: each poll costs two of the free tier's daily Durable Object
         // requests, shared by every group.
         poller = Task { [weak self] in
@@ -40,15 +41,37 @@ final class Relay: ObservableObject {
         _ = await request("PUT", RelayProtocol.path(for: group.secrets, "members"), body: body)
     }
 
-    func send(_ frame: HelpFrame) async -> String? {
+    enum Wake: String { case call, quiet }
+
+    /// `wake` asks the relay to push to the other members: `.call` visibly (a new call), `.quiet`
+    /// to wake their app without showing anything (an acknowledgement). Resends do not push.
+    func send(_ frame: HelpFrame, wake: Wake? = nil) async -> String? {
         guard let group else { return "Internet route not set up" }
-        guard let sealed = try? RelayProtocol.seal(frame, with: group.secrets),
-              let body = try? JSONEncoder().encode(["sealed": sealed]) else { return "Could not seal the message" }
+        var fields = ["sealed": ""]
+        guard let sealed = try? RelayProtocol.seal(frame, with: group.secrets) else { return "Could not seal the message" }
+        fields["sealed"] = sealed
+        if let wake { fields["wake"] = wake.rawValue }
+        guard let body = try? JSONEncoder().encode(fields) else { return "Could not seal the message" }
         switch await request("POST", RelayProtocol.path(for: group.secrets, "messages"), body: body) {
         case .some((200, _)): return nil
         case let .some((status, _)): return "Relay refused it (\(status))"
         case .none: return lastProblem ?? "No internet"
         }
+    }
+
+    /// Where Apple can push to wake this phone. Sent whenever the relay or group changes.
+    var pushToken: Data? { didSet { Task { await publishPushToken() } } }
+
+    func publishPushToken() async {
+        guard let group, let pushToken else { return }
+        #if DEBUG
+        let sandbox = true
+        #else
+        let sandbox = false
+        #endif
+        let hex = pushToken.map { String(format: "%02x", $0) }.joined()
+        guard let body = try? JSONSerialization.data(withJSONObject: ["token": hex, "sandbox": sandbox]) else { return }
+        _ = await request("PUT", RelayProtocol.path(for: group.secrets, "push"), body: body)
     }
 
     /// This phone's place in the group's message log, kept per group and relay address, so

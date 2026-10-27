@@ -102,6 +102,23 @@ export class GroupRelay {
     if (!current || !current.members.some((m) => m.key === key)) throw new RelayError(403, "not a member of this group");
   }
 
+  /// A member's phone tells the relay where to push to wake it. Kept per member key, and dropped
+  /// with the member.
+  async setPushToken(member, body) {
+    await this.requireMember(member);
+    if (!body || typeof body.token !== "string" || !/^[0-9a-f]{64,200}$/i.test(body.token)) throw new RelayError(400, "bad push token");
+    await this.storage.put("p:" + member, { token: body.token.toLowerCase(), sandbox: Boolean(body.sandbox) });
+  }
+
+  /// Push tokens of every current member except the sender.
+  async pushTargets(sender) {
+    const current = await this.members();
+    if (!current) return [];
+    const tokens = await this.storage.list({ prefix: "p:" });
+    const members = new Set(current.members.map((m) => m.key));
+    return [...tokens.entries()].filter(([k]) => k !== "p:" + sender && members.has(k.slice(2))).map(([, t]) => t);
+  }
+
   /// Each message is its own storage key, so no single value grows with the log.
   static key(seq) {
     return "m:" + String(seq).padStart(12, "0");

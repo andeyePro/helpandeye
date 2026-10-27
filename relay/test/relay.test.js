@@ -107,3 +107,17 @@ test("each message is its own key and old ones are deleted", async () => {
   await relay.post(coord.key, "AQ==");
   assert.deepEqual([...storage.m.keys()].filter((k) => k.startsWith("m:")), [GroupRelay.key(4)]);
 });
+
+test("push tokens belong to current members and the sender is not woken", async () => {
+  const relay = new GroupRelay(new MapStorage());
+  const coord = await phone(), member = await phone(), stranger = await phone();
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }] });
+  await relay.setPushToken(coord.key, { token: "A".repeat(64), sandbox: true });
+  await relay.setPushToken(member.key, { token: "b".repeat(64) });
+  await rejects(relay.setPushToken(stranger.key, { token: "c".repeat(64) }), 403);
+  await rejects(relay.setPushToken(member.key, { token: "not hex" }), 400);
+  assert.deepEqual(await relay.pushTargets(coord.key), [{ token: "b".repeat(64), sandbox: false }]);
+  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }] });
+  assert.deepEqual(await relay.pushTargets(coord.key), []);
+  assert.deepEqual(await relay.pushTargets(member.key), [{ token: "a".repeat(64), sandbox: true }]);
+});

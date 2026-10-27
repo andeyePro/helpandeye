@@ -24,6 +24,7 @@ targets:
       path: HelpAndI/HelpAndI.entitlements
       properties:
         com.apple.developer.usernotifications.time-sensitive: true
+        aps-environment: development
     info:
       path: HelpAndI/Info.plist
       properties:

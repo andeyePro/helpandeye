@@ -17,7 +17,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 
     func application(_ app: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         MainActor.assumeIsolated { watch.attach(AppModel.shared) }
+        app.registerForRemoteNotifications()
         return true
+    }
+
+    func application(_ app: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken token: Data) {
+        MainActor.assumeIsolated { AppModel.shared.relay.pushToken = token }
+    }
+
+    /// A push from the relay: fetch what is waiting, which schedules this phone's own alerts.
+    func application(_ app: UIApplication, didReceiveRemoteNotification info: [AnyHashable: Any],
+                     fetchCompletionHandler done: @escaping (UIBackgroundFetchResult) -> Void) {
+        Task { @MainActor in
+            await AppModel.shared.relay.poll()
+            AppModel.shared.tick()
+            done(.newData)
+        }
     }
 }
 

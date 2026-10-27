@@ -119,7 +119,7 @@ final class AppModel: ObservableObject {
         if colour == .green { activity.greens.append(r.createdAt) }
         for route in routes {
             Task {
-                let failure = await send(r.callFrame, on: route, kind: .call)
+                let failure = route == .internet ? await relay.send(r.callFrame, wake: .call) : await send(r.callFrame, on: route, kind: .call)
                 guard let i = activity.outgoing.firstIndex(where: { $0.number == r.number && $0.unit == r.unit }) else { return }
                 activity.outgoing[i].update(route, failure.map(RouteState.failed) ?? .sent)
             }
@@ -298,7 +298,7 @@ final class AppModel: ObservableObject {
         ackSends[key] = Dictionary(uniqueKeysWithValues: routes.map { ($0, RouteState.sending) })
         for route in routes {
             Task {
-                let failure = await send(frame, on: route, kind: .call)
+                let failure = route == .internet ? await relay.send(frame, wake: .quiet) : await send(frame, on: route, kind: .call)
                 ackSends[key]?[route] = failure.map(RouteState.failed) ?? .sent
             }
         }

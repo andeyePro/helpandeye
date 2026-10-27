@@ -17,6 +17,14 @@ Every request is signed by the phone's Ed25519 key. The headers are:
 | `PUT /g/<group>/members` | a coordinator | `{"generation": n, "members": [{"key": "...", "role": "coordinator" or "member"}]}` |
 | `POST /g/<group>/messages` | a member | `{"sealed": "<base64 ChaCha20-Poly1305 box>"}` |
 | `GET /g/<group>/messages?after=<seq>` | a member | none; the reply is `{"latest": n, "messages": [...]}` |
+| `PUT /g/<group>/push` | a member | `{"token": "<hex APNs device token>", "sandbox": true or false}` |
+
+A posted message may add `"wake": "call"`, which sends every other member a visible push ("A call
+for help in your group. Open Help&I to see who."), or `"wake": "quiet"`, which only wakes their
+app. The app asks for `call` on a call's first send and `quiet` on an acknowledgement; resends do
+not push. The relay cannot read who called, so the push cannot say; the app works out the rest
+once awake. Because the push goes to everyone at once, a responder whose turn would come later is
+told early over the internet route: the escalation order still decides the repeated alerts.
 
 The first coordinator to send a member list owns the group. After that only a coordinator in the
 current list can change it, only to a newer version (sending the same list again is accepted),
@@ -46,5 +54,9 @@ npm test
 ```
 npx wrangler deploy
 ```
+
+Push notifications stay off until these secrets are set (`npx wrangler secret put <name>`):
+`APNS_KEY` (the contents of the `.p8` key from Apple Developer, Certificates, Keys), `APNS_KEY_ID`,
+`APNS_TEAM_ID` and `APNS_TOPIC` (`org.andeye.helpandi`).
 
 Then, in the app, open Group, Internet route, and enter the Worker's `https://` address.

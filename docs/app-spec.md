@@ -70,7 +70,9 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
   use a second, independent relay on a different provider, so that no single server or provider
   is needed.
 - Each relay wakes responders' phones through Apple's and Google's push services, which is the
-  only reliable way to wake an iPhone app.
+  only reliable way to wake an iPhone app. The push says only that a group has a call, because
+  the relay cannot read who; it goes to every member at once, and each phone then alerts its own
+  person in escalation order.
 - Responders' apps poll the relays when opened, in case a push was lost.
 - The relays see only encrypted messages and unit numbers.
 

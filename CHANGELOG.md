@@ -4,6 +4,12 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Push notifications from the relay** - phones register their APNs token with the relay
+  (per member, dropped with the member). A call's first send asks the relay for a visible,
+  time-sensitive push to every other member that names nobody, since the relay cannot read who
+  called; an acknowledgement asks for a silent push that only wakes the caller's app. A push makes
+  the app fetch from the relay and schedule its own alerts. The provider token is an ES256 JWT made
+  in the Worker. Off until the APNs secrets are set (TODO.md). 12 relay tests.
 - [x] **Fixes from the second code review** - a second independent review of the send, alert and
   relay code found 17 issues. Fixed: the relay read position was shared by all groups, so a
   responder who changed group could silently miss every internet-route call (now per group and

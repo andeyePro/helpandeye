@@ -11,11 +11,10 @@
 - [ ] **Pro relay provider and price** (app spec open question).
 - [ ] **Simulator on the build Mac.** Xcode 27.1 on MBP08L reports "CoreSimulator is out of date", so the app builds but cannot run in the simulator. An admin needs to open Xcode once there (or run `sudo xcodebuild -runFirstLaunch`) to install its components. Until then nothing can be checked by eye, so screenshots and UI tests are blocked.
 - [ ] **Relay name and deployment.** The relay Worker is called `helprelayandeye` to follow the `<x>andeye` rule without a hyphen. Is that the name you want? Deploying it needs your Cloudflare account: `cd relay && npx wrangler deploy`, then enter its https address in the app under Group, Internet route.
-- [ ] **Push notifications.** Waking a responder's phone over the internet needs an APNs key from your Apple developer account, stored as a Worker secret. Until then the internet route reaches a phone only while the app is open; the mesh route works in the background.
+- [ ] **Push notifications.** Built and tested, off until you add an APNs key: in Apple Developer, Certificates, Identifiers and Profiles, Keys, make a key with Apple Push Notifications service, then `cd relay && npx wrangler secret put APNS_KEY` (paste the .p8 contents), and the same for `APNS_KEY_ID`, `APNS_TEAM_ID` and `APNS_TOPIC` (`org.andeye.helpandi`). The app also needs signing with the Push Notifications capability. Until then the internet route reaches a phone only while the app is open; the mesh route works in the background.
 
 ## Open (work)
 
-- [ ] Push from the relay through APNs once a key exists (see above).
 - [ ] Caller's typed text and position over the mesh as direct messages to each responder's board (decision 12). They go over the internet already. Needs each member's board public key in the group, and adding responders' boards as MeshCore contacts.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).
 - [ ] Sign availability and notice-acknowledgement frames as acknowledgements are, so a removed phone cannot fake them during the seven-day changeover. Today they are accepted only from current member numbers.

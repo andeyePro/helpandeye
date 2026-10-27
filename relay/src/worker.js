@@ -1,9 +1,12 @@
+import { push } from "./apns.js";
 import { GroupRelay, Meter as MeterLogic, RelayError } from "./relay.js";
 
 // Routes:
 //   PUT  /g/<groupId>/members          coordinator sends the member list (public keys only)
 //   POST /g/<groupId>/messages         a member posts a sealed message
 //   GET  /g/<groupId>/messages?after=n a member fetches sealed messages after sequence n
+//   PUT  /g/<groupId>/push             a member registers its push token
+// A message may carry "wake": "call" (a visible push to the others) or "quiet" (wakes their app).
 // Every request carries X-HelpAndI-Key, X-HelpAndI-Time and X-HelpAndI-Signature.
 // Every response carries X-HelpAndI-Allowance-Low: 1 when the free daily allowance is nearly used.
 
@@ -12,7 +15,7 @@ const GROUP_ID = /^[A-Za-z0-9_-]{16,64}$/;
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    const m = url.pathname.match(/^\/g\/([^/]+)\/(members|messages)$/);
+    const m = url.pathname.match(/^\/g\/([^/]+)\/(members|messages|push)$/);
     if (!m || !GROUP_ID.test(m[1])) return json(404, { error: "not found" });
     const stub = env.GROUPS.get(env.GROUPS.idFromName(m[1]));
     const response = await stub.fetch(request);
@@ -25,8 +28,10 @@ export default {
 };
 
 export class Group {
-  constructor(state) {
+  constructor(state, env) {
     this.relay = new GroupRelay(state.storage);
+    this.state = state;
+    this.env = env;
   }
 
   async fetch(request) {
@@ -48,7 +53,17 @@ export class Group {
         return json(200, { ok: true });
       }
       if (kind === "messages" && request.method === "POST") {
-        return json(200, { seq: await this.relay.post(key, JSON.parse(body).sealed) });
+        const msg = JSON.parse(body);
+        const seq = await this.relay.post(key, msg.sealed);
+        if (msg.wake === "call" || msg.wake === "quiet") {
+          const targets = await this.relay.pushTargets(key);
+          this.state.waitUntil(Promise.all(targets.map((t) => push(this.env, t, msg.wake))));
+        }
+        return json(200, { seq });
+      }
+      if (kind === "push" && request.method === "PUT") {
+        await this.relay.setPushToken(key, JSON.parse(body));
+        return json(200, { ok: true });
       }
       if (kind === "messages" && request.method === "GET") {
         return json(200, await this.relay.since(key, url.searchParams.get("after")));
