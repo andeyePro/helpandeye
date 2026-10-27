@@ -75,7 +75,7 @@ struct StatusCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                if request.status == .notSent {
+                if words.cross {
                     Image(systemName: "xmark").font(.title.bold()).foregroundStyle(.red).accessibilityLabel("Not sent")
                 }
                 Text(headline).font(.title3.bold())
@@ -92,7 +92,7 @@ struct StatusCard: View {
                         Button("Send as a text") { composingSMS = true }.buttonStyle(.bordered)
                     }
                 }
-                Text("If you need help now, call 999.").font(.callout.bold())
+                if words.call999 { Text("If you need help now, call 999.").font(.callout.bold()) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -103,14 +103,8 @@ struct StatusCard: View {
         .onChange(of: headline) { _, new in UIAccessibility.post(notification: .announcement, argument: new) }
     }
 
-    private var headline: String {
-        switch request.status {
-        case .sending: "Sending…"
-        case .waitingForResponder: "Sent. Waiting for a responder to see it."
-        case let .seen(who): "\(model.name(ofMember: who)) has seen your call."
-        case .notSent: "Not sent. Nobody has been told."
-        }
-    }
+    private var words: StatusWords.Words { StatusWords.phone(request.status, name: model.name(ofMember:)) }
+    private var headline: String { words.headline }
 
     private func line(_ route: Route) -> String {
         let name = switch route { case .internet: "Internet"; case .sms: "Text message"; case .mesh: "Local radio" }

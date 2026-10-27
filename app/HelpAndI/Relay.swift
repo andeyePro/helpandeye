@@ -95,28 +95,20 @@ final class Relay: ObservableObject, RelayLink {
         return "relay-after-\(group.secrets.groupID.base64EncodedString())-\(base.absoluteString)"
     }
 
+    /// Reads what is waiting, page by page (RelayPoll in HelpAndICore decides what to act on and
+    /// where to carry on).
     func poll() async {
         guard let group, let positionKey else { return }
-        struct Page: Decodable {
-            struct M: Decodable { let seq: Int; let at: Double; let sealed: String }
-            let latest: Int; let next: Int; let messages: [M]
+        for _ in 0..<5 {
+            let stored = (UserDefaults.standard.data(forKey: positionKey)).flatMap { try? JSONDecoder().decode(RelayPoll.Position.self, from: $0) }
+            let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(RelayPoll.after(stored))", body: Data())
+            if case .some((403, _)) = response { lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return }
+            guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(RelayPoll.Page.self, from: data) else { return }
+            let outcome = RelayPoll.read(page, from: stored, at: Date(), keys: group.listening(at: Date()))
+            for f in outcome.frames { onFrame?(f) }
+            UserDefaults.standard.set(try? JSONEncoder().encode(outcome.position), forKey: positionKey)
+            if !outcome.more { return }
         }
-        let stored = UserDefaults.standard.object(forKey: positionKey) as? Int
-        // A first poll reads only the last few hundred messages, and acts on the last quarter of an
-        // hour of them: a call still open is heard at once, a week of old ones is not.
-        let first = stored == nil
-        let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(stored ?? -200)", body: Data())
-        if case .some((403, _)) = response { lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return }
-        guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(Page.self, from: data) else { return }
-        // A place ahead of the relay means the relay was reset: start again from its beginning.
-        if let stored, stored > page.latest { UserDefaults.standard.set(0, forKey: positionKey); return }
-        let keys = group.listening(at: Date())
-        let recent = Date().addingTimeInterval(-15 * 60).timeIntervalSince1970 * 1000
-        for m in page.messages.sorted(by: { $0.seq < $1.seq }) where !first || m.at >= recent {
-            if let f = RelayProtocol.open(m.sealed, with: keys) { onFrame?(f) }
-        }
-        // `next` moves past expired messages too, so the place never stalls.
-        UserDefaults.standard.set(max(stored ?? 0, page.next), forKey: positionKey)
     }
 
     private func request(_ method: String, _ path: String, body: Data) async -> (Int, Data)? {

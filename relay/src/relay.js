@@ -202,6 +202,14 @@ export class GroupRelay {
     return !wake || c.wakes <= MAX_WAKES_PER_MINUTE;
   }
 
+  /// A random name for this group's message log, made once. If the relay's storage is ever reset,
+  /// the name changes, so a phone knows its place in the old log means nothing.
+  async epoch() {
+    let e = await this.storage.get("epoch");
+    if (!e) { e = b64(crypto.getRandomValues(new Uint8Array(9))); await this.storage.put("epoch", e); }
+    return e;
+  }
+
   async post(sender, sealed) {
     await this.requireMember(sender);
     if (typeof sealed !== "string" || sealed.length === 0 || sealed.length > MAX_BODY) throw new RelayError(400, "bad message");
@@ -218,6 +226,7 @@ export class GroupRelay {
   async since(reader, after) {
     await this.requireMember(reader);
     const latest = (await this.storage.get("seq")) ?? 0;
+    const epoch = await this.epoch();
     // A negative `after` asks for the last that many messages, for a phone's first read.
     const asked = Number(after) || 0;
     const from = asked < 0 ? Math.max(latest + asked, 0) : asked;
@@ -225,7 +234,7 @@ export class GroupRelay {
     const page = [...(await this.storage.list({ prefix: "m:", start: GroupRelay.key(from + 1), limit: 200 })).values()];
     // `next` is the last sequence scanned, kept or expired, so a reader never stalls on old ones.
     const next = page.length ? page[page.length - 1].seq : Math.max(from, latest);
-    return { latest, next, messages: page.filter((m) => m.at >= cutoff) };
+    return { latest, next, epoch, messages: page.filter((m) => m.at >= cutoff) };
   }
 
   async prune(latest) {

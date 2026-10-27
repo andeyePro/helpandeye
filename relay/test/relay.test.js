@@ -213,3 +213,15 @@ test("keys must be keys, and the list has a size limit", async () => {
   const many = Array.from({ length: 256 }, (_, i) => ({ key: btoa(String.fromCharCode(...new Uint8Array(32).fill(i % 256).map((b, j) => (b + j * 7) % 256))), role: "member" }));
   await rejects(relay.setMembers(owner.key, { generation: 1, members: [c(owner), ...many], primary: owner.key }), 413);
 });
+
+test("the log has a name that changes only if the relay's storage is reset", async () => {
+  const coord = await phone();
+  const relay = new GroupRelay(new MapStorage());
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }], primary: coord.key });
+  const a = (await relay.since(coord.key, 0)).epoch;
+  await relay.post(coord.key, "AA==");
+  assert.equal((await relay.since(coord.key, 0)).epoch, a);
+  const reset = new GroupRelay(new MapStorage());
+  await reset.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }], primary: coord.key });
+  assert.notEqual((await reset.since(coord.key, 0)).epoch, a);
+});

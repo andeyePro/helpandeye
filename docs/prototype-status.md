@@ -5,7 +5,7 @@ open work and decisions, `TODO.md`.
 
 ## What works, as far as a machine can check
 
-- **The app's rules** (`app/HelpAndICore`), with 152 tests including a fuzz test that runs groups of
+- **The app's rules** (`app/HelpAndICore`), with 161 tests including a fuzz test that runs groups of
   phones through random presses, acknowledgements, removals, lost packets, links going down and
   clock jumps, checking the safety rules after every step:
   - a red press goes out at once on every route and is sent again until a person acknowledges it;
@@ -15,9 +15,9 @@ open work and decisions, `TODO.md`.
   - nothing personal (typed messages, location, check-in times) goes on the shared radio channel;
   - radio use stays inside the Ofcom duty-cycle limit.
 - **The iPhone app, watch app and notification extension** build, unsigned, with no warnings.
-- **The Bluetooth command queue** that puts a call on the radio, and the choice of the box's
-  channel slots, are in the core package and tested.
-- **The internet relay** (`relay/`), with 19 tests, including checks that it verifies what the app
+- **The Bluetooth command queue** that puts a call on the radio, the choice of the box's channel
+  slots, reading the relay, and what the caller is told, are in the core package and tested.
+- **The internet relay** (`relay/`), with 20 tests, including checks that it verifies what the app
   signs and follows the same membership rules the app's tests assume.
 
 ## What has not been checked

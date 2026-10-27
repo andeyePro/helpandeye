@@ -4,6 +4,15 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Reading the relay, and the caller's words, are tested** - how a phone reads the group's
+  messages from the relay is now `RelayPoll` in HelpAndICore, with seven tests: a first read hears
+  calls still open (every open call is resent more often than the fifteen-minute window it uses)
+  and not a week of old ones; a backlog longer than a page is read through without skipping; expired
+  messages never stall the place; and a relay that was reset is noticed even if it has refilled
+  past the phone's place, which before would have skipped those messages for good (the relay now
+  names its log, and the name changes if it is reset). What the caller is told on phone and watch
+  is now `StatusWords`, with tests that only an acknowledgement is ever put as seen, nothing else
+  reassures, and the cross and 999 appear whenever nothing was sent. 161 core tests, 20 relay tests.
 - [x] **Fixes from the seventh code review, on the radio path** - a seventh independent review, of the
   path a press takes to the radio, found 1 blocker and 6 major issues. Fixed: looking for boxes
   while one was connected stopped calls going out and incoming ones being fetched until the app

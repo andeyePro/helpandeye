@@ -24,13 +24,9 @@ final class PhoneWatchLink: NSObject, ObservableObject {
         var context: [String: Any] = ["canCall": model.me?.canCall == true]
         if let r = model.current {
             context["colour"] = Int(r.colour.rawValue)
-            context["status"] = switch r.status {
-            case .sending: "Sending…"
-            case .waitingForResponder: "Sent. Waiting for a responder."
-            case let .seen(who): "\(model.name(ofMember: who)) has seen it."
-            case .notSent: "Not sent. Use your phone, or call 999."
-            }
-            context["failed"] = r.status == .notSent
+            let words = StatusWords.watch(r.status, name: model.name(ofMember:))
+            context["status"] = words.headline
+            context["failed"] = words.cross
         }
         // Open requests this person can acknowledge from the wrist, most urgent first. Names stay on
         // the paired watch, which is this person's own device.
