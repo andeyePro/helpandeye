@@ -82,10 +82,11 @@ jobs:
           oidc=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=claude-code-github-action" | jq -r .value)
           echo "::add-mask::$oidc"
-          app=$(curl -sS -X POST -H "Authorization: Bearer $oidc" -H "Content-Type: application/json" \
+          exchange=$(curl -sS -X POST -H "Authorization: Bearer $oidc" -H "Content-Type: application/json" \
             -d '{"permissions":{"discussions":"write"}}' \
-            https://api.anthropic.com/api/github/github-app-token-exchange | jq -r '.token // .app_token // empty')
-          [ -n "$app" ] || { echo "::error::Could not get a Claude app token. Is the Claude GitHub App installed?"; exit 1; }
+            https://api.anthropic.com/api/github/github-app-token-exchange)
+          app=$(jq -r '.token // .app_token // empty' <<<"$exchange")
+          [ -n "$app" ] || { echo "::error::Claude app token exchange failed: $(jq -c '.error // .message // .' <<<"$exchange")"; exit 1; }
           echo "::add-mask::$app"
           trap 'curl -sS -X DELETE -H "Authorization: Bearer $app" https://api.github.com/installation/token > /dev/null || true' EXIT
           if [ -n "$REPLY_TO" ]; then
