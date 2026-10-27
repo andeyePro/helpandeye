@@ -4,6 +4,16 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **First iOS and watchOS app** - `app/` builds an unsigned iOS app with an embedded watch app
+  (XcodeGen, Xcode 27.1). Callers get the three buttons, a status card that never implies help is
+  coming before a responder acknowledges, a cross with reasons when nothing was sent, follow-up
+  details, and a ready-written text offered only when every other route failed. Responders get a
+  list that never closes by itself, an Acknowledge button, and alerts scheduled at their turn in
+  the escalation, so they fire in the background. Groups are started and joined with three QR
+  codes, lost phones removed with new keys handed out as update codes. The box tab pairs a Heltec
+  on MeshCore companion firmware over Bluetooth, writes the group's private channel into it, and
+  refuses to send on a frequency outside the UK bands. The watch sends through the phone.
+  `tests/MANUAL-TESTS.md` has nine hardware checks. The internet route is not built yet.
 - [x] **Group keys and joining in person** - `Group.swift` in HelpAndICore makes each group's
   secrets at random, joins a member with three QR codes and no network (the group sealed to the
   new phone's key with X25519 and ChaCha20-Poly1305), gives both phones a six-digit safety number

@@ -13,9 +13,12 @@ public struct Member: Codable, Equatable, Sendable, Identifiable {
     public let publicKey: Data
     /// The member's unit number, if they can call for help.
     public var unit: UInt32?
+    /// Optional, for the ready-written text when nothing else gets through. Kept on members'
+    /// phones only.
+    public var phone: String?
 
-    public init(number: UInt16, name: String, role: Role, publicKey: Data, unit: UInt32? = nil) {
-        self.number = number; self.name = name; self.role = role; self.publicKey = publicKey; self.unit = unit
+    public init(number: UInt16, name: String, role: Role, publicKey: Data, unit: UInt32? = nil, phone: String? = nil) {
+        self.number = number; self.name = name; self.role = role; self.publicKey = publicKey; self.unit = unit; self.phone = phone
     }
 
     public var canCall: Bool { role != .responder && unit != nil }
@@ -83,6 +86,11 @@ public struct GroupState: Codable, Equatable, Sendable {
         secrets = secrets.rotated()
     }
 
+    /// The rota, with every responder available unless they have said otherwise.
+    public var defaultRota: Rota {
+        Rota(responders: members.filter(\.canRespond).map(\.number), defaultAvailable: true)
+    }
+
     public var escalationPolicy: EscalationPolicy {
         EscalationPolicy(useDistance: policy.useDistance, redInterval: policy.redInterval, amberInterval: policy.amberInterval)
     }
@@ -120,6 +128,7 @@ public enum Joining {
         public let wantsToCall: Bool
         public let wantsToRespond: Bool
         public let publicKey: Data
+        public var phone: String? = nil
     }
 
     public struct Welcome: Codable, Equatable, Sendable {
@@ -134,8 +143,8 @@ public enum Joining {
         Invitation(groupID: group.secrets.groupID, groupName: group.name, coordinatorKey: coordinator.publicKey, token: randomBytes(16))
     }
 
-    public static func request(_ invite: Invitation, name: String, call: Bool, respond: Bool, me: DeviceIdentity) -> JoinRequest {
-        JoinRequest(token: invite.token, name: name, wantsToCall: call, wantsToRespond: respond, publicKey: me.publicKey)
+    public static func request(_ invite: Invitation, name: String, call: Bool, respond: Bool, phone: String? = nil, me: DeviceIdentity) -> JoinRequest {
+        JoinRequest(token: invite.token, name: name, wantsToCall: call, wantsToRespond: respond, publicKey: me.publicKey, phone: phone)
     }
 
     /// Adds the member and seals the group for them. Run on the coordinator's phone.
@@ -145,7 +154,7 @@ public enum Joining {
         let role: Member.Role = request.wantsToCall && request.wantsToRespond ? .both : (request.wantsToCall ? .caller : .responder)
         let number = group.nextMemberNumber
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,
-                                    unit: request.wantsToCall ? group.nextUnit : nil))
+                                    unit: request.wantsToCall ? group.nextUnit : nil, phone: request.phone))
         let box = try seal(JSONEncoder().encode(group), to: request.publicKey, from: coordinator, context: invite.token)
         return Welcome(groupID: group.secrets.groupID, memberNumber: number, sealed: box)
     }
@@ -155,6 +164,27 @@ public enum Joining {
         guard welcome.groupID == invite.groupID else { throw Failure.wrongGroup }
         let plain = try unseal(welcome.sealed, from: invite.coordinatorKey, me: me, context: invite.token)
         return try JSONDecoder().decode(GroupState.self, from: plain)
+    }
+
+    /// New secrets after a phone was removed, sealed for one remaining member. Sent over the
+    /// internet route or shown as a QR code.
+    public static func update(_ group: GroupState, for member: Member, coordinator: DeviceIdentity) throws -> Welcome {
+        let box = try seal(JSONEncoder().encode(group), to: member.publicKey, from: coordinator, context: group.secrets.groupID)
+        return Welcome(groupID: group.secrets.groupID, memberNumber: member.number, sealed: box)
+    }
+
+    /// Opens an update with the group this phone already has. Only a coordinator of that group can
+    /// have sealed it, and an update can never take the group back to older secrets.
+    public static func openUpdate(_ welcome: Welcome, current: GroupState, me: DeviceIdentity) throws -> GroupState {
+        guard welcome.groupID == current.secrets.groupID else { throw Failure.wrongGroup }
+        for c in current.members where c.role == .coordinator {
+            if let plain = try? unseal(welcome.sealed, from: c.publicKey, me: me, context: current.secrets.groupID),
+               let g = try? JSONDecoder().decode(GroupState.self, from: plain) {
+                guard g.secrets.generation > current.secrets.generation else { throw Failure.cannotOpen }
+                return g
+            }
+        }
+        throw Failure.cannotOpen
     }
 
     /// Six digits both phones show for the same pair of keys, to read aloud when joining at a

@@ -7,7 +7,7 @@ public enum Colour: UInt8, Sendable, CaseIterable, Codable {
 
 /// Follow-up categories a caller can add after the first press. Codes, not text, so they fit on
 /// the group channel without carrying personal detail (decision 12).
-public enum Category: UInt8, Sendable, CaseIterable, Codable {
+public enum CallCategory: UInt8, Sendable, CaseIterable, Codable {
     case fallen = 1, unwell = 2, lockedOut = 3, powerCut = 4, needCompany = 5, other = 99
 }
 
@@ -20,7 +20,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// A red, amber or green press. Sent at once, with nothing else in it.
     case call(unit: UInt32, request: UInt16, colour: Colour, sentAt: UInt32)
     /// A category added after the call, numbered so the responder app can assemble the set.
-    case followUp(unit: UInt32, request: UInt16, part: UInt8, category: Category)
+    case followUp(unit: UInt32, request: UInt16, part: UInt8, category: CallCategory)
     /// A responder pressed acknowledge. `responder` is their member number in the group.
     case ack(unit: UInt32, request: UInt16, responder: UInt16, ackedAt: UInt32)
     /// A responder's availability changed while there was no internet (rota, app spec).
@@ -60,7 +60,7 @@ public enum HelpFrame: Equatable, Sendable {
             guard let unit = r.u32(), let req = r.u16(), let c = r.u8().flatMap(Colour.init), let at = r.u32() else { return nil }
             self = .call(unit: unit, request: req, colour: c, sentAt: at)
         case .followUp:
-            guard let unit = r.u32(), let req = r.u16(), let part = r.u8(), let cat = r.u8().flatMap(Category.init) else { return nil }
+            guard let unit = r.u32(), let req = r.u16(), let part = r.u8(), let cat = r.u8().flatMap(CallCategory.init) else { return nil }
             self = .followUp(unit: unit, request: req, part: part, category: cat)
         case .ack:
             guard let unit = r.u32(), let req = r.u16(), let who = r.u16(), let at = r.u32() else { return nil }

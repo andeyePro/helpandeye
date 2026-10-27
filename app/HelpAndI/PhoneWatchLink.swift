@@ -1,0 +1,56 @@
+import Combine
+import Foundation
+import HelpAndICore
+import WatchConnectivity
+
+/// Lets the watch's buttons send through this phone, and shows the watch what happened.
+@MainActor
+final class PhoneWatchLink: NSObject, ObservableObject {
+    private weak var model: AppModel?
+    private var bag: Set<AnyCancellable> = []
+
+    func attach(_ model: AppModel) {
+        guard self.model == nil, WCSession.isSupported() else { return }
+        self.model = model
+        WCSession.default.delegate = self
+        WCSession.default.activate()
+        model.objectWillChange.sink { [weak self] in
+            DispatchQueue.main.async { self?.pushStatus() }
+        }.store(in: &bag)
+    }
+
+    private func pushStatus() {
+        guard let model, WCSession.default.activationState == .activated, WCSession.default.isPaired else { return }
+        var context: [String: Any] = ["canCall": model.me?.canCall == true]
+        if let r = model.current {
+            context["colour"] = Int(r.colour.rawValue)
+            context["status"] = switch r.status {
+            case .sending: "Sending…"
+            case .waitingForResponder: "Sent. Waiting for a responder."
+            case let .seen(who): "\(model.name(ofMember: who)) has seen it."
+            case .notSent: "Not sent. Use your phone, or call 999."
+            }
+            context["failed"] = r.status == .notSent
+        }
+        try? WCSession.default.updateApplicationContext(context)
+    }
+}
+
+extension PhoneWatchLink: WCSessionDelegate {
+    nonisolated func session(_ s: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
+        Task { @MainActor in self.pushStatus() }
+    }
+    nonisolated func sessionDidBecomeInactive(_ s: WCSession) {}
+    nonisolated func sessionDidDeactivate(_ s: WCSession) { s.activate() }
+
+    nonisolated func session(_ s: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
+        let raw = message["press"] as? Int
+        Task { @MainActor in
+            guard let raw, let colour = Colour(rawValue: UInt8(raw)), self.model?.me?.canCall == true else {
+                replyHandler(["ok": false]); return
+            }
+            self.model?.press(colour)
+            replyHandler(["ok": true])
+        }
+    }
+}

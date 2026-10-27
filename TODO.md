@@ -9,3 +9,4 @@
 - [ ] **MeshCore data_type.** Help&I frames use `0xFF48` from MeshCore's testing range, which needs no registration. Register a permanent value in MeshCore's `docs/number_allocations.md` before release?
 - [ ] **Critical Alerts entitlement.** Apply once enrolment moves to andeye Ltd (see the app spec).
 - [ ] **Pro relay provider and price** (app spec open question).
+- [ ] **Simulator on the build Mac.** Xcode 27.1 on MBP08L reports "CoreSimulator is out of date", so the app builds but cannot run in the simulator. An admin needs to open Xcode once there (or run `sudo xcodebuild -runFirstLaunch`) to install its components. Until then nothing can be checked by eye, so screenshots and UI tests are blocked.

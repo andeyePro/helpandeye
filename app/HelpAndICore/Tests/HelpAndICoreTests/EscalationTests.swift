@@ -71,6 +71,15 @@ final class RotaTests: XCTestCase {
         XCTAssertEqual(rota.available(at: h(2.5)), [])
     }
 
+    func testDefaultAvailabilityCoversUnfilledTime() {
+        var rota = Rota(responders: [1, 2], defaultAvailable: true)
+        XCTAssertTrue(rota.gaps(from: h(0)).isEmpty)
+        rota.add(responder: 1, from: h(1), until: h(2), available: false)
+        XCTAssertTrue(rota.gaps(from: h(0)).isEmpty)
+        rota.add(responder: 2, from: h(1.5), until: h(3), available: false)
+        XCTAssertEqual(rota.gaps(from: h(0)), [DateInterval(start: h(1.5), end: h(2))])
+    }
+
     func testEmptyRotaIsOneGap() {
         XCTAssertEqual(Rota().gaps(from: t0, horizon: 3600), [DateInterval(start: t0, end: h(1))])
     }

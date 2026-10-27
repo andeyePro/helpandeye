@@ -1,0 +1,51 @@
+import HelpAndICore
+import SwiftUI
+
+/// The responder's list. A request leaves the top of the list only when a person acknowledges
+/// it; nothing here closes, expires or acknowledges on its own (decision 6).
+struct RespondView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if model.inbox.requests.isEmpty {
+                    Text("No calls for help.").foregroundStyle(.secondary)
+                }
+                ForEach(model.inbox.sorted) { r in RequestRow(request: r) }
+            }
+            .navigationTitle("Respond")
+        }
+    }
+}
+
+struct RequestRow: View {
+    @EnvironmentObject var model: AppModel
+    let request: IncomingRequest
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Circle().fill((request.colour ?? .red).color).frame(width: 18, height: 18)
+                Text(model.name(ofUnit: request.key.unit)).font(.title3.bold())
+                Spacer()
+                Text(request.firstHeardAt, style: .relative).font(.footnote).foregroundStyle(.secondary)
+            }
+            Text(request.colour?.label ?? "Call for help (details still arriving)")
+            ForEach(request.orderedCategories, id: \.self) { Text("• \($0.label)") }
+            Text("Heard by " + request.heardOn.map { $0 == .mesh ? "local radio" : ($0 == .internet ? "internet" : "text") }.sorted().joined(separator: " and "))
+                .font(.footnote).foregroundStyle(.secondary)
+            if request.isAcknowledged {
+                Text("Acknowledged by " + request.acknowledgedBy.map(model.name(ofMember:)).joined(separator: ", "))
+                    .font(.callout.bold()).foregroundStyle(.secondary)
+            }
+            if !request.acknowledgedBy.contains(model.saved?.me ?? 0) {
+                Button { model.acknowledge(request.key) } label: {
+                    Text("Acknowledge: I'm dealing with it").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(.vertical, 6)
+    }
+}

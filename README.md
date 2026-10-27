@@ -122,6 +122,20 @@ sold to others will need UKCA/RED conformity before release.
 - **Testing with real users**: running the steps in `tests/MANUAL-TESTS.md` on real boards and
   phones, and telling us what confused you.
 
+## App
+
+`app/` holds the iOS and watchOS app (SwiftUI) and `app/HelpAndICore`, a Swift package with all of
+its logic and tests. The Xcode project is generated from `app/project.yml` with
+[XcodeGen](https://github.com/yonaskolb/XcodeGen):
+
+```
+cd app && xcodegen generate && open HelpAndI.xcodeproj
+cd app/HelpAndICore && swift test
+```
+
+The app talks over Bluetooth to a Heltec board running MeshCore's standard companion firmware.
+`tests/MANUAL-TESTS.md` lists the checks that need real phones and boards.
+
 ## Website
 
 `site/` is plain HTML with no build step. Cloudflare serves it as a Worker with static assets,

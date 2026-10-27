@@ -69,6 +69,21 @@ final class GroupTests: XCTestCase {
         XCTAssertEqual(group.nextUnit, 70002)
     }
 
+    func testUpdateAfterRemovalReachesRemainingMembersOnly() throws {
+        let coord = DeviceIdentity(), stays = DeviceIdentity(), lost = DeviceIdentity()
+        var group = newGroup(coord)
+        group.members.append(Member(number: 2, name: "Stays", role: .responder, publicKey: stays.publicKey))
+        group.members.append(Member(number: 3, name: "Lost", role: .caller, publicKey: lost.publicKey, unit: 70001))
+        let before = group
+        group.remove(3)
+        let u = try Joining.update(group, for: group.member(2)!, coordinator: coord)
+        XCTAssertEqual(try Joining.openUpdate(u, current: before, me: stays).secrets, group.secrets)
+        XCTAssertThrowsError(try Joining.openUpdate(u, current: before, me: lost))
+        XCTAssertThrowsError(try Joining.openUpdate(u, current: group, me: stays), "never back to the same or older secrets")
+        let forged = try Joining.update(group, for: group.member(2)!, coordinator: DeviceIdentity())
+        XCTAssertThrowsError(try Joining.openUpdate(forged, current: before, me: stays), "only a coordinator can seal an update")
+    }
+
     func testBadCodesAreRejected() {
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "hello"))
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPANDI1:%%%"))

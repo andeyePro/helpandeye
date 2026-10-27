@@ -29,7 +29,7 @@ public struct OutgoingRequest: Equatable, Sendable {
     public let colour: Colour
     public let createdAt: Date
     public private(set) var routes: [Route: RouteState] = [:]
-    public private(set) var categories: [Category] = []
+    public private(set) var categories: [CallCategory] = []
     public private(set) var acknowledgedBy: [UInt16] = []
 
     public init(unit: UInt32, number: UInt16, colour: Colour, createdAt: Date) {
@@ -39,7 +39,7 @@ public struct OutgoingRequest: Equatable, Sendable {
     public mutating func update(_ route: Route, _ state: RouteState) { routes[route] = state }
 
     /// Returns the follow-up frame to send, numbered after any categories already added.
-    public mutating func add(_ category: Category) -> HelpFrame {
+    public mutating func add(_ category: CallCategory) -> HelpFrame {
         categories.append(category)
         return .followUp(unit: unit, request: number, part: UInt8(min(categories.count, 255)), category: category)
     }
@@ -72,12 +72,12 @@ public struct IncomingRequest: Equatable, Sendable, Identifiable {
     public let key: Key
     public internal(set) var colour: Colour?
     public internal(set) var firstHeardAt: Date
-    public internal(set) var categories: [UInt8: Category] = [:]
+    public internal(set) var categories: [UInt8: CallCategory] = [:]
     public internal(set) var heardOn: Set<Route> = []
     public internal(set) var acknowledgedBy: [UInt16] = []
 
     public var isAcknowledged: Bool { !acknowledgedBy.isEmpty }
-    public var orderedCategories: [Category] { categories.keys.sorted().compactMap { categories[$0] } }
+    public var orderedCategories: [CallCategory] { categories.keys.sorted().compactMap { categories[$0] } }
 }
 
 public enum InboxEvent: Equatable, Sendable {

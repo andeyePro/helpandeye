@@ -1,0 +1,60 @@
+name: HelpAndI
+options:
+  bundleIdPrefix: org.andeye
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+packages:
+  HelpAndICore:
+    path: HelpAndICore
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  HelpAndI:
+    type: application
+    platform: iOS
+    sources: [HelpAndI]
+    dependencies:
+      - package: HelpAndICore
+      - target: HelpAndIWatch
+    entitlements:
+      path: HelpAndI/HelpAndI.entitlements
+      properties:
+        com.apple.developer.usernotifications.time-sensitive: true
+    info:
+      path: HelpAndI/Info.plist
+      properties:
+        CFBundleDisplayName: "Help&I"
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [bluetooth-central, remote-notification]
+        NSBluetoothAlwaysUsageDescription: "Help&I uses Bluetooth to talk to your Help&I box, so a call for help can go over the local radio network."
+        NSCameraUsageDescription: "Help&I uses the camera to scan a group's joining code."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.andeye.helpandi
+        TARGETED_DEVICE_FAMILY: "1"
+  HelpAndIWatch:
+    type: application
+    platform: watchOS
+    sources: [HelpAndIWatch]
+    info:
+      path: HelpAndIWatch/Info.plist
+      properties:
+        CFBundleDisplayName: "Help&I"
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: org.andeye.helpandi
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.andeye.helpandi.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+schemes:
+  HelpAndI:
+    build:
+      targets:
+        HelpAndI: all

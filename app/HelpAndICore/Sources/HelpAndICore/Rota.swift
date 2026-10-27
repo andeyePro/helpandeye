@@ -12,8 +12,14 @@ public struct Rota: Equatable, Sendable {
     /// Later entries override earlier ones where they overlap, so "not available after all" can be
     /// sent as a short mesh message without resending the whole rota.
     public private(set) var entries: [Entry] = []
+    /// Everyone who can respond. A responder with no entry covering a moment counts as
+    /// `defaultAvailable` then, so a small group works before anyone has filled in a rota.
+    public var responders: [UInt16]
+    public var defaultAvailable: Bool
 
-    public init() {}
+    public init(responders: [UInt16] = [], defaultAvailable: Bool = false) {
+        self.responders = responders; self.defaultAvailable = defaultAvailable
+    }
 
     public mutating func add(responder: UInt16, from: Date, until: Date, available: Bool) {
         guard from < until else { return }
@@ -27,11 +33,11 @@ public struct Rota: Equatable, Sendable {
     }
 
     public func isAvailable(_ responder: UInt16, at t: Date) -> Bool {
-        entries.last { $0.responder == responder && $0.interval.start <= t && t < $0.interval.end }?.available ?? false
+        entries.last { $0.responder == responder && $0.interval.start <= t && t < $0.interval.end }?.available ?? defaultAvailable
     }
 
     public func available(at t: Date) -> [UInt16] {
-        Set(entries.map(\.responder)).filter { isAvailable($0, at: t) }.sorted()
+        Set(entries.map(\.responder) + responders).filter { isAvailable($0, at: t) }.sorted()
     }
 
     /// Stretches in the window when nobody is available.
