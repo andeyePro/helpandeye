@@ -19,6 +19,7 @@ lists what is still open. Items marked **Proposed** are not yet agreed.
 - **Peer-to-peer groups** are allowed: every member is both caller and responder, as on a street
   or a works team.
 - A group can have more than one coordinator, so that it does not depend on one person.
+- Groups are on a free or a Pro tier. See [Tiers and cost](#tiers-and-cost).
 
 ## Who is alerted
 
@@ -33,7 +34,7 @@ The app shares requests out fairly and prioritises the closest responder:
    first ones are not dropped. Once the list runs out, the whole group and the coordinator are
    alerted. A request never closes or times out on its own.
 
-**Proposed:** escalation after 2 minutes for red and 15 minutes for amber, adjustable per group.
+Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable per group.
 
 ## Messages
 
@@ -43,33 +44,40 @@ The app shares requests out fairly and prioritises the closest responder:
   the same request number. The responder app assembles them into one request.
 - Free text and details go only over the internet route, end-to-end encrypted. Over the mesh
   only the unit number, colour, category code and request number are sent.
-- **Proposed:** red and amber are sent over every route that is working, not just the first, and
-  the responder app removes duplicates by request and message number. This would change the
-  "first route that works" order in [decision 8](design-decisions.md#d8). Mesh sends stay within
-  the duty-cycle limit, so follow-ups go over the mesh only if no other route worked.
+- Red and amber are sent at once over every route that works without the caller's help, not
+  just the first, and the responder app removes duplicates by request and message number. This
+  replaces the "first route that works" order in [decision 8](design-decisions.md#d8). Mesh sends
+  stay within the duty-cycle limit, so follow-ups go over the mesh only if no other route worked.
 - A responder's acknowledgement goes back the same way. The caller sees "Seen by a responder"
   only after a human pressed acknowledge, and a cross if nothing could be sent at all.
 
 ## Routes
 
-- **Internet:** **Proposed** in [How the internet route works](#how-the-internet-route-works).
-- **SMS:** iOS does not let an app send an SMS on its own, so on iPhone the app opens a ready
-  written text and the caller taps send. This covers the case where mobile data is down but
-  texts get through. Android can send automatically.
+- **Internet:** see [How the internet route works](#how-the-internet-route-works).
+- **SMS:** iOS does not let an app send an SMS on its own, so on iPhone SMS is not part of the
+  first attempt. If every other route fails, the app offers a ready written text that the caller
+  taps to send. Android sends automatically, as part of the first attempt.
 - **Mesh:** the app sends through the paired Heltec board. A responder's phone paired with its
   own board receives the request over Bluetooth with no internet, and alerts them even when the
   app is in the background.
 
 ## How the internet route works
 
-**Proposed:** no single server that everything depends on.
-
-- Requests go end-to-end encrypted to at least two independent relays, run on different
-  providers. One can be a Cloudflare Worker, which andeye already uses.
+- Requests go end-to-end encrypted to a relay, which is a Cloudflare Worker. Pro groups also
+  use a second, independent relay on a different provider, so that no single server or provider
+  is needed.
 - Each relay wakes responders' phones through Apple's and Google's push services, which is the
   only reliable way to wake an iPhone app.
 - Responders' apps poll the relays when opened, in case a push was lost.
 - The relays see only encrypted messages and unit numbers.
+
+## Tiers and cost
+
+- **Free:** must cost andeye nothing per group. It uses one relay within Cloudflare's free
+  allowance, Apple's and Google's push services (free), and the mesh. If the free allowance runs
+  out, the app shows a cross for the internet route, never a silent failure.
+- **Pro:** a subscription. It adds the second relay and anything else that buys resilience. andeye
+  pays for it, and Pro fees must more than cover what it costs.
 
 ## Alerts on the responder's phone
 
@@ -87,7 +95,7 @@ The app shares requests out fairly and prioritises the closest responder:
 
 ## Open questions
 
-- Who runs the second relay, and who pays for the push services and relays.
+- Which provider runs the Pro second relay, and the Pro price.
 - How the coordinator learns about rota gaps when they have no internet.
 - How a unit's credentials and the group's encryption keys are created and shared at
   provisioning, and how a lost phone is removed.

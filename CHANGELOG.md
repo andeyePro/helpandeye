@@ -4,6 +4,10 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Every route at once; free and Pro tiers** - red and amber now go over every automatic route
+  at once instead of the first that works (decision 8, README). `docs/app-spec.md` confirms the
+  escalation times, leaves iPhone SMS out of the first attempt, and adds a free tier that costs
+  andeye nothing and a Pro tier whose fees cover its second relay.
 - [x] **Draft app specification** - `docs/app-spec.md` sets the first release's scope: iOS and
   watchOS, one app for callers and responders, coordinator-run groups with availability, fair
   sharing and closest-first alerting, peer-to-peer groups, and red or amber sent at once with

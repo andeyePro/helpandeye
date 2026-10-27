@@ -75,7 +75,7 @@ The box is a standard Heltec LoRa board with nothing added. It sends over the
 [MeshCore](https://github.com/meshcore-dev/MeshCore) LoRa mesh at 868 MHz, licence-exempt, with
 repeaters on mains power with battery and optional solar backup. It reaches the internet and the
 mobile networks only through the phone app, over Bluetooth, because the phone goes out with the user
-and the box stays at home. The first route that works is used:
+and the box stays at home. A call for help goes out at once over every route that works:
 
 1. Internet, through the phone
 2. The phone's own mobile network
