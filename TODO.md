@@ -15,5 +15,6 @@
 
 ## Open (work)
 
+- [ ] Set a random Bluetooth PIN on each box at setup, as the app spec says. The companion protocol has no documented command for it in the version read (MeshCore 1.12 docs); check the firmware source. Until then the default 123456 must be changed by hand (tests/MANUAL-TESTS.md, Before you start).
 - [ ] More than one coordinator per group (app spec). Needs a signed, versioned role-change message so other phones accept a second coordinator's membership changes, and the relay its member lists.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).

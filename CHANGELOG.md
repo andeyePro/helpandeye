@@ -4,6 +4,11 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **How to bring up the hardware** - `tests/MANUAL-TESTS.md` now opens with what to flash (MeshCore
+  Companion (BLE) firmware, from MeshCore's web flasher), radio settings, the default Bluetooth
+  PIN and why to change it, building and signing the app, how to record a run, and the order to run
+  the checks in. Firmware facts are from MeshCore's own README and FAQ. The app does not yet set a
+  random Bluetooth PIN as the spec says; that is now in TODO.md.
 - [x] **Check-ins reach responders with no internet** - a caller's check-in schedule went to
   responders over the internet only, so in a mesh-only group, the power-cut case Help&I exists for,
   responders never knew it and could not notice a missed check-in. It now also goes as a MeshCore

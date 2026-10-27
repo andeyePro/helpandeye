@@ -3,6 +3,22 @@
 Checks that need eyes, ears or hands. Run the relevant sections on real hardware before a pull
 request is merged, and record the commit you tested.
 
+## Before you start
+
+**Boxes.** Any Heltec WiFi LoRa 32 V3 or V4. Flash MeshCore's **Companion (BLE)** firmware, not the USB or Wi-Fi companion and not a repeater: plug the board into a computer, open the MeshCore web flasher (https://meshcore.io/flasher, linked from MeshCore's README) in Chrome or Edge, choose the board and Companion (BLE), and flash. Help&I needs no firmware of its own.
+
+**Radio settings.** Set every box to the same UK preset, inside 869.40–869.65 MHz (or 868.0–868.6 MHz). Help&I does not change radio settings, and refuses to send on a box outside those bands; the Box tab shows the frequency and band. Use the preset your local mesh uses, set with MeshCore's own app or the flasher's console.
+
+**Bluetooth PIN.** MeshCore's default pairing code is 123456 (MeshCore FAQ, 6.5). Change it on each box before real use, so a stranger's phone cannot pair. The app spec says Help&I will set a random PIN at setup; it does not yet (TODO.md).
+
+**The app.** On a Mac with Xcode: `cd app && xcodegen generate && open HelpAndI.xcodeproj`. Choose your own team under Signing for both targets (HelpAndI and HelpAndIWatch), change the bundle identifier prefix if `org.andeye.helpandi` is taken in your account, and run on each phone. Allow Bluetooth and notifications when asked. Time-sensitive alerts and push need the matching capabilities in your team.
+
+**Recording a run.** Note the commit (`git rev-parse --short HEAD`), the boards and firmware version, the phones and iOS versions, and which sections passed, failed or were skipped, in the pull request. A change made after your run voids it (AGENTS.md).
+
+**Order.** Run sections 1 and 2 first: every other section needs a group and paired boxes. Then 3, 4 and 12 (the core promise: a call, the acknowledgement, the cross), then the rest in any order.
+
+## Equipment
+
 You need, unless a section says otherwise: two iPhones with the Help&I app (phone A for a caller,
 phone B for a responder), two Heltec LoRa boards (v3 or v4) running MeshCore's standard companion
 firmware set to the same UK radio preset (869.618 MHz), and one paired Apple Watch for section 7.
