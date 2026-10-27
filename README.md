@@ -84,8 +84,9 @@ and the box stays at home. A call for help goes out at once over every route tha
 
 ## Privacy
 
-Messages carry a unit number, never a name, address or medical detail. Mesh traffic uses a
-private, encrypted channel. Each user signs a consent sheet that says what is sent and who can
+A call for help carries a unit number, never a name, address or medical detail. Mesh traffic
+uses a private, encrypted channel. Anything the caller types, and their position, goes only to
+each responder directly, encrypted. Each user signs a consent sheet that says what is sent and who can
 see it.
 
 ## Standards

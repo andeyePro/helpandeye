@@ -42,8 +42,11 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
   the colour and a message number.
 - Any follow-up (a category such as "fallen", or free text) goes as a separate message carrying
   the same request number. The responder app assembles them into one request.
-- Free text and details go only over the internet route, end-to-end encrypted. Over the mesh
-  only the unit number, colour, category code and request number are sent.
+- Over the internet route, follow-ups are end-to-end encrypted. Over the mesh, the call for help
+  and the group channel carry only the unit number, colour, category code and request number.
+  Short free text and the caller's position follow as encrypted direct messages to each
+  responder, after the call for help, and only when there is airtime to spare
+  ([decision 12](design-decisions.md#d12)).
 - Red and amber are sent at once over every route that works without the caller's help, not
   just the first, and the responder app removes duplicates by request and message number. This
   replaces the "first route that works" order in [decision 8](design-decisions.md#d8). Mesh sends
@@ -76,6 +79,8 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
 - **Free:** must cost andeye nothing per group. It uses one relay within Cloudflare's free
   allowance, Apple's and Google's push services (free), and the mesh. If the free allowance runs
   out, the app shows a cross for the internet route, never a silent failure.
+- The relay counts its use against the free allowance. Before it runs out, the coordinator gets
+  an alert they must acknowledge. If they do not, the group's responders are alerted too.
 - **Pro:** a subscription. It adds the second relay and anything else that buys resilience. andeye
   pays for it, and Pro fees must more than cover what it costs.
 
@@ -99,5 +104,5 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
 - How the coordinator learns about rota gaps when they have no internet.
 - How a unit's credentials and the group's encryption keys are created and shared at
   provisioning, and how a lost phone is removed.
-- Whether distance-based priority is wanted where callers move, such as walkers, which would need
-  live location over the internet route.
+- How distance-based priority works for callers who move, such as walkers, using the position
+  they send.

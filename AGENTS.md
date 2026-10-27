@@ -49,8 +49,10 @@ Every PR description must state:
   the internet.
 - **Supplement, never replace.** Copy, packaging and the unit itself must say that Help&I does not
   replace 999 or telecare. Do not remove or soften that wording.
-- **No personal data on air.** Messages carry a unit number only: never a name, address or
-  medical detail, even when the user typed it. Mesh traffic goes on a private channel.
+- **No stored personal data on air.** Red, amber, green and anything on the group channel carry
+  a unit number only: never a name, address or medical detail. The only personal content allowed
+  on air is short text the caller typed and their position, sent after the red or amber has gone,
+  as encrypted direct messages to each responder, and only when there is airtime to spare.
 - **Stay within licence-exempt limits.** 868 MHz use must stay within Ofcom IR 2030 power and
   duty-cycle limits. No change may raise transmit power or duty cycle beyond them.
 - **No shared secrets.** Never bake a password, key or token into firmware or an app build.

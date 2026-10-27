@@ -26,7 +26,9 @@ not replace them, and its copy must say so.
 
 ### Privacy
 
-No names, addresses or medical details travel over the air. Units are identified by number.
+Units are identified by number. Names, addresses and medical details are never sent over the
+air. The one exception is what the caller chooses to send: short text they typed and their
+position, sent as encrypted direct messages to each responder after the call for help itself.
 
 ### Radio
 

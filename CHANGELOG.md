@@ -4,6 +4,11 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Caller's text and position may go over the mesh** - decision 12, AGENTS, CONTRIBUTING,
+  README and the app spec now allow short typed text and the caller's position on air, as
+  encrypted direct messages to each responder after the call for help, when airtime allows. Calls
+  for help and the group channel still carry a unit number only. The spec also alerts the
+  coordinator, then the responders, before the free relay allowance runs out.
 - [x] **Every route at once; free and Pro tiers** - red and amber now go over every automatic route
   at once instead of the first that works (decision 8, README). `docs/app-spec.md` confirms the
   escalation times, leaves iPhone SMS out of the first attempt, and adds a free tier that costs
