@@ -1,0 +1,5 @@
+// Each developer's Apple team goes in Local.xcconfig next to this file, which git ignores:
+//   DEVELOPMENT_TEAM = <your team ID>
+// so regenerating the project with xcodegen keeps the team.
+CODE_SIGN_STYLE = Automatic
+#include? "Local.xcconfig"

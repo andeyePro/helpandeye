@@ -7,6 +7,9 @@ options:
 packages:
   helpandeyeCore:
     path: helpandeyeCore
+configFiles:
+  Debug: Signing.xcconfig
+  Release: Signing.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.0"
