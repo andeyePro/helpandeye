@@ -58,8 +58,8 @@ Availability (4) and notice acknowledgements (5) count only inside a signed fram
 member they are about.
 
 Frames marked "no" carry personal content and never go on the shared group channel (decision 12).
-They travel over the internet route, sealed with the group key, or else, for notes and positions,
-as MeshCore direct messages to each responder's box (`HI1:` and the frame in base64), which
+They travel over the internet route, sealed with the group key, and (notes, positions and
+check-ins) as MeshCore direct messages to each responder's box (`HI1:` and the frame in base64), which
 MeshCore encrypts to that box's own key. A direct message counts only if it came from the box of
 the member whose unit it names; box keys are signed by their member.
 

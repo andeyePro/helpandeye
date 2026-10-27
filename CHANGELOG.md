@@ -4,6 +4,12 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Check-ins reach responders with no internet** - a caller's check-in schedule went to
+  responders over the internet only, so in a mesh-only group, the power-cut case Help&I exists for,
+  responders never knew it and could not notice a missed check-in. It now also goes as a MeshCore
+  direct message to each responder's box, never on the group channel, is sent to any box the caller
+  hears for the first time, and is repeated once a day. A schedule counts only if it came from the
+  caller's own box. 115 core tests (two new end-to-end); manual check 21.
 - [x] **Fixes from the third code review** - a third independent review, which ran the tests, found
   1 blocker and 9 major issues. Fixed, each with a test: a removed phone could replay its old
   coordinator-signed "member added" during the changeover and get its acknowledgements counted

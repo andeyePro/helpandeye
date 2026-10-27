@@ -121,6 +121,7 @@ public final class HelpEngine: ObservableObject {
     private var lastTopUp: [IncomingRequest.Key: Date] = [:]
     private var ackAttempt: [IncomingRequest.Key: UUID] = [:]
     private var lastMembershipRepeat: Date?
+    private var lastCheckInShare: Date?
     private var tasks: [UUID: Task<Void, Never>] = [:]
 
     public init(identity: DeviceIdentity, mesh: MeshLink, relay: RelayLink, alerts: AlertScheduler, store: EngineStore,
@@ -328,9 +329,15 @@ public final class HelpEngine: ObservableObject {
 
     private func sendPersonal(_ frame: HelpFrame) async {
         if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return }
+        await sendDirect(frame, to: nil)
+    }
+
+    /// Personal content as MeshCore direct messages to each responder's box (or one member's),
+    /// which MeshCore encrypts to that box alone. Within the optional half of the airtime.
+    private func sendDirect(_ frame: HelpFrame, to only: UInt16?) async {
         guard mesh.isReady, let text = MeshText.encode(frame), let radio = mesh.radio, radio.band != nil, activity.airtime != nil else { return }
         let seconds = radio.airtime(bytes: meshPacketBytes(payload: text.utf8.count + 8))
-        for m in group?.members ?? [] where m.canRespond && m.number != saved?.me {
+        for m in group?.members ?? [] where m.canRespond && m.number != saved?.me && (only == nil || m.number == only) {
             guard let key = activity.boardKeys[m.number], activity.airtime!.allows(seconds, kind: .optional, at: now()) else { continue }
             let reservation = activity.airtime!.record(seconds, at: now())
             if case .refused = await mesh.sendText(text, to: key) { activity.airtime?.cancel(reservation) }
@@ -397,6 +404,11 @@ public final class HelpEngine: ObservableObject {
     public func tick() {
         pruneInbox()
         checkResends()
+        // Repeat this caller's check-ins once a day, for responders who missed them.
+        if saved?.checkInSince != nil, now().timeIntervalSince(lastCheckInShare ?? .distantPast) > 86_400 {
+            lastCheckInShare = now()
+            spawn { await self.shareCheckIns(to: nil) }
+        }
         checkMissedCheckIn()
         watchOthersCheckIns()
         topUpAlerts()
@@ -446,7 +458,7 @@ public final class HelpEngine: ObservableObject {
         guard let frame = MeshText.decode(text) else { return }
         let unit: UInt32
         switch frame {
-        case let .note(u, _, _, _), let .position(u, _, _, _, _): unit = u
+        case let .note(u, _, _, _), let .position(u, _, _, _, _), let .checkIns(u, _, _, _): unit = u
         default: return
         }
         guard let sender = group?.member(unit: unit), let key = activity.boardKeys[sender.number], key.prefix(6) == prefix else { return }
@@ -490,7 +502,11 @@ public final class HelpEngine: ObservableObject {
             guard member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey, group: groupID),
                   activity.boardKeys[member] != key else { return }
             activity.boardKeys[member] = key
-            spawn { await self.mesh.addContact(key, name: "Help&I \(member)") }
+            spawn {
+                await self.mesh.addContact(key, name: "Help&I \(member)")
+                // A box this phone has not heard before: tell it this caller's check-ins.
+                await self.shareCheckIns(to: member)
+            }
             return
         case let .checkIns(unit, _, _, _):
             guard unit != me?.unit, group?.member(unit: unit) != nil else { return }
@@ -677,12 +693,19 @@ public final class HelpEngine: ObservableObject {
         saved = s
         store.save(s)
         alerts.setCheckInReminders(schedule?.times ?? [])
-        // Responders' phones watch too. A routine is personal, so it goes over the internet only.
-        if let unit = me?.unit {
-            let frame = HelpFrame.checkIns(unit: unit, since: UInt32((s.checkInSince ?? now()).timeIntervalSince1970),
-                                           grace: UInt16((schedule?.grace ?? 1800) / 60), times: (schedule?.times ?? []).map { UInt16($0) })
-            spawn { _ = await self.relay.send(frame, wake: nil) }
-        }
+        lastCheckInShare = now()
+        spawn { await self.shareCheckIns(to: nil, evenIfOff: true) }
+    }
+
+    /// Tells responders this caller's check-ins, so their phones notice a missed one even if this
+    /// phone is flat. A routine is personal: over the internet sealed with the group key, and as
+    /// direct messages to each responder's box, never on the group channel.
+    private func shareCheckIns(to only: UInt16?, evenIfOff: Bool = false) async {
+        guard let unit = me?.unit, let s = saved, s.checkInSince != nil || evenIfOff else { return }
+        let frame = HelpFrame.checkIns(unit: unit, since: UInt32((s.checkInSince ?? now()).timeIntervalSince1970),
+                                       grace: UInt16((s.checkIn?.grace ?? 1800) / 60), times: (s.checkIn?.times ?? []).map { UInt16($0) })
+        if only == nil, relay.isConfigured { _ = await relay.send(frame, wake: nil) }
+        await sendDirect(frame, to: only)
     }
 
     /// A missed check-in raises an amber request, once per missed time, unless a red or amber call

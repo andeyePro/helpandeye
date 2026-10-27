@@ -161,3 +161,12 @@ Needs phone B paired with an Apple Watch with Help&I on it.
 2. On phone B's watch, open Help&I.
 
 Pass: the watch lists the caller's name and "Come now" with an Acknowledge button. Tapping it acknowledges exactly as on the phone: phone A shows "<name> has seen your call", and the entry leaves the watch. With phone B out of the watch's range, tapping it shows "Not acknowledged" and nothing is sent.
+
+## 21. A missed check-in noticed with no internet at all
+
+Like section 17, but with the internet off on every phone, so the mesh is the only route.
+
+1. On phone A, turn on a check-in three minutes from now and tap Save. Wait a minute, then switch phone A off.
+2. Wait 40 minutes.
+
+Pass: phone B raises "<name> missed a check-in" about 35 minutes after the check-in time. A third board logging the group channel never shows the schedule: it went to phone B's box as a direct message.

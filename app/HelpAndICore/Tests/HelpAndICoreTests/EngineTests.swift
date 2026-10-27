@@ -410,6 +410,24 @@ import XCTest
         XCTAssertTrue(caller.engine.activity.outgoing.contains { $0.number == red.number }, "the red call is still being sent")
     }
 
+    func testAMeshOnlyResponderNoticesAMissedCheckInWithTheCallersPhoneOff() async {
+        let hour = Calendar(identifier: .gregorian).component(.hour, from: clock.now)
+        caller.engine.setCheckIn(CheckInSchedule(times: [(hour * 60 + 120) % 1440]))
+        await air.run()
+        XCTAssertNotNil(responder.engine.activity.checkInWatch.callers[caller.engine.me!.unit!], "the schedule reached the responder over the mesh")
+        XCTAssertFalse(air.groupSends.contains { if case .checkIns = $0 { return true }; return false }, "never on the group channel")
+        caller.mesh.isReady = false  // the caller's phone goes flat
+        await advance(2 * 3600 + 36 * 60)
+        XCTAssertTrue(responder.engine.activity.inbox.requests.values.contains { $0.key.request == 0 && $0.orderedCategories.contains(.missedCheckIn) })
+    }
+
+    func testACheckInScheduleFromTheWrongBoxIsIgnored() async {
+        let unit = caller.engine.me!.unit!
+        let forged = HelpFrame.checkIns(unit: unit, since: 0, grace: 30, times: [0])
+        responder.engine.receiveText(from: Data(repeating: 7, count: 6), MeshText.encode(forged)!)
+        XCTAssertNil(responder.engine.activity.checkInWatch.callers[unit])
+    }
+
     func testAMissedCheckInIsRaisedEndToEnd() async {
         caller.engine.setCheckIn(CheckInSchedule(times: [Calendar(identifier: .gregorian).component(.hour, from: clock.now) * 60 + 60]))
         await advance(3600 + 31 * 60)
