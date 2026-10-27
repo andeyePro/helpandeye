@@ -14,7 +14,7 @@ decision silently.
 | 7 | The user sees a cross on delivery failure and no "delivered" tick | A tick could be misread as help on the way |
 | 8 | The box is a standard Heltec LoRa board (v4 or similar) with nothing added: it sends over the MeshCore LoRa mesh, and over the internet and mobile networks only through the user's phone app. Route order: internet, the phone's own mobile network, other mobile networks (a multi-network SIM in the phone), then the mesh | Better value in the phone, which goes out with the user, than in a box that stays at home or a pendant that gets heavier and needs charging. Mesh survives multi-day outages. A SIM in the box may come later (Martin, 2026-10-26) |
 | 9 | Phone link: Bluetooth, with Wi-Fi as backup when available | Bluetooth links drop; the buttons never depend on either |
-| 10 | MeshCore over Meshtastic | Better routing with fixed repeaters; matches the Irvine Valley backbone. Firmware is open source; the official MeshCore phone apps are not, and are too complex for this user group, so Help&I has its own app |
+| 10 | MeshCore over Meshtastic | Better routing with fixed repeaters. Firmware is open source; the official MeshCore phone apps are not, and are too complex for this user group, so Help&I has its own app |
 | 11 | No PMR446 / dPMR446 for the home unit | PMR446 is licence-exempt only on a mobile basis; a fixed home unit is not |
 | 12 | Private, encrypted mesh channel; unit numbers, never names or medical detail, on air | Health data is special-category data under UK GDPR. Encryption is permitted for licence-exempt 868 MHz use (the amateur-licence ban does not apply) |
 | 13 | Device and app state plainly that Help&I supplements 999 and telecare | Duty of care and liability |
