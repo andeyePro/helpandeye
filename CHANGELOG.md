@@ -4,6 +4,12 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Large text and VoiceOver** - a pass over every screen's words found them plain and calm, with
+  no "delivered" wording and the 999 notice in place. Fixed: the Come now button and the watch's
+  999 line used fixed sizes that ignored the reader's text size; at large sizes the amber and green
+  buttons now stack instead of squeezing; each call button says what it does to VoiceOver; and the
+  caller's status is spoken aloud when it changes, including when a responder has seen the call.
+  Manual check 22.
 - [x] **A random Bluetooth code on every box** - MeshCore's default pairing code, 123456, is the same on
   every box. The app now reads the box's code and, if it is the default, sets a random six-digit
   one with the firmware's set-PIN command (37, found in MeshCore's source) and shows it once to

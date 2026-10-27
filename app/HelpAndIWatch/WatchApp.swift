@@ -35,13 +35,14 @@ struct WatchCallView: View {
                 }
                 Button { link.press(1) } label: { Text("Come now").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 70) }
                     .tint(.red)
+                    .accessibilityHint("Asks your responders to come now")
                 HStack {
                     Button { link.press(2) } label: { Text("When convenient").font(.caption2.bold()).frame(maxWidth: .infinity, minHeight: 44) }
                         .tint(.orange)
                     Button { link.press(3) } label: { Text("I'm OK").font(.caption2.bold()).frame(maxWidth: .infinity, minHeight: 44) }
                         .tint(.green)
                 }
-                Text("Not a replacement for 999.").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Not a replacement for 999.").font(.footnote).foregroundStyle(.secondary)
             }
             .buttonStyle(.borderedProminent)
         }

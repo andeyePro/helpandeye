@@ -14,19 +14,15 @@ struct CallView: View {
             if let r = model.current { StatusCard(request: r, composingSMS: $composingSMS) }
             Spacer(minLength: 0)
             Button { model.press(.red) } label: {
-                Text("Come now").font(.system(size: 40, weight: .bold)).frame(maxWidth: .infinity, minHeight: 220)
+                // Scales with the reader's text size, shrinking only if it would not fit.
+                Text("Come now").font(.largeTitle.weight(.heavy)).minimumScaleFactor(0.5).frame(maxWidth: .infinity, minHeight: 220)
             }
             .buttonStyle(CallButtonStyle(colour: .red))
-            .accessibilityHint("Calls your responders to come now")
-            HStack(spacing: 16) {
-                Button { model.press(.amber) } label: {
-                    Text("Come when convenient").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
-                }
-                .buttonStyle(CallButtonStyle(colour: .amber))
-                Button { model.press(.green) } label: {
-                    Text("I'm OK now").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
-                }
-                .buttonStyle(CallButtonStyle(colour: .green))
+            .accessibilityHint("Asks your responders to come now")
+            // Side by side when they fit; one above the other at large text sizes.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 16) { amber; green }
+                VStack(spacing: 16) { amber; green }
             }
             if let r = model.current, r.colour != .green, r.status != .notSent {
                 FollowUps(request: r)
@@ -40,6 +36,24 @@ struct CallView: View {
                             body: RoutePlan.smsBody(for: r))
             }
         }
+    }
+}
+
+extension CallView {
+    private var amber: some View {
+        Button { model.press(.amber) } label: {
+            Text("Come when convenient").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
+        }
+        .buttonStyle(CallButtonStyle(colour: .amber))
+        .accessibilityHint("Asks your responders to come when they can")
+    }
+
+    private var green: some View {
+        Button { model.press(.green) } label: {
+            Text("I'm OK now").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
+        }
+        .buttonStyle(CallButtonStyle(colour: .green))
+        .accessibilityHint("Tells your responders you are all right")
     }
 }
 
@@ -85,6 +99,8 @@ struct StatusCard: View {
         .padding()
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .combine)
+        // Someone who cannot see the screen hears each change, such as a responder seeing the call.
+        .onChange(of: headline) { _, new in UIAccessibility.post(notification: .announcement, argument: new) }
     }
 
     private var headline: String {

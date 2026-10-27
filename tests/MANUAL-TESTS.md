@@ -186,3 +186,10 @@ Like section 17, but with the internet off on every phone, so the mesh is the on
 2. Wait 40 minutes.
 
 Pass: phone B raises "<name> missed a check-in" about 35 minutes after the check-in time. A third board logging the group channel never shows the schedule: it went to phone B's box as a direct message.
+
+## 22. Large text and VoiceOver
+
+1. On phone A, set Settings, Accessibility, Display & Text Size, Larger Text to the largest size, and open Help&I.
+2. Turn on VoiceOver and move through the Help tab, then press Come now.
+
+Pass: every word on the Help tab can be read without cutting off; Come when convenient and I'm OK now sit one above the other rather than squeezed side by side. VoiceOver reads each button's name and what it does. After the press it says the status aloud ("Sending…", then "Sent. Waiting for a responder to see it."), and again when a responder acknowledges. Nothing on any screen depends on colour alone: every coloured button and dot also has words.
