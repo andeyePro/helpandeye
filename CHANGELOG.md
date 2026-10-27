@@ -4,6 +4,10 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Fuller Discussion answers** - Claude now answers with its own expertise and web search, not
+  only the project documents, on Opus with up to about 400 words. It still marks what is decided,
+  what is open and what is its own suggestion. Tools are limited to WebSearch and WebFetch, so the
+  thread still cannot reach a shell or files on the runner.
 - [x] **Discussion replies come from github-actions[bot]** - Anthropic's app-token exchange answers
   `Invalid OIDC token` to any workflow but its own action, which does not handle Discussions, so
   replies cannot appear as the Claude app. They are now posted with the workflow's own token and
