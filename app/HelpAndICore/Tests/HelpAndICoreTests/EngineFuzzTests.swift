@@ -29,6 +29,7 @@ import XCTest
         /// Who invited each phone that joined during the run.
         var invitedBy: [ObjectIdentifier: UInt16] = [:]
         var lossRate = 0.0
+        var lossRng = SplitMix64(state: 1)
         var log: [String] = []
     }
 
@@ -61,7 +62,9 @@ import XCTest
         await w.air.run()
         for p in w.phones { await p.engine.boxReady() }
         await w.air.run()
-        w.air.keep = { [unowned w] _, _, _ in w.lossRate == 0 || Double.random(in: 0..<1) >= w.lossRate }
+        // Packet loss draws from its own seeded generator, so every run repeats exactly.
+        w.lossRng = SplitMix64(state: seed &* 0x2545_F491_4F6C_DD1D)
+        w.air.keep = { [unowned w] _, _, _ in w.lossRate == 0 || Double.random(in: 0..<1, using: &w.lossRng) >= w.lossRate }
 
         for step in 0..<steps {
             let action = Int.random(in: 0..<100, using: &rng)
@@ -105,7 +108,9 @@ import XCTest
                 }
             case 50..<53:
                 let c = w.coordinator.engine!
-                if live.count > 3, let victim = live.filter({ $0 !== w.coordinator }).randomElement(using: &rng), let num = victim.engine.saved?.me {
+                // The first coordinator can only remove someone it knows is in the group.
+                if live.count > 3, let victim = live.filter({ $0 !== w.coordinator && c.group?.member($0.engine.saved!.me) != nil }).randomElement(using: &rng),
+                   let num = victim.engine.saved?.me {
                     c.removeMember(num)
                     w.gone.insert(ObjectIdentifier(victim))
                     w.removedNumbers.insert(num)
@@ -188,37 +193,23 @@ import XCTest
             }
         }
         await settleDays(3)
-        // Everyone scans the first coordinator's latest key update, as they would be asked to.
-        if let g = w.coordinator.engine.group, g.secrets.generation > 1 {
-            for m in w.phones where m !== w.coordinator && !w.gone.contains(ObjectIdentifier(m)) {
-                guard let mine = m.engine.group, mine.secrets.generation < g.secrets.generation, let member = g.member(m.engine.saved!.me),
-                      let u = try? Joining.update(g, for: member, coordinator: w.coordinator.identity),
-                      let updated = try? Joining.openUpdate(u, current: mine, me: m.identity) else { continue }
-                m.engine.applyKeyUpdate(updated)
-            }
-        }
-        await settleDays(2)
-        try check(w, seed: seed, step: steps)
-        // Liveness once links have healed: every open call from someone still here is with every
-        // responder still here, still alerting, and still being sent.
-        let here = w.phones.filter { !w.gone.contains(ObjectIdentifier($0)) && $0.engine.me != nil }
-        for caller in here {
-            for r in caller.engine.activity.outgoing where r.unit != 0 && r.colour != .green && r.acknowledgedBy.isEmpty {
-                XCTAssertNotNil(r.nextResend, "seed \(seed): an open call stopped being sent")
-                guard caller.engine.group?.member(unit: r.unit) != nil else { continue }
-                for responder in here where responder !== caller && responder.engine.me?.canRespond == true
-                    && responder.engine.group?.member(unit: r.unit) != nil {
-                    let k = IncomingRequest.Key(unit: r.unit, request: r.number)
-                    guard let heard = responder.engine.activity.inbox.requests[k] else {
-                        XCTFail("seed \(seed): member \(responder.engine.saved!.me) never heard open call \(k)\n" + w.log.suffix(30).joined(separator: "\n")); continue
-                    }
-                    if !heard.isAcknowledged {
-                        XCTAssertTrue(responder.alerts.scheduled[k]?.times.contains { $0 >= w.clock.now } ?? false,
-                                      "seed \(seed): open call \(k) has no future alerts on member \(responder.engine.saved!.me)")
-                    }
+        // Everyone the first coordinator knows scans its latest key update, as its "New keys to hand
+        // out" list asks; people it hears of meanwhile are handed theirs in the next round.
+        for _ in 0..<4 {
+            var handed = 0
+            if let g = w.coordinator.engine.group, g.secrets.generation > 1 {
+                for m in w.phones where m !== w.coordinator && !w.gone.contains(ObjectIdentifier(m)) {
+                    guard let mine = m.engine.group, mine.secrets.generation < g.secrets.generation, let member = g.member(m.engine.saved!.me),
+                          let u = try? Joining.update(g, for: member, coordinator: w.coordinator.identity),
+                          let updated = try? Joining.openUpdate(u, current: mine, me: m.identity) else { continue }
+                    m.engine.applyKeyUpdate(updated)
+                    handed += 1
                 }
             }
+            await settleDays(2)
+            if handed == 0 { break }
         }
+        try check(w, seed: seed, step: steps)
         // Someone invited by a coordinator who was then removed may never have been accepted by the
         // rest of the group. That is safe (their acks count nowhere else), but they must be invited
         // again, so they are left out of the agreement check, and must not be in the first
@@ -227,11 +218,62 @@ import XCTest
             guard let inviter = w.invitedBy[ObjectIdentifier(p)] else { return false }
             return w.removedNumbers.contains(inviter) && w.coordinator.engine.group?.member(p.engine.saved!.me) == nil
         }
+        // Liveness once links have healed: every open call from someone still here is with every
+        // responder still here, still alerting, and still being sent.
+        let here = w.phones.filter { !w.gone.contains(ObjectIdentifier($0)) && $0.engine.me != nil && !orphan($0) }
+        for caller in here {
+            for r in caller.engine.activity.outgoing where r.unit != 0 && r.colour != .green && r.acknowledgedBy.isEmpty {
+                XCTAssertNotNil(r.nextResend, "seed \(seed): an open call stopped being sent")
+                guard caller.engine.group?.member(unit: r.unit) != nil else { continue }
+                for responder in here where responder !== caller && responder.engine.me?.canRespond == true
+                    && responder.engine.group?.member(unit: r.unit) != nil {
+                    let k = IncomingRequest.Key(unit: r.unit, request: r.number)
+                    guard let heard = responder.engine.activity.inbox.requests[k] else {
+                        let onRelay = responder.relay.key.map(w.air.relay.isMember) ?? false
+                        let callerOnRelay = caller.relay.key.map(w.air.relay.isMember) ?? false
+                        let sameChannel = responder.engine.group?.secrets.channelSecret == caller.engine.group?.secrets.channelSecret
+                        XCTFail("seed \(seed): member \(responder.engine.saved!.me) never heard open call \(k); responder on relay \(onRelay), "
+                                + "caller on relay \(callerOnRelay), same channel \(sameChannel), caller sees responder \(caller.engine.group?.member(responder.engine.saved!.me) != nil), "
+                                + "relay members \(w.air.relay.members.count), log tail:\n" + w.air.relayLog.suffix(6).map { "\($0.1.generation) \($0.2) n=\($0.1.members.count)" }.joined(separator: " | ")); continue
+                    }
+                    if !heard.isAcknowledged {
+                        XCTAssertTrue(responder.alerts.scheduled[k]?.times.contains { $0 >= w.clock.now } ?? false,
+                                      "seed \(seed): open call \(k) has no future alerts on member \(responder.engine.saved!.me)")
+                    }
+                }
+            }
+        }
         let stayed = w.phones.filter { !w.gone.contains(ObjectIdentifier($0)) && $0.engine.me != nil && !orphan($0) }
         let versions = Set(stayed.map { $0.engine.group!.membershipVersion })
         let orphans = Set(w.phones.filter(orphan).map { $0.engine.saved!.me })
         let rosters = Set(stayed.map { Set($0.engine.group!.members.map(\.number)).subtracting(orphans) })
         XCTAssertEqual(versions.count, 1, "seed \(seed): phones disagree on the membership version: \(versions)\n" + w.log.suffix(30).joined(separator: "\n"))
+        // For relay/test/model.test.js: the member-list publishes this run made, with what the model
+        // said, to replay through the real relay.
+        if let path = ProcessInfo.processInfo.environment["HELPANDI_RELAY_LOG"], seed <= 4 {
+            let steps = w.air.relayLog.map { e -> [String: Any] in
+                ["signer": e.0, "status": e.2,
+                 "list": ["generation": Int(e.1.generation), "members": e.1.members.map { ["key": $0.key, "role": $0.role] },
+                          "removed": e.1.removed, "primary": e.1.primary as Any]]
+            }
+            let final = w.air.relay.members.map { ["key": $0.key, "role": $0.role] }
+            let data = try JSONSerialization.data(withJSONObject: ["seed": Int(seed), "steps": steps, "final": final], options: .sortedKeys)
+            if !FileManager.default.fileExists(atPath: path) { FileManager.default.createFile(atPath: path, contents: nil) }
+            let h = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+            h.seekToEndOfFile(); h.write(data + Data("\n".utf8)); try h.close()
+        }
+        // The relay lists everyone the phones agree on, so all of them can use the internet route,
+        // and nobody removed.
+        for p in stayed {
+            XCTAssertTrue(p.relay.key.map(w.air.relay.isMember) ?? false, "seed \(seed): member \(p.engine.saved!.me) is not on the relay")
+        }
+        for p in w.phones where w.gone.contains(ObjectIdentifier(p)) {
+            let primaryKey = w.coordinator.relay.key ?? ""
+            let mine = w.air.relayLog.filter { $0.0 == primaryKey }.suffix(3).map { "g\($0.1.generation) s\($0.2) removed \($0.1.removed.count)" }
+            XCTAssertFalse(p.relay.key.map(w.air.relay.isMember) ?? false,
+                           "seed \(seed): a removed phone is still on the relay; owner is first coordinator \(w.air.relay.owner == primaryKey); "
+                           + "its key in the owner's removed keys \(w.coordinator.engine.group!.removedKeys.contains(p.identity.signingPublicKey)); first coordinator's publishes \(mine)")
+        }
         let channels = Set(stayed.map { $0.engine.group!.secrets.channelSecret })
         XCTAssertEqual(channels.count, 1, "seed \(seed): phones are on different keys")
         XCTAssertEqual(rosters.count, 1, "seed \(seed): phones disagree on who is in the group: \(rosters)\n" + w.log.suffix(30).joined(separator: "\n"))

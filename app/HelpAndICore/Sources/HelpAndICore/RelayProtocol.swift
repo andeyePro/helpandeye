@@ -40,11 +40,16 @@ public enum RelayProtocol {
         public struct Entry: Codable, Equatable, Sendable { public let key: String; public let role: String }
         public let generation: UInt32
         public let members: [Entry]
+        /// Keys of people removed from the group. Only these ever come off the relay's list.
+        public let removed: [String]
+        /// The group's first coordinator, who owns the group on the relay whoever registers it.
+        public let primary: String?
     }
 
     public static func memberList(_ group: GroupState) -> MemberList {
         MemberList(generation: group.membershipVersion, members: group.members.compactMap { m in
             m.signingKey.map { .init(key: $0.base64EncodedString(), role: m.role == .coordinator ? "coordinator" : "member") }
-        })
+        }, removed: group.removedKeys.map { $0.base64EncodedString() }.sorted(),
+        primary: group.primaryCoordinator.flatMap { group.member($0)?.signingKey }?.base64EncodedString())
     }
 }

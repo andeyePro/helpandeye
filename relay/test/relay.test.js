@@ -52,22 +52,10 @@ test("only members can post and read, and a removed phone is refused at once", a
   await rejects(relay.since(stranger.key, 0), 403);
   assert.deepEqual((await relay.since(member.key, 1)).messages.map((m) => m.sealed), ["AwQF"]);
   assert.equal((await relay.since(member.key, 1)).latest, 2);
-  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }] });
+  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }], removed: [member.key] });
   await rejects(relay.since(member.key, 0), 403);
 });
 
-test("only a coordinator changes the member list, never backwards, and cannot remove themselves", async () => {
-  const relay = new GroupRelay(new MapStorage());
-  const coord = await phone(), member = await phone();
-  const list = { generation: 2, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }] };
-  await relay.setMembers(coord.key, list);
-  await rejects(relay.setMembers(member.key, { ...list, generation: 3 }), 403);
-  await rejects(relay.setMembers(coord.key, { ...list, generation: 1 }), 409);
-  await relay.setMembers(coord.key, { ...list, members: [...list.members].reverse() });
-  await rejects(relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }] }), 409);
-  await rejects(relay.setMembers(coord.key, { generation: 3, members: [{ key: member.key, role: "coordinator" }] }), 409);
-  await rejects(relay.setMembers(coord.key, { generation: 3, members: [{ key: 1, role: "x" }] }), 400);
-});
 
 test("messages are kept for a week at most and must be base64 of a sane size", async () => {
   let now = 0;
@@ -117,7 +105,7 @@ test("push tokens belong to current members and the sender is not woken", async 
   await rejects(relay.setPushToken(stranger.key, { token: "c".repeat(64) }), 403);
   await rejects(relay.setPushToken(member.key, { token: "not hex" }), 400);
   assert.deepEqual(await relay.pushTargets(coord.key), [{ token: "b".repeat(64), sandbox: false }]);
-  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }] });
+  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }], removed: [member.key] });
   assert.deepEqual(await relay.pushTargets(coord.key), []);
   assert.deepEqual(await relay.pushTargets(member.key), [{ token: "a".repeat(64), sandbox: true }]);
 });
@@ -149,31 +137,38 @@ test("posts and pushes are limited per phone per minute, and old push tokens are
   now = 60_000;
   assert.equal(await relay.limit(member.key, true), true, "a new minute");
   await relay.setPushToken(member.key, { token: "b".repeat(64) });
-  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }] });
+  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }], removed: [member.key] });
   assert.equal(storage.m.has("p:" + member.key), false);
 });
 
-test("a merged list at the same version is accepted if it keeps everyone", async () => {
-  const relay = new GroupRelay(new MapStorage());
-  const coord = await phone(), a = await phone(), b = await phone();
-  const base = [{ key: coord.key, role: "coordinator" }];
-  await relay.setMembers(coord.key, { generation: 3, members: [...base, { key: a.key, role: "member" }] });
-  await relay.setMembers(coord.key, { generation: 3, members: [...base, { key: a.key, role: "member" }, { key: b.key, role: "member" }] });
-  assert.equal((await relay.members()).members.length, 3);
-  await rejects(relay.setMembers(coord.key, { generation: 3, members: [...base, { key: b.key, role: "member" }] }), 409);
-});
 
-test("only the first coordinator takes people off, and nobody taken off comes back", async () => {
+
+test("lists add people; only the owner's named removals take anyone off, for good", async () => {
   const relay = new GroupRelay(new MapStorage());
-  const owner = await phone(), second = await phone(), x = await phone(), y = await phone();
+  const owner = await phone(), second = await phone(), x = await phone(), y = await phone(), stranger = await phone();
   const c = (k) => ({ key: k.key, role: "coordinator" }), m = (k) => ({ key: k.key, role: "member" });
+  const keys = async () => (await relay.members()).members.map((e) => e.key).sort();
   await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second), m(x)] });
-  await rejects(relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second)] }), 403);
-  await relay.setMembers(owner.key, { generation: 2, members: [c(owner), c(second)] });
-  // The second coordinator, out of touch, adds y to a list that still has x.
-  await rejects(relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second), m(x), m(y)] }), 409);
-  await relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second), m(y)] });
-  await rejects(relay.setMembers(second.key, { generation: 3, members: [c(second), m(y)] }), 403);
-  await rejects(relay.setMembers(owner.key, { generation: 3, members: [c(owner), c(owner)] }), 400);
+  // The second coordinator adds y; the owner, not yet told, sends a list without y: y stays.
+  await relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second), m(x), m(y)] });
+  await relay.setMembers(owner.key, { generation: 2, members: [c(owner), c(second), m(x)] });
+  assert.deepEqual(await keys(), [owner.key, second.key, x.key, y.key].sort());
+  // Only the owner's named removal takes x off, and x can never come back.
+  await relay.setMembers(second.key, { generation: 3, members: [c(owner), c(second), m(y)], removed: [x.key] });
+  assert.equal((await keys()).includes(x.key), true, "a removal named by someone else is ignored");
+  await relay.setMembers(owner.key, { generation: 3, members: [c(owner), c(second), m(y)], removed: [x.key] });
+  await relay.setMembers(second.key, { generation: 4, members: [c(owner), c(second), m(x), m(y)] });
+  assert.equal((await keys()).includes(x.key), false);
   await rejects(relay.since(x.key, 0), 403);
+  // A second coordinator registering first does not become the owner: the list names the first.
+  const fresh = new GroupRelay(new MapStorage());
+  await fresh.setMembers(second.key, { generation: 1, members: [c(owner), c(second), m(x)], primary: owner.key });
+  await fresh.setMembers(owner.key, { generation: 2, members: [c(owner), c(second)], removed: [x.key] });
+  assert.equal((await fresh.members()).members.some((e) => e.key === x.key), false);
+  // Only the owner sets roles; nobody else can make someone a coordinator.
+  await relay.setMembers(second.key, { generation: 5, members: [c(owner), c(second), c(y)] });
+  assert.equal((await relay.members()).members.find((e) => e.key === y.key).role, "member");
+  await rejects(relay.setMembers(stranger.key, { generation: 9, members: [c(stranger)] }), 403);
+  await rejects(relay.setMembers(owner.key, { generation: 6, members: [c(owner)], removed: [owner.key] }), 409);
+  await rejects(relay.setMembers(owner.key, { generation: 6, members: [c(owner), c(owner)] }), 400);
 });

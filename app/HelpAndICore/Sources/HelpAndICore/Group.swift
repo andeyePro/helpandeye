@@ -75,6 +75,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// Member numbers are never reused, and a removed one can never be added back, so an old
     /// signed "member added" replayed by a removed phone cannot let it back in.
     public var removedMembers: Set<UInt16> = []
+    /// Removed members' signing keys, so the relay can be told exactly who is out.
+    public var removedKeys: Set<Data> = []
     public var highestMember: UInt16 = 0
     /// The membership version of each member's last role change, so an old one replayed is ignored.
     public var roleVersions: [UInt16: UInt32] = [:]
@@ -103,7 +105,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, highestMember, roleVersions
+        case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, highestMember, roleVersions
         case policy, relayURL, membershipVersion, roleBlocksSeen
     }
 
@@ -118,6 +120,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         previousUntil = try c.decodeIfPresent(Date.self, forKey: .previousUntil)
         removedUnits = try c.decodeIfPresent(Set<UInt32>.self, forKey: .removedUnits) ?? []
         removedMembers = try c.decodeIfPresent(Set<UInt16>.self, forKey: .removedMembers) ?? []
+        removedKeys = try c.decodeIfPresent(Set<Data>.self, forKey: .removedKeys) ?? []
         highestMember = try c.decodeIfPresent(UInt16.self, forKey: .highestMember) ?? 0
         roleVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .roleVersions) ?? [:]
         policy = try c.decodeIfPresent(StoredPolicy.self, forKey: .policy) ?? .init()
@@ -189,6 +192,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         members.removeAll { $0.number == number }
         membershipVersion += 1
         removedMembers.insert(number)
+        if let k = m.signingKey { removedKeys.insert(k) }
         if let u = m.unit { removedUnits.insert(u) }
         previousSecrets = secrets
         previousUntil = now.addingTimeInterval(Self.changeoverPeriod)
@@ -234,6 +238,7 @@ public struct GroupState: Codable, Equatable, Sendable {
             membershipVersion = max(membershipVersion, version)
             guard let m = member(number) else { return }
             members.removeAll { $0.number == number }
+            if let k = m.signingKey { removedKeys.insert(k) }
             if let u = m.unit { removedUnits.insert(u) }
         case let .memberRole(number, role, block, version):
             guard let i = members.firstIndex(where: { $0.number == number }), version > (roleVersions[number] ?? 0) else { return }

@@ -38,7 +38,8 @@ public enum RelayWake: String, Sendable { case call, quiet }
     var isConfigured: Bool { get }
     var lastProblem: String? { get }
     func configure(group: GroupState?, identity: DeviceIdentity)
-    func publishMembers() async
+    /// Returns whether the relay took the member list.
+    func publishMembers() async -> Bool
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String?
 }
 
@@ -127,6 +128,9 @@ public final class HelpEngine: ObservableObject {
     private var ackAttempt: [IncomingRequest.Key: UUID] = [:]
     private var lastMembershipRepeat: Date?
     private var answeredBoxes: Set<UInt16> = []
+    /// When this coordinator's phone last got the relay to take the member list; nil until it has.
+    private var membersPublished: Date?
+    private var lastPublishTry: Date?
     /// An answer is a broadcast every box hears, so one a minute covers a newcomer hearing many.
     private var lastBoxAnswer: Date?
     private var tasks: [UUID: Task<Void, Never>] = [:]
@@ -251,7 +255,8 @@ public final class HelpEngine: ObservableObject {
         if mesh.secrets != listening { mesh.secrets = listening }
         if activity.airtime == nil { bandChanged(mesh.radio?.band) }
         relay.configure(group: group, identity: identity)
-        if me?.role == .coordinator, relay.isConfigured { spawn { await self.relay.publishMembers() } }
+        membersPublished = nil
+        publishMembersIfDue()
         checkGaps()
     }
 
@@ -439,6 +444,7 @@ public final class HelpEngine: ObservableObject {
     /// Runs every 15 seconds while the app runs, and whenever the box or relay wakes it.
     public func tick() {
         pruneInbox()
+        publishMembersIfDue()
         checkResends()
         // Repeat this caller's check-ins once a day, for responders who missed them.
         if var s = saved, s.checkInSince != nil, now().timeIntervalSince(s.checkInSharedAt ?? .distantPast) > 86_400 {
@@ -453,6 +459,20 @@ public final class HelpEngine: ObservableObject {
         // Stop listening on the old channel once the changeover after a removal is over.
         let listening = group?.listening(at: now()).map(\.channelSecret) ?? []
         if mesh.secrets != listening { mesh.secrets = listening }
+    }
+
+    /// A coordinator's phone keeps the relay's member list current: after any change, again a minute
+    /// later if the relay could not be reached or refused it, and once a day, so a list lost to a
+    /// dropped connection or a clash between coordinators does not stay wrong.
+    private func publishMembersIfDue() {
+        guard me?.role == .coordinator, relay.isConfigured else { return }
+        let t = now()
+        let due = membersPublished.map { t.timeIntervalSince($0) > 86_400 } ?? (t.timeIntervalSince(lastPublishTry ?? .distantPast) > 60)
+        guard due else { return }
+        lastPublishTry = t
+        spawn {
+            if await self.relay.publishMembers() { self.membersPublished = self.now() }
+        }
     }
 
     /// Drops "I'm OK now" calls and acknowledged requests after a week. A request nobody has

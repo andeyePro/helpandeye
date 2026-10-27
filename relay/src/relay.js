@@ -77,47 +77,46 @@ export class GroupRelay {
     return (await this.storage.get("members")) ?? null;
   }
 
-  /// The first coordinator to register a group owns it. Later member lists must come from a key
-  /// that is a coordinator in the current list, and must be newer. Sending the same list again is
-  /// accepted, so a coordinator's phone can republish at every launch; an out-of-date phone's
-  /// different list at the same version is refused, so it cannot drop a newer member.
+  /// The coordinator who first registers a group owns it. A member list from any coordinator adds
+  /// people; nobody comes off unless the owner names them as removed, and nobody removed is ever
+  /// listed again. So a list from a coordinator who has not yet heard of someone another coordinator
+  /// added never takes them off. Roles are the owner's to set; anyone else adds people as members.
   async setMembers(signer, list) {
     if (!list || !Array.isArray(list.members) || !Number.isInteger(list.generation)) throw new RelayError(400, "bad member list");
+    const named = list.removed ?? [];
+    if (!Array.isArray(named) || named.some((k) => typeof k !== "string")) throw new RelayError(400, "bad removed list");
     for (const m of list.members) {
       if (typeof m.key !== "string" || !["coordinator", "member"].includes(m.role)) throw new RelayError(400, "bad member");
     }
     if (new Set(list.members.map((m) => m.key)).size !== list.members.length) throw new RelayError(400, "a key listed twice");
     const current = await this.members();
-    // The coordinator who registered the group owns it: only they can take anyone off, and
-    // anyone they took off can never be listed again, whoever sends the list.
-    const owner = (await this.storage.get("owner")) ?? signer;
+    // The owner is the group's first coordinator, as the list names them, so a second coordinator
+    // who happens to register the group first does not become its owner.
+    const claimed = typeof list.primary === "string" && list.members.some((m) => m.key === list.primary && m.role === "coordinator") ? list.primary : signer;
+    const owner = (await this.storage.get("owner")) ?? claimed;
     const removed = new Set((await this.storage.get("removed")) ?? []);
-    if (list.members.some((m) => removed.has(m.key))) throw new RelayError(409, "a removed member cannot be listed again");
     if (current) {
       if (!current.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(403, "only a coordinator can change members");
-      if (list.generation < current.generation) throw new RelayError(409, "older member list");
-      const dropped = current.members.filter((m) => !list.members.some((n) => n.key === m.key)).map((m) => m.key);
-      if (dropped.length && signer !== owner) throw new RelayError(403, "only the first coordinator can take people off");
-      if (dropped.includes(owner)) throw new RelayError(409, "the first coordinator cannot be taken off");
-      for (const k of dropped) removed.add(k);
-      if (list.generation === current.generation) {
-        // The same version from two coordinators who each added someone while out of touch: take
-        // a list that keeps everyone already listed (the phones' merged list). Anything that drops
-        // someone must come with a newer version.
-        const pairs = (a) => new Set(a.map(({ key, role }) => key + " " + role));
-        const now = pairs(list.members);
-        if (![...pairs(current.members)].every((p) => now.has(p))) throw new RelayError(409, "a different list at the same version");
-        if (now.size === current.members.length) return;
-      }
+    } else if (!list.members.some((m) => m.key === signer && m.role === "coordinator")) {
+      throw new RelayError(400, "the signer must be a coordinator");
     }
-    if (!list.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(400, "the signer must stay a coordinator");
+    if (signer === owner) {
+      if (named.includes(owner)) throw new RelayError(409, "the first coordinator cannot be removed");
+      for (const k of named) removed.add(k);
+    }
+    const roles = new Map((current?.members ?? []).map((m) => [m.key, m.role]));
+    // Roles as listed when the group is first registered, and from the owner after that.
+    for (const m of list.members) {
+      if (signer === owner || !current) roles.set(m.key, m.role);
+      else if (!roles.has(m.key)) roles.set(m.key, "member");
+    }
+    for (const k of removed) roles.delete(k);
+    const members = [...roles].map(([key, role]) => ({ key, role }));
     await this.storage.put("owner", owner);
     await this.storage.put("removed", [...removed]);
-    await this.storage.put("members", { generation: list.generation, members: list.members.map(({ key, role }) => ({ key, role })) });
-    // Push tokens of anyone no longer listed are deleted, not just ignored.
-    const keep = new Set(list.members.map((m) => "p:" + m.key));
-    const tokens = await this.storage.list({ prefix: "p:" });
-    const gone = [...tokens.keys()].filter((k) => !keep.has(k));
+    await this.storage.put("members", { generation: Math.max(current?.generation ?? 0, list.generation), members });
+    // Push tokens of anyone removed are deleted, not just ignored.
+    const gone = [...(await this.storage.list({ prefix: "p:" })).keys()].filter((k) => removed.has(k.slice(2)));
     if (gone.length) await this.storage.delete(gone);
   }
 

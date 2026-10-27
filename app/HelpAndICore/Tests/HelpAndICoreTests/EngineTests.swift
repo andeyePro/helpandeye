@@ -13,6 +13,8 @@ import XCTest
     var groupSends: [HelpFrame] = []
     var directSends: [String] = []
     var violations: [String] = []
+    let relay = RelayModel()
+    var relayLog: [(String, RelayProtocol.MemberList, Int)] = []
 
     func run() async {
         for _ in 0..<50 {
@@ -58,21 +60,74 @@ import XCTest
     func addContact(_ key: Data, name: String) async {}
 }
 
+/// The relay's membership rules (relay/src/relay.js, `setMembers` and `requireMember`), so the
+/// fakes refuse what the real relay refuses. RelayModelVectorTests checks it against the real one.
+final class RelayModel {
+    struct Entry: Equatable { let key: String; let role: String }
+    var owner: String?
+    var removed: Set<String> = []
+    var generation: UInt32 = 0
+    var members: [Entry] = []
+    private var started = false
+
+    /// 200, or the status the relay would refuse with.
+    func setMembers(signer: String, generation g: UInt32, members list: [Entry], removed named: [String], primary: String? = nil) -> Int {
+        if Set(list.map(\.key)).count != list.count { return 400 }
+        let claimed = primary.flatMap { p in list.contains { $0.key == p && $0.role == "coordinator" } ? p : nil } ?? signer
+        let owner = self.owner ?? claimed
+        if started {
+            if !members.contains(where: { $0.key == signer && $0.role == "coordinator" }) { return 403 }
+        } else if !list.contains(where: { $0.key == signer && $0.role == "coordinator" }) {
+            return 400
+        }
+        var removed = self.removed
+        if signer == owner {
+            if named.contains(owner) { return 409 }
+            removed.formUnion(named)
+        }
+        var roles = Dictionary(members.map { ($0.key, $0.role) }, uniquingKeysWith: { a, _ in a })
+        var order = members.map(\.key)
+        for m in list {
+            if roles[m.key] == nil { order.append(m.key) }
+            if signer == owner || !started { roles[m.key] = m.role } else if roles[m.key] == nil { roles[m.key] = "member" }
+        }
+        for k in removed { roles[k] = nil }
+        self.owner = owner; self.removed = removed; started = true
+        generation = max(generation, g)
+        members = order.compactMap { k in roles[k].map { Entry(key: k, role: $0) } }
+        return 200
+    }
+
+    func isMember(_ key: String) -> Bool { members.contains { $0.key == key } }
+}
+
 @MainActor final class FakeRelay: RelayLink {
     weak var air: Air?
     weak var phone: Phone?
     var isConfigured = false
     var lastProblem: String?
     var sent: [(HelpFrame, RelayWake?)] = []
-
     var configured = 0
-    func configure(group: GroupState?, identity: DeviceIdentity) { configured += 1 }
-    func publishMembers() async {}
+    private var group: GroupState?
+    private var identity: DeviceIdentity?
+    var key: String? { identity?.signingPublicKey.base64EncodedString() }
+
+    func configure(group: GroupState?, identity: DeviceIdentity) { configured += 1; self.group = group; self.identity = identity }
+
+    func publishMembers() async -> Bool {
+        guard isConfigured, let air, let group, let key else { return false }
+        let list = RelayProtocol.memberList(group)
+        let status = air.relay.setMembers(signer: key, generation: list.generation, members: list.members.map { .init(key: $0.key, role: $0.role) },
+                                          removed: list.removed, primary: list.primary)
+        air.relayLog.append((key, list, status))
+        return status == 200
+    }
 
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String? {
-        guard isConfigured, let air, let me = phone else { return "No internet" }
+        guard isConfigured, let air, let me = phone, let key else { return "No internet" }
+        guard air.relay.isMember(key) else { return "Relay refused it (403)" }
         sent.append((frame, wake))
-        for p in air.phones where p !== me && p.relay.isConfigured {
+        for p in air.phones where p !== me && p.relay.isConfigured && p.relay.key.map(air.relay.isMember) == true {
             air.queue.append((me, p, { p.engine.receive(frame, via: .internet) }))
         }
         return nil
@@ -146,6 +201,12 @@ import XCTest
         p.engine.joined(try! Joining.open(welcome!, invite: invite, me: p.identity), as: welcome!.memberNumber)
     }
 
+    /// What happens when the coordinator enters the relay's address: the member list is published.
+    func relaySetUp() async {
+        coordinator.engine.tick()
+        await air.run()
+    }
+
     func advance(_ seconds: TimeInterval) async {
         clock.now = clock.now.addingTimeInterval(seconds)
         for p in air.phones { p.engine.tick() }
@@ -200,6 +261,7 @@ import XCTest
 
     func testTheInternetRouteAloneWorksAndAsksForAPush() async {
         for p in air.phones { p.mesh.isReady = false; p.relay.isConfigured = true }
+        await relaySetUp()
         caller.engine.press(.red)
         await air.run()
         XCTAssertEqual(caller.request?.routes[.internet], .sent)
@@ -409,6 +471,7 @@ import XCTest
         await air.run()
         XCTAssertEqual(caller.request?.status, .notSent)
         for p in air.phones { p.relay.isConfigured = true }
+        await relaySetUp()
         await advance(30)
         XCTAssertEqual(caller.relay.sent.first?.1, .call, "the first post to the relay asks for a push")
         XCTAssertNotNil(responder.alerts.scheduled[key])
@@ -522,6 +585,7 @@ import XCTest
 
     func testCheckInsOverTheInternetCountOnlyFromTheCaller() async {
         for p in air.phones { p.mesh.isReady = false; p.relay.isConfigured = true }
+        await relaySetUp()
         let unit = caller.engine.me!.unit!
         caller.engine.setCheckIn(CheckInSchedule(times: [600]))
         await air.run()

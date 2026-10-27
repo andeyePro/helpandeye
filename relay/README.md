@@ -14,7 +14,7 @@ Every request is signed by the phone's Ed25519 key. The headers are:
 
 | Request | Who | Body |
 |---|---|---|
-| `PUT /g/<group>/members` | a coordinator | `{"generation": n, "members": [{"key": "...", "role": "coordinator" or "member"}]}` |
+| `PUT /g/<group>/members` | a coordinator | `{"generation": n, "members": [{"key": "...", "role": "coordinator" or "member"}], "removed": ["key", ...], "primary": "key"}` |
 | `POST /g/<group>/messages` | a member | `{"sealed": "<base64 ChaCha20-Poly1305 box>"}` |
 | `GET /g/<group>/messages?after=<seq>` | a member | none; the reply is `{"latest": n, "next": n, "messages": [...]}`. A negative `after` asks for the last that many messages. Read on from `next`, which moves past expired messages. |
 | `PUT /g/<group>/push` | a member | `{"token": "<hex APNs device token>", "sandbox": true or false}` |
@@ -26,9 +26,11 @@ not push. The relay cannot read who called, so the push cannot say; the app work
 once awake. Because the push goes to everyone at once, a responder whose turn would come later is
 told early over the internet route: the escalation order still decides the repeated alerts.
 
-The first coordinator to send a member list owns the group. After that only a coordinator in the
-current list can change it, only to a newer version (sending the same list again is accepted),
-and a phone left out of it is refused at once. Each message is its own storage key, at most 512
+The group's first coordinator, whom every member list names as `primary`, owns the group on the
+relay, whoever registers it. Any coordinator's list adds people, as members; nobody comes off
+unless the owner names them in `removed`, and nobody removed is ever listed again. So a list from
+a coordinator who has not yet heard of someone another coordinator added never takes them off.
+Roles are the owner's to set. Each message is its own storage key, at most 512
 characters, kept for seven days, 2,000 at most.
 
 A phone's first read asks for the last 200 messages and acts only on the last quarter of an hour
@@ -51,7 +53,8 @@ npm test
 ```
 
 `test/interop.test.js` checks a request signed by the app's Swift code
-(`app/HelpAndICore`, `RelayVectorTests`).
+(`app/HelpAndICore`, `RelayVectorTests`). `test/model.test.js` replays member-list publishes
+recorded from the app's fuzz test, checking the app's copy of these rules gives the same results.
 
 ## Deploy
 

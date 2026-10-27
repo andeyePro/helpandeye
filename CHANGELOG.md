@@ -4,6 +4,20 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **The fuzz test uses the relay's real membership rules** - the fake relay used to deliver to
+  everyone, so the relay's refusals never happened in the fuzz. It now follows a Swift copy of the
+  relay's rules, checked against the real relay by replaying member-list publishes recorded from
+  fuzz runs (`relay/test/model.test.js`). With that, it found three real bugs: a first
+  coordinator's list removed anyone it had not yet heard of, for good, so someone a second
+  coordinator invited could be banned from the relay; a second coordinator who registered the
+  group first became its owner, so the first coordinator's removals were then ignored and removed
+  phones stayed on the relay; and when that happened everyone was registered as a plain member.
+  Membership on the relay is now a union: lists add people, only removals the first coordinator
+  names take anyone off, the list names the first coordinator as owner, and roles come as listed at
+  registration and from the owner after. A coordinator's phone now retries publishing the member
+  list a minute after a failure and repeats it daily. After links heal, the fuzz test checks that
+  the relay lists everyone the phones agree on and nobody removed. 132 core tests, 16 relay tests;
+  200 fuzz seeds pass.
 - [x] **Fixes from the fifth code review, and named pushes** - a fifth independent review found 1
   blocker and 7 major issues, and the strengthened fuzz test found two more. Fixed: a second
   coordinator had no way to scan new keys after a removal, so a week later their calls reached
