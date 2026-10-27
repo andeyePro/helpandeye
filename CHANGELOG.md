@@ -4,6 +4,8 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Linkable decisions** - each row of `docs/design-decisions.md` has an anchor (`#d10`), and
+  Claude's Discussion answers link every decision and open question they cite.
 - [x] **Fuller Discussion answers** - Claude now answers with its own expertise and web search, not
   only the project documents, on Opus with up to about 400 words. It still marks what is decided,
   what is open and what is its own suggestion. Tools are limited to WebSearch and WebFetch, so the
