@@ -25,6 +25,10 @@ public struct Member: Codable, Equatable, Sendable, Identifiable {
     public var phone: String?
     /// Ed25519 key the phone signs relay requests with.
     public var signingKey: Data?
+    /// For a coordinator: the first of the 1,000 member numbers they hand out, so two coordinators
+    /// adding people while out of touch never give out the same number. 0 for whoever started the
+    /// group.
+    public var block: UInt16?
     /// The MeshCore public key of the member's box, once it has been heard.
     public var boardKey: Data?
 
@@ -72,6 +76,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// signed "member added" replayed by a removed phone cannot let it back in.
     public var removedMembers: Set<UInt16> = []
     public var highestMember: UInt16 = 0
+    /// The membership version of each member's last role change, so an old one replayed is ignored.
+    public var roleVersions: [UInt16: UInt32] = [:]
     public var policy: StoredPolicy = .init()
     /// The relay for the internet route, such as https://helprelayandeye.example.workers.dev.
     public var relayURL: String?
@@ -93,11 +99,43 @@ public struct GroupState: Codable, Equatable, Sendable {
     public func member(_ number: UInt16) -> Member? { members.first { $0.number == number } }
     public func member(unit: UInt32) -> Member? { members.first { $0.unit == unit } }
 
-    public var nextMemberNumber: UInt16 { max(highestMember, members.map(\.number).max() ?? 0, removedMembers.max() ?? 0) + 1 }
+    /// The number block of the coordinator whose phone this is: 0 unless they were made a
+    /// coordinator later.
+    public func block(of coordinator: UInt16?) -> UInt16 { coordinator.flatMap { member($0)?.block } ?? 0 }
 
-    /// Unit numbers are never reused, even after a phone is removed.
-    public var nextUnit: UInt32 {
-        max((members.compactMap(\.unit) + removedUnits).max() ?? 70000, 70000) + 1
+    /// The next member number this coordinator hands out. Numbers are never reused.
+    public func nextMemberNumber(by coordinator: UInt16?) -> UInt16 {
+        let base = block(of: coordinator)
+        let used = (members.map(\.number) + removedMembers + [highestMember]).filter { $0 > base && $0 <= base &+ 999 }
+        return (used.max() ?? base) + 1
+    }
+
+    public var nextMemberNumber: UInt16 { nextMemberNumber(by: nil) }
+
+    /// The next unit number this coordinator hands out. Unit numbers are never reused either.
+    public func nextUnit(by coordinator: UInt16?) -> UInt32 {
+        let base = 70000 + UInt32(block(of: coordinator)) * 10
+        let used = (members.compactMap(\.unit) + removedUnits).filter { $0 > base && $0 <= base + 9999 }
+        return (used.max() ?? base) + 1
+    }
+
+    public var nextUnit: UInt32 { nextUnit(by: nil) }
+
+    /// Makes a member a coordinator, with their own block of numbers. Returns the signed-ready
+    /// frame that tells everyone.
+    public mutating func promote(_ number: UInt16) -> HelpFrame? {
+        guard let i = members.firstIndex(where: { $0.number == number }), members[i].role != .coordinator else { return nil }
+        let blocks = members.compactMap(\.block) + [0]
+        members[i].role = .coordinator
+        members[i].block = (blocks.max() ?? 0) + 1000
+        membershipVersion += 1
+        roleVersions[number] = membershipVersion
+        return roleFrame(number)
+    }
+
+    public func roleFrame(_ number: UInt16) -> HelpFrame? {
+        guard let m = member(number) else { return nil }
+        return .memberRole(member: number, role: m.role, block: m.block ?? 0, version: roleVersions[number] ?? membershipVersion)
     }
 
     public static let changeoverPeriod: TimeInterval = 7 * 24 * 3600
@@ -133,19 +171,29 @@ public struct GroupState: Codable, Equatable, Sendable {
     }
 
     /// Applies a coordinator's signed membership change on another member's phone. A new member
-    /// is known by number until a key update brings their name. Never touches the secrets.
+    /// is known by number until their name arrives. Never touches the secrets. Each frame carries the
+    /// membership version, so every phone ends up with the same one and any coordinator's member
+    /// list is accepted by the relay.
     public mutating func apply(membership frame: HelpFrame, at now: Date = Date()) {
         switch frame {
-        case let .memberAdded(number, role, unit, key):
+        case let .memberAdded(number, role, unit, key, sealKey, version):
             let u: UInt32? = role == .responder || unit == 0 ? nil : unit
             guard member(number) == nil, !removedMembers.contains(number), u.map({ !removedUnits.contains($0) }) ?? true else { return }
-            members.append(Member(number: number, name: "Member \(number)", role: role, publicKey: Data(), unit: u, signingKey: key))
+            members.append(Member(number: number, name: "Member \(number)", role: role, publicKey: sealKey, unit: u, signingKey: key))
             highestMember = max(highestMember, number)
-        case let .memberRemoved(number):
+            membershipVersion = max(membershipVersion, version)
+        case let .memberRemoved(number, version):
             removedMembers.insert(number)
+            membershipVersion = max(membershipVersion, version)
             guard let m = member(number) else { return }
             members.removeAll { $0.number == number }
             if let u = m.unit { removedUnits.insert(u) }
+        case let .memberRole(number, role, block, version):
+            guard let i = members.firstIndex(where: { $0.number == number }), version > (roleVersions[number] ?? 0) else { return }
+            members[i].role = role
+            members[i].block = role == .coordinator ? block : nil
+            roleVersions[number] = version
+            membershipVersion = max(membershipVersion, version)
         case let .memberName(number, name):
             guard let i = members.firstIndex(where: { $0.number == number }), !name.isEmpty else { return }
             members[i].name = name
@@ -156,7 +204,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// What a coordinator's phone sends so other members learn of a new member.
     public func addedFrame(_ number: UInt16) -> HelpFrame? {
         guard let m = member(number), let key = m.signingKey else { return nil }
-        return .memberAdded(member: m.number, role: m.role, unit: m.unit ?? 0, signingKey: key)
+        return .memberAdded(member: m.number, role: m.role, unit: m.unit ?? 0, signingKey: key,
+                            sealKey: m.publicKey.count == 32 ? m.publicKey : Data(count: 32), version: membershipVersion)
     }
 
     public var escalationPolicy: EscalationPolicy {
@@ -235,11 +284,12 @@ public enum Joining {
         guard request.token == invite.token else { throw Failure.wrongToken }
         guard invite.groupID == group.secrets.groupID else { throw Failure.wrongGroup }
         let role: Member.Role = request.wantsToCall && request.wantsToRespond ? .both : (request.wantsToCall ? .caller : .responder)
-        let number = group.nextMemberNumber
+        let me = group.members.first { $0.publicKey == coordinator.publicKey }?.number
+        let number = group.nextMemberNumber(by: me)
         group.membershipVersion += 1
         group.highestMember = max(group.highestMember, number)
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,
-                                    unit: request.wantsToCall ? group.nextUnit : nil, phone: request.phone,
+                                    unit: request.wantsToCall ? group.nextUnit(by: me) : nil, phone: request.phone,
                                     signingKey: request.signingKey))
         let box = try seal(JSONEncoder().encode(group), to: request.publicKey, from: coordinator, context: invite.token)
         return Welcome(groupID: group.secrets.groupID, memberNumber: number, sealed: box)

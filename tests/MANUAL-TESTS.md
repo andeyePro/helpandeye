@@ -193,3 +193,10 @@ Pass: phone B raises "<name> missed a check-in" about 35 minutes after the check
 2. Turn on VoiceOver and move through the Help tab, then press Come now.
 
 Pass: every word on the Help tab can be read without cutting off; Come when convenient and I'm OK now sit one above the other rather than squeezed side by side. VoiceOver reads each button's name and what it does. After the press it says the status aloud ("Sending…", then "Sent. Waiting for a responder to see it."), and again when a responder acknowledges. Nothing on any screen depends on colour alone: every coloured button and dot also has words.
+
+## 23. A second coordinator
+
+1. On phone B (coordinator), open Group, swipe left on phone C's person, and tap Make coordinator.
+2. On phone C, invite a fourth phone, D, as a responder. Then press Come now on phone A and acknowledge on phone D.
+
+Pass: phone C shows the coordinator's tools (Invite someone, gaps, Internet route). Phone A shows phone D's person as having seen the call, although phone B never touched phone D. Phone D's member number is above 1000.

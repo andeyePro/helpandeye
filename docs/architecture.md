@@ -47,9 +47,10 @@ Integers are little-endian.
 | 8 | check-ins | unit u32, since u32, grace in minutes u16, count u8, minutes after midnight u16 each | no |
 | 9 | box key | member u16, MeshCore public key (32), Ed25519 signature (64) | yes |
 | 10 | signed | signer u16, length u8, inner frame, Ed25519 signature (64) | yes |
-| 11 | member added | member u16, role u8, unit u32, signing key (32) | inside 10, from a coordinator |
-| 12 | member removed | member u16 | inside 10, from a coordinator |
+| 11 | member added | member u16, role u8, unit u32, signing key (32), sealing key (32), version u32 | inside 10, from a coordinator |
+| 12 | member removed | member u16, version u32 | inside 10, from a coordinator |
 | 13 | member name | member u16, length u8, UTF-8 name (up to 40) | no; inside 10, from a coordinator |
+| 14 | role change | member u16, role u8, number block u16, version u32 | inside 10, from a coordinator |
 
 Every signature (kinds 3, 9 and 10) also covers the group's ID, so one made in one group is
 worthless in another.

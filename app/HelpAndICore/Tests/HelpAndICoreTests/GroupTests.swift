@@ -124,7 +124,7 @@ final class GroupTests: XCTestCase {
         callersCopy.apply(membership: inner)
         XCTAssertTrue(callersCopy.acceptsAck(ack))
         XCTAssertEqual(callersCopy.member(w.memberNumber)?.name, "Member \(w.memberNumber)")
-        callersCopy.apply(membership: .memberRemoved(member: w.memberNumber))
+        callersCopy.apply(membership: .memberRemoved(member: w.memberNumber, version: 99))
         XCTAssertFalse(callersCopy.acceptsAck(ack))
         callersCopy.apply(membership: inner)
         XCTAssertNil(callersCopy.member(w.memberNumber), "an old signed add, replayed by the removed phone, cannot let it back in")

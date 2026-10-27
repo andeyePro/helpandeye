@@ -300,6 +300,40 @@ import XCTest
         XCTAssertEqual(coordinator.mesh.secrets.count, 1, "the old channel is dropped after the changeover")
     }
 
+    func testASecondCoordinatorCanAddAndRemoveAndEveryoneFollows() async {
+        let second = Phone(air: air, clock: clock)
+        join(second, call: false, respond: true)
+        await air.run()
+        let n2 = second.engine.saved!.me
+        coordinator.engine.promote(n2)
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.member(n2)?.role, .coordinator, "everyone heard the promotion")
+        XCTAssertEqual(second.engine.me?.role, .coordinator, "so did the new coordinator's own phone")
+        // The second coordinator adds someone; their number comes from the second coordinator's block.
+        let late = Phone(air: air, clock: clock)
+        let invite = Joining.invitation(for: second.engine.group!, coordinator: second.identity)
+        let request = Joining.request(invite, name: "Late", call: false, respond: true, me: late.identity)
+        var welcome: Joining.Welcome?
+        second.engine.updateGroup { g in welcome = try! Joining.admit(request, to: &g, invite: invite, coordinator: second.identity) }
+        late.engine.joined(try! Joining.open(welcome!, invite: invite, me: late.identity), as: welcome!.memberNumber)
+        await air.run()
+        let n3 = welcome!.memberNumber
+        XCTAssertGreaterThan(n3, 1000, "from the second coordinator's own block, so it cannot clash")
+        XCTAssertNotNil(caller.engine.group?.member(n3), "the caller accepts the second coordinator's change")
+        XCTAssertNotNil(coordinator.engine.group?.member(n3), "and so does the first coordinator")
+        XCTAssertEqual(coordinator.engine.group?.membershipVersion, second.engine.group?.membershipVersion,
+                       "versions agree, so either coordinator's member list is accepted by the relay")
+        // The second coordinator removes a responder: the caller stops counting their acks.
+        let r = responder.engine.saved!.me
+        second.engine.updateGroup { $0.remove(r, at: clock.now) }
+        await air.run()
+        XCTAssertNil(caller.engine.group?.member(r))
+        // An old role change, replayed, does not undo a newer one.
+        let demote = HelpFrame.memberRole(member: n2, role: .responder, block: 0, version: 1)
+        caller.engine.receive(.signing(demote, as: 1, identity: coordinator.identity, group: gid), via: .mesh)
+        XCTAssertEqual(caller.engine.group?.member(n2)?.role, .coordinator)
+    }
+
     func testAReplayedMemberAddedCannotLetARemovedPhoneBackIn() async {
         let lost = Phone(air: air, clock: clock)
         join(lost, call: false, respond: true)

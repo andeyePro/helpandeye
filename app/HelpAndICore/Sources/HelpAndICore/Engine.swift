@@ -159,6 +159,7 @@ public final class HelpEngine: ObservableObject {
         var g = GroupState(name: name, secrets: .random(), members: [])
         g.members.append(Member(number: 1, name: myName, role: .coordinator, publicKey: identity.publicKey,
                                 unit: call ? g.nextUnit : nil, signingKey: identity.signingPublicKey))
+        g.highestMember = 1
         setState(SavedState(group: g, me: 1))
     }
 
@@ -168,18 +169,22 @@ public final class HelpEngine: ObservableObject {
     /// so their acknowledgements count (or stop counting) on every phone at once.
     public func updateGroup(_ change: (inout GroupState) -> Void) {
         guard var s = saved else { return }
+        let old = s.group
         let before = Set(s.group.members.map(\.number))
         change(&s.group)
         setState(s)
         guard me?.role == .coordinator else { return }
+        let roleChanged = s.group.members.filter { m in old.member(m.number).map { $0.role != m.role } ?? false }.map(\.number)
         announce(membershipOf: s.group, added: Set(s.group.members.map(\.number)).subtracting(before),
-                 removed: before.subtracting(s.group.members.map(\.number)))
+                 removed: before.subtracting(s.group.members.map(\.number)), roles: Set(roleChanged))
     }
 
-    private func announce(membershipOf g: GroupState, added: Set<UInt16>, removed: Set<UInt16>) {
+    private func announce(membershipOf g: GroupState, added: Set<UInt16>, removed: Set<UInt16>, roles: Set<UInt16> = []) {
         guard let me = saved?.me else { return }
         let gid = g.secrets.groupID
-        let frames = added.sorted().compactMap { g.addedFrame($0) } + removed.sorted().map { HelpFrame.memberRemoved(member: $0) }
+        let frames = added.sorted().compactMap { g.addedFrame($0) }
+            + removed.sorted().map { HelpFrame.memberRemoved(member: $0, version: g.membershipVersion) }
+            + roles.sorted().compactMap { g.roleFrame($0) }
         for f in frames {
             let signed = HelpFrame.signing(f, as: me, identity: identity, group: gid)
             spawn { await self.sendToAll(signed) }
@@ -394,6 +399,7 @@ public final class HelpEngine: ObservableObject {
             lastMembershipRepeat = now()
             for m in g.members where m.number != myNumber {
                 if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
+                if m.role == .coordinator, let f = g.roleFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
             }
         }
     }
@@ -474,7 +480,7 @@ public final class HelpEngine: ObservableObject {
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
             }
-        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName:
+        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole:
             // Counted only when signed (below), so a removed phone cannot fake them.
             return
         case let .signed(signer, _, _):
@@ -488,7 +494,7 @@ public final class HelpEngine: ObservableObject {
                 }
             case .availability:
                 if sender.canRespond { activity.rota.apply(inner); checkGaps() }
-            case .memberAdded, .memberRemoved, .memberName:
+            case .memberAdded, .memberRemoved, .memberName, .memberRole:
                 // Only a coordinator changes who is in the group. Nothing changes, nothing is redone.
                 if sender.role == .coordinator, signer != saved?.me, var s = saved {
                     let before = s.group
@@ -674,6 +680,11 @@ public final class HelpEngine: ObservableObject {
         let frame = HelpFrame.signing(.noticeAck(notice: notice, by: me, at: UInt32(now().timeIntervalSince1970)), as: me,
                                       identity: identity, group: groupID)
         spawn { _ = await self.sendOptional(frame) }
+    }
+
+    /// Makes a member a coordinator too, so the group does not depend on one person.
+    public func promote(_ number: UInt16) {
+        updateGroup { _ = $0.promote(number) }
     }
 
     public func setRelay(_ url: String) {

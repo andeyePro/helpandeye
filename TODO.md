@@ -15,5 +15,4 @@
 
 ## Open (work)
 
-- [ ] More than one coordinator per group (app spec). Needs a signed, versioned role-change message so other phones accept a second coordinator's membership changes, and the relay its member lists.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).

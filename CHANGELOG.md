@@ -4,6 +4,15 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **More than one coordinator** - a coordinator can now make someone else a coordinator, so a
+  group does not depend on one person. The change goes to every phone in a signed role-change
+  message carrying the membership version, so an old one replayed cannot undo a newer one. Every
+  membership message now carries the version, so all phones agree on it and either coordinator's
+  member list is accepted by the relay, and carries the member's sealing key, so a second
+  coordinator can hand out key updates. Each coordinator gives out member and unit numbers from
+  their own block of 1,000, so two coordinators adding people while out of touch never clash. 117
+  core tests, including one where the second coordinator adds and removes people and everyone
+  follows.
 - [x] **Large text and VoiceOver** - a pass over every screen's words found them plain and calm, with
   no "delivered" wording and the 999 notice in place. Fixed: the Come now button and the watch's
   999 line used fixed sizes that ignored the reader's text size; at large sizes the amber and green

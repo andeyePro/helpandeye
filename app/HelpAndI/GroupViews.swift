@@ -133,6 +133,9 @@ struct GroupView: View {
                         .swipeActions {
                             if model.me?.role == .coordinator, m.number != model.saved?.me {
                                 Button("Remove", role: .destructive) { model.updateGroup { $0.remove(m.number) } }
+                                if m.role != .coordinator {
+                                    Button("Make coordinator") { model.engine.promote(m.number) }.tint(.blue)
+                                }
                             }
                         }
                     }
