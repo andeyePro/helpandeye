@@ -4,6 +4,11 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Draft app specification** - `docs/app-spec.md` sets the first release's scope: iOS and
+  watchOS, one app for callers and responders, coordinator-run groups with availability, fair
+  sharing and closest-first alerting, peer-to-peer groups, and red or amber sent at once with
+  details following as separate messages. The internet relay design and every-route sending are
+  marked as proposals.
 - [x] **Linkable decisions** - each row of `docs/design-decisions.md` has an anchor (`#d10`), and
   Claude's Discussion answers link every decision and open question they cite.
 - [x] **Fuller Discussion answers** - Claude now answers with its own expertise and web search, not
