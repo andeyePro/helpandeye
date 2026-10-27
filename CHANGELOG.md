@@ -4,6 +4,14 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Everyone hears who joined or left** - adding someone used to change only the coordinator's
+  copy of the group, so a caller's phone would reject a new responder's acknowledgement and never
+  show "seen". A coordinator's phone now sends a signed member-added or member-removed frame over
+  the internet and the mesh, repeats who is in the group when its box connects, and other phones
+  apply it at once (names follow in a key update). During the seven-day changeover after a removal,
+  phones send on both the old and new channel and keys, so members who have not scanned their
+  update still hear calls and acknowledgements; the relay refuses the removed phone, and the
+  airtime budget counts both packets. 92 core tests; manual check 19.
 - [x] **Signed availability and notice acknowledgements** - both now count only inside a frame signed
   by the member they are about, so a removed phone that still knows the old channel key cannot
   take responders off the rota (delaying their alerts) or clear a coordinator's notice. 91 core

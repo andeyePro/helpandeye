@@ -126,9 +126,17 @@ Decided for now, following common practice for end-to-end encrypted apps (Martin
   once.
 - The coordinator's app then makes new group secrets and sends them to every remaining member,
   encrypted to each phone's key. Each app writes the new channel secret into its board the next
-  time it connects. While that happens, boards listen on both the old and the new channel and send
-  on the new one.
+  time it connects. For seven days, phones listen and send on both the old and the new
+  channel and keys, so members who have not scanned their update still hear calls and
+  acknowledgements. The relay refuses the removed phone at once, so nothing personal reaches it.
 - A removed phone's unit number is never reused.
+
+## Who is in the group
+
+- When a coordinator adds or removes someone, their phone tells every member at once, in a frame
+  signed by the coordinator, over the internet and the mesh. So a new responder's acknowledgement
+  counts on every phone straight away, and a removed one's stops counting. Names follow later, in
+  a key update: until then a new member shows as "Member" and their number.
 
 ## Rota gaps without internet
 

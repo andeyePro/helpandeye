@@ -15,6 +15,9 @@ final class BoardLink: NSObject, ObservableObject {
     @Published private(set) var selfInfo: MeshCore.SelfInfo?
     @Published private(set) var batteryMillivolts: Int?
     @Published private(set) var helpChannel: UInt8?
+    /// The previous channel during a changeover after a removal. Sends go on both, so members who
+    /// have not scanned their update yet still hear calls and acknowledgements.
+    private var previousChannel: UInt8?
 
     var onFrame: ((HelpFrame) -> Void)?
     /// A direct text message: the sender's key prefix (6 bytes) and the text.
@@ -99,6 +102,15 @@ final class BoardLink: NSObject, ObservableObject {
     /// Sends a Help&I frame as a datagram on the group's channel.
     func send(_ frame: HelpFrame, urgent: Bool = false) async -> SendResult {
         guard state == .ready, let ch = helpChannel else { return .refused("Box not connected") }
+        let result = await sendOn(ch, frame, urgent: urgent)
+        if let old = previousChannel, old != ch { _ = await sendOn(old, frame, urgent: urgent) }
+        return result
+    }
+
+    /// How many packets a send puts on air, for the airtime budget.
+    var channelsPerSend: Int { previousChannel == nil || previousChannel == helpChannel ? 1 : 2 }
+
+    private func sendOn(_ ch: UInt8, _ frame: HelpFrame, urgent: Bool) async -> SendResult {
         let cmd = MeshCore.Command.sendChannelData(index: ch, dataType: HelpFrame.meshDataType, payload: frame.encoded())
         switch await run(cmd, urgent: urgent, expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
         case .ok?: return .sent
@@ -197,6 +209,7 @@ final class BoardLink: NSObject, ObservableObject {
         }
         var listen: Set<UInt8> = []
         var current: UInt8?
+        var previous: UInt8?
         for (n, secret) in secrets.enumerated() {
             var slot = slots.first { $0.value == secret }?.key
             if slot == nil, !free.isEmpty {
@@ -206,10 +219,11 @@ final class BoardLink: NSObject, ObservableObject {
                     slot = i
                 }
             }
-            if let slot { listen.insert(slot); if n == 0 { current = slot } }
+            if let slot { listen.insert(slot); if n == 0 { current = slot } else { previous = slot } }
         }
         listenChannels = listen
         helpChannel = current
+        previousChannel = previous
         if current == nil, !secrets.isEmpty { state = .failed("No free channel on the box") }
     }
 

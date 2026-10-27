@@ -145,3 +145,10 @@ Pass: about 35 minutes after the check-in time, phone B alerts "<name> missed a 
 2. On a phone in the new group, press Come now.
 
 Pass: phone B alerts. (A shared read position used to make it miss the new group's calls.)
+
+## 19. A new responder's acknowledgement counts everywhere
+
+1. With phones A (caller) and B (coordinator) in a group, add phone C as a responder (section 1, steps 2 to 5, on phones B and C). Do not show phone A anything.
+2. On phone A, press Come now. Acknowledge on phone C.
+
+Pass: phone A shows "Member <n> has seen your call." within a minute. Then remove phone C on phone B, press Come now again on phone A, and acknowledge on phone C: phone A must not show it as seen.

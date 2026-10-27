@@ -45,18 +45,26 @@ final class Relay: ObservableObject {
 
     /// `wake` asks the relay to push to the other members: `.call` visibly (a new call), `.quiet`
     /// to wake their app without showing anything (an acknowledgement). Resends do not push.
+    /// During a changeover after a removal, the message is sealed and posted once with each key, so
+    /// members who have not scanned their update yet can still open it.
     func send(_ frame: HelpFrame, wake: Wake? = nil) async -> String? {
         guard let group else { return "Internet route not set up" }
-        var fields = ["sealed": ""]
-        guard let sealed = try? RelayProtocol.seal(frame, with: group.secrets) else { return "Could not seal the message" }
-        fields["sealed"] = sealed
-        if let wake { fields["wake"] = wake.rawValue }
-        guard let body = try? JSONEncoder().encode(fields) else { return "Could not seal the message" }
-        switch await request("POST", RelayProtocol.path(for: group.secrets, "messages"), body: body) {
-        case .some((200, _)): return nil
-        case let .some((status, _)): return "Relay refused it (\(status))"
-        case .none: return lastProblem ?? "No internet"
+        var failure: String?
+        for (n, secrets) in group.listening(at: Date()).enumerated() {
+            var fields = ["sealed": ""]
+            guard let sealed = try? RelayProtocol.seal(frame, with: secrets) else { return "Could not seal the message" }
+            fields["sealed"] = sealed
+            if let wake { fields["wake"] = wake.rawValue }
+            guard let body = try? JSONEncoder().encode(fields) else { return "Could not seal the message" }
+            let result: String?
+            switch await request("POST", RelayProtocol.path(for: group.secrets, "messages"), body: body) {
+            case .some((200, _)): result = nil
+            case let .some((status, _)): result = "Relay refused it (\(status))"
+            case .none: result = lastProblem ?? "No internet"
+            }
+            if n == 0 { failure = result }
         }
+        return failure
     }
 
     /// Where Apple can push to wake this phone. Sent whenever the relay or group changes.

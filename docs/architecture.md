@@ -47,6 +47,8 @@ Integers are little-endian.
 | 8 | check-ins | unit u32, since u32, grace in minutes u16, count u8, minutes after midnight u16 each | no |
 | 9 | box key | member u16, MeshCore public key (32), Ed25519 signature (64) | yes |
 | 10 | signed | signer u16, length u8, inner frame, Ed25519 signature (64) | yes |
+| 11 | member added | member u16, role u8, unit u32, signing key (32) | inside 10, from a coordinator |
+| 12 | member removed | member u16 | inside 10, from a coordinator |
 
 Availability (4) and notice acknowledgements (5) count only inside a signed frame (10) from the
 member they are about.

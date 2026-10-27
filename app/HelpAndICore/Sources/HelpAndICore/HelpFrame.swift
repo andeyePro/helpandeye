@@ -49,6 +49,11 @@ public enum HelpFrame: Equatable, Sendable {
     /// acknowledgements count only inside one, so a removed phone that still knows the old channel
     /// key cannot take responders off the rota or clear a coordinator's notice.
     case signed(signer: UInt16, inner: Data, signature: Data)
+    /// A coordinator added someone. No name: other phones show "Member n" until they get the name
+    /// in a key update. Counts only inside a frame signed by a coordinator.
+    case memberAdded(member: UInt16, role: Member.Role, unit: UInt32, signingKey: Data)
+    /// A coordinator removed someone; their acknowledgements stop counting at once. Signed too.
+    case memberRemoved(member: UInt16)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -60,7 +65,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10 }
+    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10, memberAdded = 11, memberRemoved = 12 }
 
     /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
     public static let maxNoteBytes = 120
@@ -107,6 +112,11 @@ public enum HelpFrame: Equatable, Sendable {
         case let .board(member, key, signature):
             w.u8(Self.header(.board)); w.u16(member); w.bytes(key.count == 32 ? key : Data(count: 32))
             w.bytes(signature.count == 64 ? signature : Data(count: 64))
+        case let .memberAdded(member, role, unit, key):
+            w.u8(Self.header(.memberAdded)); w.u16(member); w.u8(role.code); w.u32(unit)
+            w.bytes(key.count == 32 ? key : Data(count: 32))
+        case let .memberRemoved(member):
+            w.u8(Self.header(.memberRemoved)); w.u16(member)
         case let .signed(signer, inner, signature):
             w.u8(Self.header(.signed)); w.u16(signer); w.u8(UInt8(min(inner.count, 80))); w.bytes(inner.prefix(80))
             w.bytes(signature.count == 64 ? signature : Data(count: 64))
@@ -154,6 +164,13 @@ public enum HelpFrame: Equatable, Sendable {
         case .board:
             guard let member = r.u16(), let key = r.take(32), let sig = r.take(64) else { return nil }
             self = .board(member: member, publicKey: Data(key), signature: Data(sig))
+        case .memberAdded:
+            guard let member = r.u16(), let role = r.u8().flatMap(Member.Role.init(code:)), let unit = r.u32(),
+                  let key = r.take(32) else { return nil }
+            self = .memberAdded(member: member, role: role, unit: unit, signingKey: Data(key))
+        case .memberRemoved:
+            guard let member = r.u16() else { return nil }
+            self = .memberRemoved(member: member)
         case .signed:
             guard let signer = r.u16(), let n = r.u8(), n <= 80, let inner = r.take(Int(n)), let sig = r.take(64) else { return nil }
             self = .signed(signer: signer, inner: Data(inner), signature: Data(sig))
@@ -209,6 +226,8 @@ public enum HelpFrame: Equatable, Sendable {
         switch frame {
         case let .availability(who, _, _, _) where who == signer: return frame
         case let .noticeAck(_, by, _) where by == signer: return frame
+        // The caller of this checks that the signer is a coordinator.
+        case .memberAdded, .memberRemoved: return frame
         default: return nil
         }
     }

@@ -109,6 +109,27 @@ final class GroupTests: XCTestCase {
         XCTAssertFalse(group.acceptsAck(.signedAck(unit: 70001, request: 1, responder: 2, at: now, identity: responder)), "removed")
     }
 
+    func testOthersLearnOfANewMemberSoTheirAcksCount() {
+        let coord = DeviceIdentity(), caller = DeviceIdentity(), newcomer = DeviceIdentity()
+        var group = newGroup(coord)
+        group.members.append(Member(number: 2, name: "Caller", role: .caller, publicKey: caller.publicKey, unit: 70001, signingKey: caller.signingPublicKey))
+        var callersCopy = group
+        let invite = Joining.invitation(for: group, coordinator: coord)
+        let w = try! Joining.admit(Joining.request(invite, name: "New", call: false, respond: true, me: newcomer), to: &group, invite: invite, coordinator: coord)
+        let ack = HelpFrame.signedAck(unit: 70001, request: 1, responder: w.memberNumber, at: Date(), identity: newcomer)
+        XCTAssertFalse(callersCopy.acceptsAck(ack), "before hearing of them")
+        let signed = HelpFrame.signing(group.addedFrame(w.memberNumber)!, as: 1, identity: coord)
+        XCTAssertLessThanOrEqual(signed.encoded().count, HelpFrame.maxPayload)
+        guard let inner = HelpFrame(signed.encoded())?.verifiedInner(signedBy: coord.signingPublicKey) else { return XCTFail() }
+        callersCopy.apply(membership: inner)
+        XCTAssertTrue(callersCopy.acceptsAck(ack))
+        XCTAssertEqual(callersCopy.member(w.memberNumber)?.name, "Member \(w.memberNumber)")
+        callersCopy.apply(membership: .memberRemoved(member: w.memberNumber))
+        XCTAssertFalse(callersCopy.acceptsAck(ack))
+        callersCopy.apply(membership: inner)
+        XCTAssertNotNil(callersCopy.member(w.memberNumber), "re-adding the same number is allowed")
+    }
+
     func testBadCodesAreRejected() {
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "hello"))
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPANDI1:%%%"))

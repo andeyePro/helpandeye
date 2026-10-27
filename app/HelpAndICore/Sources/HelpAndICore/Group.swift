@@ -4,7 +4,14 @@ import Foundation
 /// A member's place in a group. Numbers, not names, are what travel on air (decision 12); the
 /// name lives only on group members' phones.
 public struct Member: Codable, Equatable, Sendable, Identifiable {
-    public enum Role: String, Codable, Sendable { case caller, responder, both, coordinator }
+    public enum Role: String, Codable, Sendable {
+        case caller, responder, both, coordinator
+
+        var code: UInt8 { switch self { case .caller: 1; case .responder: 2; case .both: 3; case .coordinator: 4 } }
+        init?(code: UInt8) {
+            switch code { case 1: self = .caller; case 2: self = .responder; case 3: self = .both; case 4: self = .coordinator; default: return nil }
+        }
+    }
     public var id: UInt16 { number }
     public let number: UInt16
     public var name: String
@@ -118,6 +125,28 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// The rota, with every responder available unless they have said otherwise.
     public var defaultRota: Rota {
         Rota(responders: members.filter(\.canRespond).map(\.number), defaultAvailable: true)
+    }
+
+    /// Applies a coordinator's signed membership change on another member's phone. A new member
+    /// is known by number until a key update brings their name. Never touches the secrets.
+    public mutating func apply(membership frame: HelpFrame, at now: Date = Date()) {
+        switch frame {
+        case let .memberAdded(number, role, unit, key):
+            guard member(number) == nil, !removedUnits.contains(unit) else { return }
+            members.append(Member(number: number, name: "Member \(number)", role: role, publicKey: Data(),
+                                  unit: role == .responder ? nil : unit, signingKey: key))
+        case let .memberRemoved(number):
+            guard let m = member(number) else { return }
+            members.removeAll { $0.number == number }
+            if let u = m.unit { removedUnits.insert(u) }
+        default: break
+        }
+    }
+
+    /// What a coordinator's phone sends so other members learn of a new member.
+    public func addedFrame(_ number: UInt16) -> HelpFrame? {
+        guard let m = member(number), let key = m.signingKey else { return nil }
+        return .memberAdded(member: m.number, role: m.role, unit: m.unit ?? 0, signingKey: key)
     }
 
     public var escalationPolicy: EscalationPolicy {

@@ -68,8 +68,23 @@ final class AppModel: ObservableObject {
 
     func updateGroup(_ change: (inout GroupState) -> Void) {
         guard var s = saved else { return }
+        let before = Set(s.group.members.map(\.number))
         change(&s.group)
         setState(s)
+        // A coordinator tells everyone who joined or left, signed, so their acknowledgements
+        // count (or stop counting) on every phone at once.
+        guard me?.role == .coordinator, let me = saved?.me else { return }
+        let after = Set(s.group.members.map(\.number))
+        let frames = after.subtracting(before).compactMap { s.group.addedFrame($0) }
+            + before.subtracting(after).map { HelpFrame.memberRemoved(member: $0) }
+        for f in frames { Task { await sendToAll(.signing(f, as: me, identity: identity)) } }
+    }
+
+    /// Over the internet if it is set up, and over the mesh as well, so members without internet
+    /// hear too. Optional airtime.
+    private func sendToAll(_ frame: HelpFrame) async {
+        if relay.isConfigured { _ = await relay.send(frame) }
+        _ = await sendOnMesh(frame, kind: .optional)
     }
 
     func leave() {
@@ -182,9 +197,13 @@ final class AppModel: ObservableObject {
         guard let me = saved?.me, let key = board.selfInfo?.publicKey else { return }
         activity.boardKeys[me] = key
         for (member, k) in activity.boardKeys where member != me { await board.addContact(k, name: "Help&I \(member)") }
-        let frame = HelpFrame.signedBoard(member: me, publicKey: key, identity: identity)
-        if relay.isConfigured { _ = await relay.send(frame) }
-        _ = await sendOnMesh(frame, kind: .optional)
+        await sendToAll(.signedBoard(member: me, publicKey: key, identity: identity))
+        // A coordinator repeats who is in the group, for members who missed it.
+        if me == saved?.me, self.me?.role == .coordinator, let g = group {
+            for m in g.members where m.number != me {
+                if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: me, identity: identity)) }
+            }
+        }
     }
 
     /// A direct message counts only if it came from the box of the member whose unit it names.
@@ -226,7 +245,7 @@ final class AppModel: ObservableObject {
         guard frame.mayGoOnGroupChannel else { return "Only goes over the internet" }
         guard board.state == .ready, let radio = board.radio else { return meshUnavailableReason }
         guard radio.band != nil, activity.airtime != nil else { return "Box is on a frequency Help&I will not use" }
-        let seconds = radio.airtime(bytes: meshPacketBytes(payload: frame.encoded().count))
+        let seconds = radio.airtime(bytes: meshPacketBytes(payload: frame.encoded().count)) * Double(board.channelsPerSend)
         guard activity.airtime!.allows(seconds, kind: kind, at: Date()) else { return "Radio time used up for now" }
         // Reserve before sending, so overlapping sends cannot each see the same allowance. Give it
         // back only when the box certainly did not transmit.
@@ -281,15 +300,19 @@ final class AppModel: ObservableObject {
             // Counted only when signed (below), so a removed phone cannot fake them.
             return
         case let .signed(signer, _, _):
-            switch frame.verifiedInner(signedBy: group?.member(signer)?.signingKey) {
-            case let inner? where group?.member(signer)?.canRespond == true:
-                if case let .noticeAck(notice, by, _) = inner {
-                    if group?.member(by)?.role == .coordinator { notices[notice]?.acknowledge(by: by) }
-                } else {
-                    activity.rota.apply(inner); checkGaps()
-                }
+            guard let sender = group?.member(signer), let inner = frame.verifiedInner(signedBy: sender.signingKey) else { return }
+            switch inner {
+            case let .noticeAck(notice, by, _):
+                if sender.role == .coordinator { notices[notice]?.acknowledge(by: by) }
+            case .availability:
+                if sender.canRespond { activity.rota.apply(inner); checkGaps() }
+            case .memberAdded, .memberRemoved:
+                // Only a coordinator changes who is in the group.
+                if sender.role == .coordinator, me?.role != .coordinator { updateGroup { $0.apply(membership: inner) } }
             default: break
             }
+            return
+        case .memberAdded, .memberRemoved:
             return
         case let .board(member, key, _):
             guard member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey),
