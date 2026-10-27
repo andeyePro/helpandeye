@@ -129,3 +129,23 @@ final class RequestTests: XCTestCase {
         XCTAssertEqual(inbox.sorted.map(\.key.unit), [3, 1, 2])
     }
 }
+
+final class WithdrawnCategoryTests: XCTestCase {
+    func testACategoryPressedByMistakeCanBeTakenBackEvenIfHeardOutOfOrder() {
+        var r = OutgoingRequest(unit: 70001, number: 4, colour: .amber, createdAt: Date())
+        let locked = r.add(.lockedOut)
+        let fallen = r.add(.fallen)
+        let back = r.withdraw(.lockedOut)
+        XCTAssertEqual(r.categories, [.fallen])
+        XCTAssertNil(r.withdraw(.lockedOut), "nothing left to take back")
+        XCTAssertEqual(HelpFrame(back!.encoded()), back)
+
+        var inbox = ResponderInbox()
+        _ = inbox.receive(locked, via: .mesh, at: Date())
+        _ = inbox.receive(fallen, via: .mesh, at: Date())
+        XCTAssertEqual(inbox.receive(back!, via: .mesh, at: Date()), .updated(IncomingRequest.Key(unit: 70001, request: 4)))
+        XCTAssertEqual(inbox.requests.values.first?.orderedCategories, [.fallen])
+        _ = inbox.receive(locked, via: .internet, at: Date())
+        XCTAssertEqual(inbox.requests.values.first?.orderedCategories, [.fallen], "a late copy does not bring it back")
+    }
+}

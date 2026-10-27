@@ -64,6 +64,7 @@ final class AppModel: ObservableObject {
 
     func press(_ colour: Colour) { engine.press(colour) }
     func add(_ category: CallCategory) { engine.add(category) }
+    func withdraw(_ category: CallCategory) { engine.withdraw(category) }
     func addNote(_ text: String) -> String? { engine.addNote(text) }
     func sharePosition(latitude: Double, longitude: Double, accuracy: Double) {
         engine.sharePosition(latitude: latitude, longitude: longitude, accuracy: accuracy)

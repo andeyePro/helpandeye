@@ -42,12 +42,12 @@ struct CreateGroupView: View {
             }
             Section {
                 Text("You will coordinate this group: invite people, and be told when nobody is available to respond.")
-                    .font(.footnote)
                 Button("Start the group") { model.createGroup(name: name, myName: myName, call: call, phone: phone.isEmpty ? nil : phone) }
                     .disabled(name.isEmpty || myName.isEmpty)
             }
         }
         .navigationTitle("Start a group")
+        .keyboardDismissable()
     }
 }
 
@@ -85,7 +85,6 @@ struct JoinGroupView: View {
                     QRCode(text: requestCode).frame(maxWidth: 260).frame(maxWidth: .infinity)
                     ShareLink(item: requestCode) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
                     Text("If you are not together, read this number to each other on a call: \(Joining.safetyNumber(invite.coordinatorKey, model.identity.publicKey)). It must match on both phones.")
-                        .font(.footnote)
                 }
                 CodeReader(prompt: "Then scan the welcome code they show you") { code in
                     do {
@@ -98,6 +97,7 @@ struct JoinGroupView: View {
             if let error { Text(error).foregroundStyle(.red) }
         }
         .navigationTitle("Join a group")
+        .keyboardDismissable()
     }
 }
 
@@ -118,7 +118,10 @@ struct GroupView: View {
                     }
                 }
                 MyPhoneSection()
-                if model.me?.canCall == true { CheckInSection() }
+                if model.me?.canCall == true {
+                    ShareEveryCallSection()
+                    CheckInSection()
+                }
                 if model.me?.role == .coordinator {
                     Section("Gaps in the next 24 hours") {
                         if model.gaps.isEmpty { Text("Someone is available all the time.") }
@@ -132,7 +135,7 @@ struct GroupView: View {
                     ForEach(model.group?.members ?? []) { m in
                         VStack(alignment: .leading) {
                             Text(m.name + (m.number == model.saved?.me ? " (you)" : "")).font(.headline)
-                            Text(roleText(m)).font(.footnote).foregroundStyle(.secondary)
+                            Text(roleText(m))
                         }
                         .swipeActions {
                             // Only the group's first coordinator removes people or makes coordinators.
@@ -157,11 +160,13 @@ struct GroupView: View {
                     // Everyone but the first coordinator, other coordinators included, takes in new keys.
                     ReceiveUpdateSection()
                 }
+                DisplaySection()
                 Section {
                     Button("Leave this group", role: .destructive) { model.leave() }
                 }
             }
             .navigationTitle(model.group?.name ?? "Group")
+            .keyboardDismissable()
             .sheet(isPresented: $inviting) { NavigationStack { InviteView() } }
         }
     }
@@ -203,7 +208,6 @@ struct InviteView: View {
                 Section("Add \(request.name)?") {
                     Text(request.wantsToCall && request.wantsToRespond ? "Calls for help and responds" : (request.wantsToCall ? "Calls for help" : "Responds"))
                     Text("If you are not together, the number on their phone must be \(Joining.safetyNumber(model.identity.publicKey, request.publicKey)).")
-                        .font(.footnote)
                     Button("Add them") {
                         var made: Joining.Welcome?
                         model.updateGroup { g in made = try? Joining.admit(request, to: &g, invite: invite, coordinator: model.identity) }
@@ -221,6 +225,7 @@ struct InviteView: View {
             if let error { Text(error).foregroundStyle(.red) }
         }
         .navigationTitle("Invite someone")
+        .keyboardDismissable()
         .onAppear { if invite == nil, let g = model.group { invite = Joining.invitation(for: g, coordinator: model.identity) } }
     }
 }
@@ -232,7 +237,7 @@ struct KeyUpdatesSection: View {
 
     var body: some View {
         Section("New keys to hand out") {
-            Text("A phone was removed, so the group has new keys. Show each member their update code.").font(.footnote)
+            Text("A phone was removed, so the group has new keys. Show each member their update code.")
             ForEach((model.group?.members ?? []).filter { $0.number != model.saved?.me }) { m in
                 Button("Update code for \(m.name)") { shown = m }
             }
@@ -269,6 +274,18 @@ struct ReceiveUpdateSection: View {
     }
 }
 
+/// Whether red and amber calls also send where the caller is.
+struct ShareEveryCallSection: View {
+    @AppStorage(ShareEveryCall.key) private var on = false
+
+    var body: some View {
+        Section("When you call") {
+            Toggle("Send where I am with every Come now or Come when convenient", isOn: $on)
+            Text("It goes only to your responders, encrypted, after the call itself.")
+        }
+    }
+}
+
 /// The number a caller's ready-written text goes to, if nothing else got through.
 struct MyPhoneSection: View {
     @EnvironmentObject var model: AppModel
@@ -281,7 +298,6 @@ struct MyPhoneSection: View {
             Button("Save") { model.setMyPhone(phone); saved = true }
             Text(saved ? "Saved. Members with the internet route get it now; others when they next scan a code."
                        : "If a call cannot go any other way, the caller can send it to responders as a text.")
-                .font(.footnote).foregroundStyle(.secondary)
         }
         .onAppear { phone = model.me?.phone ?? "" }
     }
@@ -296,8 +312,7 @@ struct RelaySection: View {
             TextField("Relay address, starting https://", text: $url).textInputAutocapitalization(.never).keyboardType(.URL)
             Button("Save") { model.setRelay(url) }
             Text(model.relay.isConfigured ? "Calls also go over the internet." : "Not set up: calls go over the local radio only.")
-                .font(.footnote)
-            Text("Members get the address the next time they join or scan a key update.").font(.footnote).foregroundStyle(.secondary)
+            Text("Members get the address the next time they join or scan a key update.")
         }
         .onAppear { url = model.group?.relayURL ?? "" }
     }
@@ -319,7 +334,6 @@ struct CheckInSection: View {
                 Toggle("A second check-in", isOn: $twice)
                 if twice { DatePicker("Second check-in", selection: $evening, displayedComponents: .hourAndMinute) }
                 Text("Press I'm OK now within half an hour of each time. If you do not, your responders get a come-when-convenient call.")
-                    .font(.footnote)
             }
             Button("Save") { model.setCheckIn(on ? CheckInSchedule(times: [minutes(morning)] + (twice ? [minutes(evening)] : [])) : nil) }
         }

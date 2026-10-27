@@ -8,12 +8,39 @@ import SwiftUI
 struct CallView: View {
     @EnvironmentObject var model: AppModel
     @State private var composingSMS = false
+    @AppStorage(ShareEveryCall.key) private var shareEveryCall = false
+    @StateObject private var location = OneShotLocation()
 
     var body: some View {
+        NavigationStack {
+            ScrollView {
+                content.padding()
+                    // A tap on any empty part of the screen puts the keyboard away.
+                    .background(Color.clear.contentShape(Rectangle()).onTapGesture { hideKeyboard() })
+            }
+            .keyboardDismissable()
+            .toolbar(.hidden, for: .navigationBar)
+        }
+        .sheet(isPresented: $composingSMS) {
+            if let r = model.current {
+                SMSComposer(recipients: RoutePlan.smsRecipients(in: model.group, me: model.saved?.me),
+                            body: RoutePlan.smsBody(for: r))
+            }
+        }
+    }
+
+    /// Red and amber also send where the caller is, if they chose that.
+    private func press(_ colour: Colour) {
+        model.press(colour)
+        if shareEveryCall, colour != .green, model.canSendPersonal {
+            location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) }
+        }
+    }
+
+    private var content: some View {
         VStack(spacing: 16) {
             if let r = model.current { StatusCard(request: r, composingSMS: $composingSMS) }
-            Spacer(minLength: 0)
-            Button { model.press(.red) } label: {
+            Button { press(.red) } label: {
                 // Scales with the reader's text size, shrinking only if it would not fit.
                 Text("Come now").font(.largeTitle.weight(.heavy)).minimumScaleFactor(0.5).frame(maxWidth: .infinity, minHeight: 220)
             }
@@ -29,19 +56,21 @@ struct CallView: View {
             }
             NotA999Notice()
         }
-        .padding()
-        .sheet(isPresented: $composingSMS) {
-            if let r = model.current {
-                SMSComposer(recipients: RoutePlan.smsRecipients(in: model.group, me: model.saved?.me),
-                            body: RoutePlan.smsBody(for: r))
-            }
-        }
     }
+}
+
+/// The caller's choice to send where they are with every red or amber call. Kept on this phone.
+enum ShareEveryCall {
+    static let key = "shareEveryCall"
+}
+
+func hideKeyboard() {
+    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 }
 
 extension CallView {
     private var amber: some View {
-        Button { model.press(.amber) } label: {
+        Button { press(.amber) } label: {
             Text("Come when convenient").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
         }
         .buttonStyle(CallButtonStyle(colour: .amber))
@@ -49,7 +78,7 @@ extension CallView {
     }
 
     private var green: some View {
-        Button { model.press(.green) } label: {
+        Button { press(.green) } label: {
             Text("I'm OK now").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
         }
         .buttonStyle(CallButtonStyle(colour: .green))
@@ -81,9 +110,8 @@ struct StatusCard: View {
                 Text(headline).font(.title3.bold())
             }
             Text("\(request.colour.label), \(request.createdAt.formatted(date: .omitted, time: .shortened))")
-                .foregroundStyle(.secondary)
             ForEach(Route.allCases.filter { request.routes[$0] != nil }, id: \.self) { route in
-                Text(line(route)).font(.footnote).foregroundStyle(.secondary)
+                Text(line(route))
             }
             if request.status == .notSent {
                 HStack {
@@ -123,35 +151,55 @@ struct FollowUps: View {
     let request: OutgoingRequest
     @State private var typed = ""
     @State private var problem: String?
+    @FocusState private var typing: Bool
     @StateObject private var location = OneShotLocation()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             Text("Tell them more (optional)").font(.headline)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 8) {
+                ForEach(CallCategory.choices, id: \.self) { c in
+                    let chosen = request.categories.contains(c)
+                    // Pressed again, a choice is taken back: one pressed by mistake is not stuck.
+                    Button {
+                        if chosen { model.withdraw(c); return }
+                        model.add(c)
+                        // "Something else" asks what: the keyboard's microphone takes speech too.
+                        if c == .other, model.canSendPersonal { typing = true }
+                    } label: {
+                        Label(c.label, systemImage: chosen ? "checkmark.circle.fill" : "circle")
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(chosen ? .accentColor : .primary)
+                    .accessibilityAddTraits(chosen ? .isSelected : [])
+                    .accessibilityHint(chosen ? "Tells your responders to ignore this" : "Tells your responders")
+                }
+            }
             if model.canSendPersonal {
-                HStack {
-                    TextField("Type a short message", text: $typed)
+                HStack(alignment: .bottom) {
+                    TextField("Type or speak a short message", text: $typed, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
+                        .focused($typing)
                         .submitLabel(.send)
                         .onSubmit(sendNote)
-                    Button("Send", action: sendNote).disabled(typed.isEmpty)
+                    Button("Send", action: sendNote).buttonStyle(.borderedProminent).disabled(typed.isEmpty)
                 }
-                Button(location.state == .finding ? "Finding where you are…" : "Share where I am") {
+                Button {
                     location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) }
+                } label: {
+                    Label(location.state == .finding ? "Finding where you are…" : "Share where I am", systemImage: "location.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
                 }
+                .buttonStyle(.bordered)
                 .disabled(location.state == .finding)
-                if location.state == .shared { Text("Your location was sent.").font(.footnote) }
-                if location.state == .denied { Text("Help&I is not allowed to use your location.").font(.footnote) }
-                ForEach(request.notes, id: \.self) { Text("You said: \($0)").font(.footnote).foregroundStyle(.secondary) }
+                if location.state == .shared { Text("Where you are was sent.") }
+                if location.state == .denied { Text("Help&I is not allowed to use your location. You can allow it in Settings.") }
+                ForEach(request.notes, id: \.self) { Text("You said: \($0)") }
+            } else {
+                Text("Typed messages and where you are can only go over the internet or your box, and neither is working now.")
             }
-            if let problem { Text(problem).font(.footnote) }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 8) {
-                ForEach(CallCategory.allCases.filter { $0 != .missedCheckIn }, id: \.self) { c in
-                    Button(c.label) { model.add(c) }
-                        .buttonStyle(.bordered)
-                        .disabled(request.categories.contains(c))
-                }
-            }
+            if let problem { Text(problem) }
         }
     }
 }

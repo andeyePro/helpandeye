@@ -10,6 +10,11 @@ public enum Colour: UInt8, Sendable, CaseIterable, Codable {
 /// the group channel without carrying personal detail (decision 12).
 public enum CallCategory: UInt8, Sendable, CaseIterable, Codable {
     case fallen = 1, unwell = 2, lockedOut = 3, powerCut = 4, needCompany = 5, missedCheckIn = 6, other = 99
+    /// Sent in a follow-up's place when the caller takes it back, such as one pressed by mistake.
+    case withdrawn = 0
+
+    /// What a caller can choose from.
+    public static let choices: [CallCategory] = [.fallen, .unwell, .lockedOut, .powerCut, .needCompany, .other]
 }
 
 /// Things a coordinator is told about and must acknowledge.

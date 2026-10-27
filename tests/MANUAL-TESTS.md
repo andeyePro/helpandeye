@@ -267,3 +267,13 @@ Pass: the Box tab shows the box's code before the pairing prompt appears (and ne
 2. On the first coordinator's phone, remove a phone. Then move the clock on past the seven-day changeover.
 
 Pass: during the changeover phone B's Box tab says there is no free channel; afterwards, without restarting, it reuses the old slot and says "Connected", and calls reach it.
+
+## 33. Typing, text size and taking back a choice
+
+1. On any screen with a text box, including the mobile number box (which has no return key), type something, then tap Done above the keyboard. Type again, then tap an empty part of the Help screen, and on other screens scroll.
+2. Under Group, Text size, choose Larger, then Largest. Look at every tab in light and dark mode.
+3. Press Come when convenient, tap I'm locked out, then tap it again. On phone B, watch the request.
+4. Tap Something else.
+5. Turn on VoiceOver and go through the Help tab.
+
+Pass: the keyboard always goes away and never hides the tabs for good. Text gets bigger on every tab and nothing is cut off; nothing is grey-on-grey. I'm locked out shows ticked, then unticked, and phone B shows it, then stops showing it. Something else opens the message box with the keyboard, and its microphone takes speech. VoiceOver reads every button, says which choices are selected, and reads the call's status when it changes.

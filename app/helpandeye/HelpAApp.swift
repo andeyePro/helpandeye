@@ -6,7 +6,7 @@ struct HelpAApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
 
     var body: some Scene {
-        WindowGroup { RootView().environmentObject(AppModel.shared) }
+        WindowGroup { SizedRoot().environmentObject(AppModel.shared) }
     }
 }
 
@@ -34,6 +34,12 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
             done(.newData)
         }
     }
+}
+
+/// Applies the reader's chosen text size to every screen.
+struct SizedRoot: View {
+    @AppStorage(TextSize.key) private var size = TextSize.asPhone
+    var body: some View { RootView().dynamicTypeSize(size.sizes) }
 }
 
 struct RootView: View {
@@ -99,8 +105,6 @@ struct NoticeBanner: View {
 struct NotA999Notice: View {
     var body: some View {
         Text("Help&I does not replace 999 or telecare. In an emergency, call 999 first if you can.")
-            .font(.footnote)
-            .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .padding(.horizontal)
     }
@@ -120,7 +124,7 @@ extension CallCategory {
         switch self {
         case .fallen: "I've fallen"; case .unwell: "I feel unwell"; case .lockedOut: "I'm locked out"
         case .powerCut: "Power cut"; case .needCompany: "I'd like company"; case .missedCheckIn: "Missed a check-in"
-        case .other: "Something else"
+        case .other: "Something else"; case .withdrawn: ""
         }
     }
 }

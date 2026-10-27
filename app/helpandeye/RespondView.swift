@@ -10,11 +10,12 @@ struct RespondView: View {
         NavigationStack {
             List {
                 if model.inbox.requests.isEmpty {
-                    Text("No calls for help.").foregroundStyle(.secondary)
+                    Text("No calls for help.")
                 }
                 ForEach(model.inbox.sorted) { r in RequestRow(request: r) }
             }
             .navigationTitle("Respond")
+            .keyboardDismissable()
         }
     }
 }
@@ -29,7 +30,7 @@ struct RequestRow: View {
                 Circle().fill((request.colour ?? .red).color).frame(width: 18, height: 18)
                 Text(model.name(ofUnit: request.key.unit)).font(.title3.bold())
                 Spacer()
-                Text(request.firstHeardAt, style: .relative).font(.footnote).foregroundStyle(.secondary)
+                Text(request.firstHeardAt, style: .relative)
             }
             Text(request.colour?.label ?? "Call for help (details still arriving)")
             ForEach(request.orderedCategories, id: \.self) { Text("• \($0.label)") }
@@ -39,17 +40,16 @@ struct RequestRow: View {
                 Link("Open their location in Maps (within \(Int(p.accuracy)) m)", destination: url)
             }
             Text("Heard by " + request.heardOn.map { $0 == .mesh ? "local radio" : ($0 == .internet ? "internet" : "text") }.sorted().joined(separator: " and "))
-                .font(.footnote).foregroundStyle(.secondary)
             if request.isAcknowledged {
                 Text("Acknowledged by " + request.acknowledgedBy.map(model.name(ofMember:)).joined(separator: ", "))
-                    .font(.callout.bold()).foregroundStyle(.secondary)
+                    .font(.callout.bold())
             }
             switch model.ackSendStatus(request.key) {
-            case .sending?: Text("Sending your acknowledgement…").font(.footnote)
+            case .sending?: Text("Sending your acknowledgement…")
             case .notSent?:
                 HStack {
                     Image(systemName: "xmark").foregroundStyle(.red).accessibilityLabel("Not sent")
-                    Text("Your acknowledgement did not go out, so the caller has not seen it.").font(.footnote)
+                    Text("Your acknowledgement did not go out, so the caller has not seen it.")
                     Button("Try again") { model.retryAck(request.key) }.buttonStyle(.bordered)
                 }
             default: EmptyView()

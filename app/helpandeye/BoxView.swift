@@ -39,7 +39,7 @@ struct BoxView: View {
                         } label: {
                             VStack(alignment: .leading) {
                                 Text(p.name ?? "MeshCore box")
-                                if let pin = model.board.pin(for: p.identifier) { Text("Bluetooth code \(String(pin))").font(.footnote) }
+                                if let pin = model.board.pin(for: p.identifier) { Text("Bluetooth code \(String(pin))") }
                             }
                         }
                     }
@@ -49,6 +49,7 @@ struct BoxView: View {
                 }
             }
             .navigationTitle("Box")
+            .keyboardDismissable()
         }
     }
 

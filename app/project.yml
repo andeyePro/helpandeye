@@ -37,6 +37,7 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        "UISupportedInterfaceOrientations~ipad": [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIBackgroundModes: [bluetooth-central, remote-notification]
         NSBluetoothAlwaysUsageDescription: "Help&I uses Bluetooth to talk to your Help&I box, so a call for help can go over the local radio network."
         NSCameraUsageDescription: "Help&I uses the camera to scan a group's joining code."
@@ -47,7 +48,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
   helpandeyeNotify:
     type: app-extension
     platform: iOS
@@ -65,7 +66,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.notify
-        TARGETED_DEVICE_FAMILY: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
   helpandeyeWatch:
     type: application
     platform: watchOS

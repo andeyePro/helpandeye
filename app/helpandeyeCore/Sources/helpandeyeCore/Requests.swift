@@ -30,6 +30,8 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     public let createdAt: Date
     public private(set) var routes: [Route: RouteState] = [:]
     public private(set) var categories: [CallCategory] = []
+    /// The follow-up part each category went in, so it can be taken back.
+    private var categoryParts: [CallCategory: UInt8] = [:]
     public private(set) var notes: [String] = []
     public private(set) var acknowledgedBy: [UInt16] = []
     /// Takes back acknowledgements from people no longer in the group: one heard from a phone
@@ -59,7 +61,17 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     /// Returns the follow-up frame to send, numbered after any categories already added.
     public mutating func add(_ category: CallCategory) -> HelpFrame {
         categories.append(category)
-        return .followUp(unit: unit, request: number, part: nextPart(), category: category)
+        let part = nextPart()
+        categoryParts[category] = part
+        return .followUp(unit: unit, request: number, part: part, category: category)
+    }
+
+    /// Takes back a category, in the same part, so responders' phones remove it.
+    public mutating func withdraw(_ category: CallCategory) -> HelpFrame? {
+        guard let part = categoryParts[category] else { return nil }
+        categories.removeAll { $0 == category }
+        categoryParts[category] = nil
+        return .followUp(unit: unit, request: number, part: part, category: .withdrawn)
     }
 
     public mutating func addNote(_ typed: String) -> HelpFrame {
@@ -116,6 +128,8 @@ public struct IncomingRequest: Equatable, Sendable, Identifiable, Codable {
     /// works out the same turns however late it heard.
     public internal(set) var sentAt: Date?
     public internal(set) var categories: [UInt8: CallCategory] = [:]
+    /// Parts the caller took back. A copy of the original heard late does not bring one back.
+    public internal(set) var withdrawnParts: Set<UInt8> = []
     public internal(set) var heardOn: Set<Route> = []
     public internal(set) var acknowledgedBy: [UInt16] = []
     public internal(set) var notes: [UInt8: String] = [:]
@@ -194,8 +208,10 @@ public struct ResponderInbox: Sendable, Codable {
             // arrives, and alert now: a follow-up means somebody pressed for help.
             var r = requests[key] ?? IncomingRequest(key: key, colour: nil, firstHeardAt: now)
             let isNew = requests[key] == nil && !r.isAcknowledged
-            let changed = r.categories[part] != category
-            r.categories[part] = category
+            let wanted = category == .withdrawn || r.withdrawnParts.contains(part) ? nil : category
+            let changed = r.categories[part] != wanted
+            r.categories[part] = wanted
+            if category == .withdrawn { r.withdrawnParts.insert(part) }
             r.heardOn.insert(route)
             requests[key] = r
             return isNew ? .new(key) : (changed ? .updated(key) : .duplicate)
@@ -293,6 +309,7 @@ extension OutgoingRequest {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         routes = try c.value(.routes, or: [:])
         categories = try c.value(.categories, or: [])
+        categoryParts = try c.value(.categoryParts, or: [:])
         notes = try c.value(.notes, or: [])
         acknowledgedBy = try c.value(.acknowledgedBy, or: [])
         parts = try c.value(.parts, or: 0)
@@ -308,6 +325,7 @@ extension IncomingRequest {
         firstHeardAt = try c.decode(Date.self, forKey: .firstHeardAt)
         sentAt = try c.decodeIfPresent(Date.self, forKey: .sentAt)
         categories = try c.value(.categories, or: [:])
+        withdrawnParts = try c.value(.withdrawnParts, or: [])
         heardOn = try c.value(.heardOn, or: [])
         acknowledgedBy = try c.value(.acknowledgedBy, or: [])
         notes = try c.value(.notes, or: [:])

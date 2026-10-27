@@ -395,6 +395,14 @@ public final class HelpEngine: ObservableObject {
         spawn { _ = await self.sendOptional(frame) }
     }
 
+    /// Takes back a category pressed by mistake.
+    public func withdraw(_ category: CallCategory) {
+        guard var r = activity.outgoing.popLast() else { return }
+        let frame = r.withdraw(category)
+        activity.outgoing.append(r)
+        if let frame { spawn { _ = await self.sendOptional(frame) } }
+    }
+
     /// Typed text and position never go on the group channel (decision 12): over the internet,
     /// sealed with the group key, or else as direct messages to each responder's box.
     public var canSendPersonal: Bool { relay.isConfigured || mesh.isReady }
