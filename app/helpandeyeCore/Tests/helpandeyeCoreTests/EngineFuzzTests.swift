@@ -3,7 +3,7 @@ import XCTest
 
 /// Random interleavings of presses, acknowledgements, membership changes, links going up and
 /// down, lost packets and clock jumps across a group of phones, checking the safety rules after
-/// every step. Every run is repeatable from its seed. HELPANDI_FUZZ_SEEDS=n runs more seeds.
+/// every step. Every run is repeatable from its seed. HELPA_FUZZ_SEEDS=n runs more seeds.
 @MainActor final class EngineFuzzTests: XCTestCase {
     struct SplitMix64: RandomNumberGenerator {
         var state: UInt64
@@ -34,7 +34,7 @@ import XCTest
     }
 
     func testRandomInterleavingsKeepTheSafetyRules() async throws {
-        let seeds = Int(ProcessInfo.processInfo.environment["HELPANDI_FUZZ_SEEDS"] ?? "") ?? 60
+        let seeds = Int(ProcessInfo.processInfo.environment["HELPA_FUZZ_SEEDS"] ?? "") ?? 60
         for seed in 1...seeds {
             try await run(seed: UInt64(seed), steps: 250)
         }
@@ -254,7 +254,7 @@ import XCTest
         XCTAssertEqual(versions.count, 1, "seed \(seed): phones disagree on the membership version: \(versions)\n" + w.log.suffix(30).joined(separator: "\n"))
         // For relay/test/model.test.js: the member-list publishes this run made, with what the model
         // said, to replay through the real relay.
-        if let path = ProcessInfo.processInfo.environment["HELPANDI_RELAY_LOG"], seed <= 4 {
+        if let path = ProcessInfo.processInfo.environment["HELPA_RELAY_LOG"], seed <= 4 {
             let steps = w.air.relayLog.map { e -> [String: Any] in
                 ["signer": e.0, "status": e.2,
                  "list": ["generation": Int(e.1.generation), "members": e.1.members.map { ["key": $0.key, "role": $0.role] },

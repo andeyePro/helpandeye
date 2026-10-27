@@ -122,7 +122,7 @@ final class Relay: ObservableObject, RelayLink {
         do {
             let (data, response) = try await session.data(for: req)
             guard let http = response as? HTTPURLResponse else { return nil }
-            if http.value(forHTTPHeaderField: "X-HelpAndI-Allowance-Low") == "1" { onAllowanceLow?() }
+            if http.value(forHTTPHeaderField: "X-HelpA-Allowance-Low") == "1" { onAllowanceLow?() }
             if http.statusCode != 403 { lastProblem = nil }
             return (http.statusCode, data)
         } catch {

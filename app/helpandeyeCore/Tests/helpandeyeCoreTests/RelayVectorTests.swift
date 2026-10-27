@@ -8,7 +8,7 @@ final class RelayVectorTests: XCTestCase {
         let me = DeviceIdentity()
         let body = Data(#"{"sealed":"AAEC"}"#.utf8)
         let h = try RelayProtocol.headers(method: "POST", pathAndQuery: "/g/ABCDEFGHIJKLMNOP/messages", body: body, identity: me, now: Date())
-        let v = ["key": h["X-HelpAndI-Key"]!, "timestamp": h["X-HelpAndI-Time"]!, "signature": h["X-HelpAndI-Signature"]!,
+        let v = ["key": h["X-HelpA-Key"]!, "timestamp": h["X-HelpA-Time"]!, "signature": h["X-HelpA-Signature"]!,
                  "path": "/g/ABCDEFGHIJKLMNOP/messages", "body": String(decoding: body, as: UTF8.self)]
         print("VECTOR:" + String(decoding: try JSONSerialization.data(withJSONObject: v, options: .sortedKeys), as: UTF8.self))
     }

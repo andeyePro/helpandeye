@@ -8,9 +8,9 @@ that key: it holds ciphertext and the members' public signing keys, nothing else
 
 Every request is signed by the phone's Ed25519 key. The headers are:
 
-- `X-HelpAndI-Key`: the phone's public signing key, base64
-- `X-HelpAndI-Time`: milliseconds since 1970; refused if more than 5 minutes out
-- `X-HelpAndI-Signature`: Ed25519 over `HELPANDI-RELAY-1\n<method>\n<path and query>\n<time>\n<base64 SHA-256 of the body>`
+- `X-HelpA-Key`: the phone's public signing key, base64
+- `X-HelpA-Time`: milliseconds since 1970; refused if more than 5 minutes out
+- `X-HelpA-Signature`: Ed25519 over `HELPA-RELAY-1\n<method>\n<path and query>\n<time>\n<base64 SHA-256 of the body>`
 
 | Request | Who | Body |
 |---|---|---|
@@ -27,7 +27,7 @@ once awake. Because the push goes to everyone at once, a responder whose turn wo
 told early over the internet route: the escalation order still decides the repeated alerts.
 
 The group's first coordinator owns the group on the relay. The group's ID is made from their key
-(8 random bytes, then the first 8 bytes of SHA-256 over `HELPANDI-GROUP-1`, those bytes and the
+(8 random bytes, then the first 8 bytes of SHA-256 over `HELPA-GROUP-1`, those bytes and the
 key), so the group can be registered only by a list naming them as `primary`, whoever sends it.
 After that, any coordinator's list adds people, as members; only the owner sets roles, from their
 newest list, and removes people, by naming them in `removed`; nobody removed is ever listed
@@ -42,7 +42,7 @@ Each phone may post 20 messages a minute and ask for 2 pushes a minute; past tha
 refused with 429 and pushes are not sent. Push tokens of anyone left out of a new member list are
 deleted.
 
-Every response carries `X-HelpAndI-Allowance-Low: 1` once 40,000 relay requests have been made in
+Every response carries `X-HelpA-Allowance-Low: 1` once 40,000 relay requests have been made in
 the day, so coordinators hear before the free tier runs out. Each relay request uses two Durable
 Object requests (the group's and the meter's), so the free 100,000 Durable Object requests a day
 are reached at 50,000 relay requests, before the Worker limit. A phone polls every 30 seconds while

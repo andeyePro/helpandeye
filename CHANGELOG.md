@@ -4,6 +4,7 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Internal names drop HelpAndI** - Swift types, Info.plist keys, relay headers, signing labels, QR prefix and test settings now use `HelpA`/`HELPA` (for example `HELPA-GROUP-1`, `X-HelpA-Key`, `HELPA1:`), so nothing internal spells andi, andeye or &I. Signatures and group IDs change, so the relay test vectors were regenerated from the app; nothing was deployed, so no live group is affected. The QR prefix length is no longer hard-coded. 165 core tests, 20 relay tests, device build succeeds.
 - [x] **The app follows the andeye naming** - the Xcode project, targets, folders and Swift package are now `helpandeye`, `helpandeyeNotify`, `helpandeyeWatch` and `helpandeyeCore`, and the bundle IDs `com.andeye.help` (plus `.notify` and `.watchkitapp`), in line with `com.andeye.money`. The app is still shown as Help&I. 165 core tests, 20 relay tests, device build succeeds.
 - [x] **Three small fixes to reading the relay** - a narrow review of the relay-reading change found
   nothing that loses or falsely confirms a call, and three small issues, now fixed with tests:

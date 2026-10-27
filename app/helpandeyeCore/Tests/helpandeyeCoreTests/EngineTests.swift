@@ -627,7 +627,7 @@ final class RelayModel {
         XCTAssertEqual(caller.request?.routes[.mesh], .sent)
     }
 
-    func testDirectMessagesStayOffAFrequencyHelpAndIWillNotUse() async {
+    func testDirectMessagesStayOffAFrequencyTheAppWillNotUse() async {
         caller.engine.press(.red)
         await air.run()
         caller.mesh.radio = RadioSettings(frequencyMHz: 870.0, bandwidthKHz: 62.5, spreadingFactor: 8, codingRate: 8)

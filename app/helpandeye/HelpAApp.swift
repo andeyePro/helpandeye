@@ -2,7 +2,7 @@ import helpandeyeCore
 import SwiftUI
 
 @main
-struct HelpAndIApp: App {
+struct HelpAApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
 
     var body: some Scene {

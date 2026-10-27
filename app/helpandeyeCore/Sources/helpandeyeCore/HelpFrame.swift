@@ -213,7 +213,7 @@ public enum HelpFrame: Equatable, Sendable {
 
     static func ackInput(unit: UInt32, request: UInt16, responder: UInt16, ackedAt: UInt32, group: Data) -> Data {
         var w = ByteWriter()
-        w.bytes(Data("HELPANDI-ACK-2".utf8)); w.bytes(group); w.u32(unit); w.u16(request); w.u16(responder); w.u32(ackedAt)
+        w.bytes(Data("HELPA-ACK-2".utf8)); w.bytes(group); w.u32(unit); w.u16(request); w.u16(responder); w.u32(ackedAt)
         return w.data
     }
 
@@ -226,7 +226,7 @@ public enum HelpFrame: Equatable, Sendable {
 
     static func boardInput(member: UInt16, key: Data, group: Data) -> Data {
         var w = ByteWriter()
-        w.bytes(Data("HELPANDI-BOARD-2".utf8)); w.bytes(group); w.u16(member); w.bytes(key)
+        w.bytes(Data("HELPA-BOARD-2".utf8)); w.bytes(group); w.u16(member); w.bytes(key)
         return w.data
     }
 
@@ -237,7 +237,7 @@ public enum HelpFrame: Equatable, Sendable {
 
     static func signedInput(signer: UInt16, inner: Data, group: Data) -> Data {
         var w = ByteWriter()
-        w.bytes(Data("HELPANDI-SIGNED-2".utf8)); w.bytes(group); w.u16(signer); w.bytes(inner)
+        w.bytes(Data("HELPA-SIGNED-2".utf8)); w.bytes(group); w.u16(signer); w.bytes(inner)
         return w.data
     }
 

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { signingInput, verify } from "../src/relay.js";
 
 // Signed by the app's RelayProtocol (app/helpandeyeCore RelayVectorTests).
-const vector = {"body":"{\"sealed\":\"AAEC\"}","key":"Tuo9IbVjC7jhUXPQTWqdfCb9UoQ1ix+AqSQn03WOt0Y=","path":"\/g\/ABCDEFGHIJKLMNOP\/messages","signature":"kFxph\/gD7m7S1wcmX+NeMCTx9elGZf+7J5IFz86vyT48xwlJgX\/a15A9qxYbkLqMIHspjQUtsy7WHKQzA6+2AQ==","timestamp":"1793067444921"};
+const vector = {"body":"{\"sealed\":\"AAEC\"}","key":"TRAgti\/0OS4bCrpTWS8dqNdzBvciwckp2dV+4c92gS0=","path":"\/g\/ABCDEFGHIJKLMNOP\/messages","signature":"8ub9QJKuYvOjBu9pGwze\/IAO5MvmqE7dW0zWpS0cJiwjcGiKbc0FlODAWBkkb9vXkunX2\/DD6uLTw3BOdGeKDA==","timestamp":"1793105186783"};
 
 test("the relay verifies a request signed by the app", async () => {
   const input = await signingInput("POST", vector.path, vector.timestamp, vector.body);

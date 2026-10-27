@@ -7,11 +7,11 @@ final class RelayProtocolTests: XCTestCase {
         let me = DeviceIdentity()
         let body = Data(#"{"sealed":"AA=="}"#.utf8)
         let h = try RelayProtocol.headers(method: "POST", pathAndQuery: "/g/x/messages", body: body, identity: me, now: Date(timeIntervalSince1970: 1_793_000_000))
-        XCTAssertEqual(h["X-HelpAndI-Time"], "1793000000000")
-        let input = RelayProtocol.signingInput(method: "POST", pathAndQuery: "/g/x/messages", timestamp: h["X-HelpAndI-Time"]!, body: body)
-        let key = try Curve25519.Signing.PublicKey(rawRepresentation: Data(base64Encoded: h["X-HelpAndI-Key"]!)!)
-        XCTAssertTrue(key.isValidSignature(Data(base64Encoded: h["X-HelpAndI-Signature"]!)!, for: input))
-        XCTAssertEqual(String(decoding: input, as: UTF8.self).components(separatedBy: "\n").first, "HELPANDI-RELAY-1")
+        XCTAssertEqual(h["X-HelpA-Time"], "1793000000000")
+        let input = RelayProtocol.signingInput(method: "POST", pathAndQuery: "/g/x/messages", timestamp: h["X-HelpA-Time"]!, body: body)
+        let key = try Curve25519.Signing.PublicKey(rawRepresentation: Data(base64Encoded: h["X-HelpA-Key"]!)!)
+        XCTAssertTrue(key.isValidSignature(Data(base64Encoded: h["X-HelpA-Signature"]!)!, for: input))
+        XCTAssertEqual(String(decoding: input, as: UTF8.self).components(separatedBy: "\n").first, "HELPA-RELAY-1")
     }
 
     func testSealedFramesOpenOnlyWithTheGroupKeyIncludingTheOldOne() throws {

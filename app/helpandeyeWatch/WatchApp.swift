@@ -2,7 +2,7 @@ import SwiftUI
 import WatchConnectivity
 
 @main
-struct HelpAndIWatchApp: App {
+struct HelpAWatchApp: App {
     @StateObject private var link = WatchLink()
 
     var body: some Scene {

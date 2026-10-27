@@ -75,7 +75,7 @@ enum Store {
 
     /// Shared with the notification extension once the app is signed with a keychain group (named
     /// in Info.plist); unsigned builds keep the app's own keychain.
-    private static let accessGroup = (Bundle.main.object(forInfoDictionaryKey: "HelpAndIKeychainGroup") as? String).flatMap { $0.isEmpty ? nil : $0 }
+    private static let accessGroup = (Bundle.main.object(forInfoDictionaryKey: "HelpAKeychainGroup") as? String).flatMap { $0.isEmpty ? nil : $0 }
 
     private static func query(_ account: String) -> [String: Any] {
         var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]

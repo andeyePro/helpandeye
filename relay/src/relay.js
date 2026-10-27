@@ -31,7 +31,7 @@ export function isKey(k) {
 /// the first coordinator's key, so the relay can tell who may register it.
 export async function ownsGroup(groupId, primary) {
   if (!(groupId instanceof Uint8Array) || groupId.length !== 16 || !isKey(primary)) return false;
-  const label = enc.encode("HELPANDI-GROUP-1");
+  const label = enc.encode("HELPA-GROUP-1");
   const input = new Uint8Array([...label, ...groupId.slice(0, 8), ...unb64(primary)]);
   const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", input));
   return hash.slice(0, 8).every((b, i) => b === groupId[8 + i]);
@@ -63,7 +63,7 @@ async function sha256(bytes) {
 /// request cannot be replayed after MAX_SKEW_MS or against another path.
 export async function signingInput(method, pathAndQuery, timestamp, body) {
   const hash = b64(await sha256(enc.encode(body)));
-  return enc.encode(`HELPANDI-RELAY-1\n${method}\n${pathAndQuery}\n${timestamp}\n${hash}`);
+  return enc.encode(`HELPA-RELAY-1\n${method}\n${pathAndQuery}\n${timestamp}\n${hash}`);
 }
 
 export async function verify(publicKeyB64, signatureB64, input) {

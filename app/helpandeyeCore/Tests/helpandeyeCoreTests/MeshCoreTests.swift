@@ -16,7 +16,7 @@ final class MeshCoreTests: XCTestCase {
         // The document's datagram example: flood, data type 0xFFFF, payload A1 B2 C3, channel 1.
         XCTAssertEqual(try MeshCore.Command.sendChannelData(index: 1, dataType: 0xFFFF, payload: hex("a1b2c3")).encoded(),
                        hex("3e01ffffffa1b2c3"))
-        XCTAssertEqual(try MeshCore.Command.appStart(name: "HelpAndI").encoded().prefix(8), hex("0101000000000000"))
+        XCTAssertEqual(try MeshCore.Command.appStart(name: "HelpA").encoded().prefix(8), hex("0101000000000000"))
     }
 
     func testSetChannelIsFiftyBytesAndRefusesAZeroSecret() throws {

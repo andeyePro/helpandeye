@@ -200,6 +200,6 @@ final class GroupTests: XCTestCase {
 
     func testBadCodesAreRejected() {
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "hello"))
-        XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPANDI1:%%%"))
+        XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPA1:%%%"))
     }
 }

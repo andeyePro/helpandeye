@@ -61,14 +61,14 @@ public struct GroupSecrets: Codable, Equatable, Sendable {
     /// `ownsGroup`).
     public static func forOwner(signingKey: Data) -> GroupSecrets {
         let nonce = randomBytes(8)
-        let hash = SHA256.hash(data: Data("HELPANDI-GROUP-1".utf8) + nonce + signingKey)
+        let hash = SHA256.hash(data: Data("HELPA-GROUP-1".utf8) + nonce + signingKey)
         return .random(groupID: nonce + Data(hash.prefix(8)))
     }
 
     /// Whether this group's ID was made from the given key.
     public func isOwned(by signingKey: Data) -> Bool {
         guard groupID.count == 16 else { return false }
-        let hash = SHA256.hash(data: Data("HELPANDI-GROUP-1".utf8) + groupID.prefix(8) + signingKey)
+        let hash = SHA256.hash(data: Data("HELPA-GROUP-1".utf8) + groupID.prefix(8) + signingKey)
         return Data(hash.prefix(8)) == groupID.suffix(8)
     }
 
@@ -404,13 +404,15 @@ public enum Joining {
     }
 
     /// Text form of any of the three codes, for QR codes and for sending as a link.
+    public static let prefix = "HELPA1:"
+
     public static func code<T: Encodable>(_ value: T) throws -> String {
-        "HELPANDI1:" + (try JSONEncoder().encode(value)).base64EncodedString()
+        prefix + (try JSONEncoder().encode(value)).base64EncodedString()
     }
 
     public static func decode<T: Decodable>(_ type: T.Type, from code: String) throws -> T {
         let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("HELPANDI1:"), let data = Data(base64Encoded: String(trimmed.dropFirst(10))) else { throw Failure.badCode }
+        guard trimmed.hasPrefix(prefix), let data = Data(base64Encoded: String(trimmed.dropFirst(prefix.count))) else { throw Failure.badCode }
         return try JSONDecoder().decode(type, from: data)
     }
 }

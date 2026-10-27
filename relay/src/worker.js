@@ -7,8 +7,8 @@ import { GroupRelay, Meter as MeterLogic, RelayError, unb64 } from "./relay.js";
 //   GET  /g/<groupId>/messages?after=n a member fetches sealed messages after sequence n
 //   PUT  /g/<groupId>/push             a member registers its push token
 // A message may carry "wake": "call" (a visible push to the others) or "quiet" (wakes their app).
-// Every request carries X-HelpAndI-Key, X-HelpAndI-Time and X-HelpAndI-Signature.
-// Every response carries X-HelpAndI-Allowance-Low: 1 when the free daily allowance is nearly used.
+// Every request carries X-HelpA-Key, X-HelpA-Time and X-HelpA-Signature.
+// Every response carries X-HelpA-Allowance-Low: 1 when the free daily allowance is nearly used.
 
 const GROUP_ID = /^[A-Za-z0-9_-]{16,64}$/;
 
@@ -22,7 +22,7 @@ export default {
     const meter = env.METER.get(env.METER.idFromName("all"));
     const low = await (await meter.fetch("https://meter/add", { method: "POST" })).json();
     const out = new Response(response.body, response);
-    if (low.low) out.headers.set("X-HelpAndI-Allowance-Low", "1");
+    if (low.low) out.headers.set("X-HelpA-Allowance-Low", "1");
     return out;
   },
 };
@@ -42,9 +42,9 @@ export class Group {
       const key = await this.relay.authenticate({
         method: request.method,
         path: url.pathname + url.search,
-        key: request.headers.get("X-HelpAndI-Key") ?? "",
-        timestamp: request.headers.get("X-HelpAndI-Time") ?? "",
-        signature: request.headers.get("X-HelpAndI-Signature") ?? "",
+        key: request.headers.get("X-HelpA-Key") ?? "",
+        timestamp: request.headers.get("X-HelpA-Time") ?? "",
+        signature: request.headers.get("X-HelpA-Signature") ?? "",
         body,
       });
       const kind = url.pathname.split("/").pop();

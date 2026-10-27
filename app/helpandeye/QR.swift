@@ -1,5 +1,6 @@
 import CoreImage.CIFilterBuiltins
 import SwiftUI
+import helpandeyeCore
 import VisionKit
 
 struct QRCode: View {
@@ -64,7 +65,7 @@ private struct Scanner: UIViewControllerRepresentable {
 
         func dataScanner(_ s: DataScannerViewController, didAdd items: [RecognizedItem], allItems: [RecognizedItem]) {
             for case let .barcode(b) in items {
-                if let v = b.payloadStringValue, v.hasPrefix("HELPANDI1:"), !done { done = true; onCode(v) }
+                if let v = b.payloadStringValue, v.hasPrefix(Joining.prefix), !done { done = true; onCode(v) }
             }
         }
     }

@@ -177,7 +177,7 @@ test("only the first coordinator, whose key the group ID is made from, can regis
   const owner = await phone(), second = await phone(), member = await phone();
   const c = (k) => ({ key: k.key, role: "coordinator" }), m = (k) => ({ key: k.key, role: "member" });
   const nonce = crypto.getRandomValues(new Uint8Array(8));
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("HELPANDI-GROUP-1"), ...nonce, ...Uint8Array.from(atob(owner.key), (ch) => ch.charCodeAt(0))])));
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("HELPA-GROUP-1"), ...nonce, ...Uint8Array.from(atob(owner.key), (ch) => ch.charCodeAt(0))])));
   const id = new Uint8Array([...nonce, ...hash.slice(0, 8)]);
   assert.equal(await ownsGroup(id, owner.key), true);
   assert.equal(await ownsGroup(id, member.key), false);

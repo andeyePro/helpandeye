@@ -6,14 +6,14 @@ import Foundation
 public enum RelayProtocol {
     public static func signingInput(method: String, pathAndQuery: String, timestamp: String, body: Data) -> Data {
         let hash = Data(SHA256.hash(data: body)).base64EncodedString()
-        return Data("HELPANDI-RELAY-1\n\(method)\n\(pathAndQuery)\n\(timestamp)\n\(hash)".utf8)
+        return Data("HELPA-RELAY-1\n\(method)\n\(pathAndQuery)\n\(timestamp)\n\(hash)".utf8)
     }
 
     public static func headers(method: String, pathAndQuery: String, body: Data, identity: DeviceIdentity, now: Date) throws -> [String: String] {
         let ts = String(Int64(now.timeIntervalSince1970 * 1000))
         let sig = try identity.signingKey.signature(for: signingInput(method: method, pathAndQuery: pathAndQuery, timestamp: ts, body: body))
-        return ["X-HelpAndI-Key": identity.signingPublicKey.base64EncodedString(), "X-HelpAndI-Time": ts,
-                "X-HelpAndI-Signature": sig.base64EncodedString(), "Content-Type": "application/json"]
+        return ["X-HelpA-Key": identity.signingPublicKey.base64EncodedString(), "X-HelpA-Time": ts,
+                "X-HelpA-Signature": sig.base64EncodedString(), "Content-Type": "application/json"]
     }
 
     /// The path for a group: its ID in URL-safe base64.

@@ -39,7 +39,7 @@ targets:
         NSCameraUsageDescription: "Help&I uses the camera to scan a group's joining code."
         # Set to "$(AppIdentifierPrefix)com.andeye.help.shared" with a matching keychain-access-groups
         # entitlement once signed, so the notification extension can name callers.
-        HelpAndIKeychainGroup: ""
+        HelpAKeychainGroup: ""
         NSLocationWhenInUseUsageDescription: "When you choose to share where you are, Help&I sends it to your responders, encrypted, over the internet."
     settings:
       base:
@@ -55,7 +55,7 @@ targets:
       path: helpandeyeNotify/Info.plist
       properties:
         CFBundleDisplayName: "Help&I"
-        HelpAndIKeychainGroup: ""
+        HelpAKeychainGroup: ""
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
