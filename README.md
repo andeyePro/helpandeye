@@ -6,6 +6,7 @@ that needs no mains electricity, no internet and no licence.
 
 Status: **pre-alpha.** A first prototype of the app and the internet relay is in `app/` and
 `relay/`. It has not yet been tested on real phones and radios. Nothing here is ready to rely on.
+[docs/prototype-status.md](docs/prototype-status.md) says what works and what is next.
 
 > Help&I supplements 999, NHS 111, telecare services and any lone-working procedure you already
 > have. It never replaces them. In an emergency, call 999 first if you can.
