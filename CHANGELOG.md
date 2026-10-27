@@ -2,6 +2,13 @@
 
 Done work, newest first. Open items live in the issue tracker.
 
+## 2026-10-27
+
+- [x] **Discussion replies come from github-actions[bot]** - Anthropic's app-token exchange answers
+  `Invalid OIDC token` to any workflow but its own action, which does not handle Discussions, so
+  replies cannot appear as the Claude app. They are now posted with the workflow's own token and
+  open with "**Claude** (Anthropic's AI assistant):".
+
 ## 2026-10-26
 
 - [x] **@claude in Discussions** - `.github/workflows/claude-discussions.yml` answers any discussion or
