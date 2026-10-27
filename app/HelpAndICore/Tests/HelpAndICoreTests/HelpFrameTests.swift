@@ -8,6 +8,7 @@ final class HelpFrameTests: XCTestCase {
             .followUp(unit: 70001, request: 12, part: 2, category: .fallen),
             .ack(unit: 70001, request: 12, responder: 3, ackedAt: 1_793_000_060),
             .availability(responder: 3, from: 1_793_000_000, until: 1_793_003_600, available: false),
+            .noticeAck(notice: .allowanceLow, by: 1, at: 1_793_000_100),
         ]
         for f in frames {
             XCTAssertEqual(HelpFrame(f.encoded()), f)

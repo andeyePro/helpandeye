@@ -20,6 +20,16 @@ struct RootView: View {
 
     var body: some View {
         if let me = model.me {
+            VStack(spacing: 0) {
+                NoticeBanner()
+                tabs(me)
+            }
+        } else {
+            WelcomeView()
+        }
+    }
+
+    @ViewBuilder private func tabs(_ me: Member) -> some View {
             TabView {
                 if me.canCall {
                     CallView().tabItem { Label("Help", systemImage: "cross.fill") }
@@ -31,8 +41,33 @@ struct RootView: View {
                 GroupView().tabItem { Label("Group", systemImage: "person.3.fill") }
                 BoxView().tabItem { Label("Box", systemImage: "antenna.radiowaves.left.and.right") }
             }
-        } else {
-            WelcomeView()
+    }
+}
+
+/// A notice someone must acknowledge: a gap in the rota, or the free relay allowance running low.
+/// It widens from the coordinator to everyone until someone acknowledges it.
+struct NoticeBanner: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 60)) { _ in
+            VStack(spacing: 0) {
+                ForEach(Notice.allCases.filter(model.showing), id: \.self) { n in
+                    HStack {
+                        Text(text(n)).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Acknowledge") { model.acknowledge(n) }.buttonStyle(.borderedProminent)
+                    }
+                    .padding()
+                    .background(Color.orange.opacity(0.2))
+                }
+            }
+        }
+    }
+
+    private func text(_ n: Notice) -> String {
+        switch n {
+        case .rotaGap: "Nobody is available to respond for part of the next 24 hours. See Group."
+        case .allowanceLow: "The free internet relay is nearly used up for today. Calls will still go over the local radio."
         }
     }
 }

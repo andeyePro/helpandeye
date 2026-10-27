@@ -139,6 +139,9 @@ struct GroupView: View {
                         Button("Invite someone") { inviting = true }
                     }
                 }
+                if model.me?.role == .coordinator {
+                    RelaySection()
+                }
                 if model.me?.role == .coordinator, model.group?.previousSecrets != nil {
                     KeyUpdatesSection()
                 } else if model.me?.role != .coordinator {
@@ -252,5 +255,21 @@ struct ReceiveUpdateSection: View {
             }
             if let message { Text(message) }
         }
+    }
+}
+
+struct RelaySection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var url = ""
+
+    var body: some View {
+        Section("Internet route") {
+            TextField("Relay address, starting https://", text: $url).textInputAutocapitalization(.never).keyboardType(.URL)
+            Button("Save") { model.setRelay(url) }
+            Text(model.relay.isConfigured ? "Calls also go over the internet." : "Not set up: calls go over the local radio only.")
+                .font(.footnote)
+            Text("Members get the address the next time they join or scan a key update.").font(.footnote).foregroundStyle(.secondary)
+        }
+        .onAppear { url = model.group?.relayURL ?? "" }
     }
 }

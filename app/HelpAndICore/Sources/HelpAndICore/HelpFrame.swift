@@ -11,6 +11,11 @@ public enum CallCategory: UInt8, Sendable, CaseIterable, Codable {
     case fallen = 1, unwell = 2, lockedOut = 3, powerCut = 4, needCompany = 5, other = 99
 }
 
+/// Things a coordinator is told about and must acknowledge.
+public enum Notice: UInt8, Sendable, Codable, CaseIterable {
+    case rotaGap = 1, allowanceLow = 2
+}
+
 /// One Help&I message on the MeshCore group channel, sent as a channel data datagram.
 ///
 /// Every frame starts with a byte holding the format version (high nibble) and the kind (low
@@ -25,6 +30,9 @@ public enum HelpFrame: Equatable, Sendable {
     case ack(unit: UInt32, request: UInt16, responder: UInt16, ackedAt: UInt32)
     /// A responder's availability changed while there was no internet (rota, app spec).
     case availability(responder: UInt16, from: UInt32, until: UInt32, available: Bool)
+    /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
+    /// so other phones need not widen it.
+    case noticeAck(notice: Notice, by: UInt16, at: UInt32)
 
     public static let formatVersion: UInt8 = 1
     /// MeshCore data_type for Help&I datagrams: inside the testing range, which needs no
@@ -33,7 +41,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4 }
+    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5 }
 
     public func encoded() -> Data {
         var w = ByteWriter()
@@ -46,6 +54,8 @@ public enum HelpFrame: Equatable, Sendable {
             w.u8(Self.header(.ack)); w.u32(unit); w.u16(request); w.u16(responder); w.u32(ackedAt)
         case let .availability(responder, from, until, available):
             w.u8(Self.header(.availability)); w.u16(responder); w.u32(from); w.u32(until); w.u8(available ? 1 : 0)
+        case let .noticeAck(notice, by, at):
+            w.u8(Self.header(.noticeAck)); w.u8(notice.rawValue); w.u16(by); w.u32(at)
         }
         return w.data
     }
@@ -68,6 +78,9 @@ public enum HelpFrame: Equatable, Sendable {
         case .availability:
             guard let who = r.u16(), let from = r.u32(), let until = r.u32(), let a = r.u8(), a <= 1, from < until else { return nil }
             self = .availability(responder: who, from: from, until: until, available: a == 1)
+        case .noticeAck:
+            guard let n = r.u8().flatMap(Notice.init), let by = r.u16(), let at = r.u32() else { return nil }
+            self = .noticeAck(notice: n, by: by, at: at)
         }
         guard r.isAtEnd else { return nil }
     }

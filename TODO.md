@@ -10,3 +10,12 @@
 - [ ] **Critical Alerts entitlement.** Apply once enrolment moves to andeye Ltd (see the app spec).
 - [ ] **Pro relay provider and price** (app spec open question).
 - [ ] **Simulator on the build Mac.** Xcode 27.1 on MBP08L reports "CoreSimulator is out of date", so the app builds but cannot run in the simulator. An admin needs to open Xcode once there (or run `sudo xcodebuild -runFirstLaunch`) to install its components. Until then nothing can be checked by eye, so screenshots and UI tests are blocked.
+- [ ] **Relay name and deployment.** The relay Worker is called `helprelayandeye` to follow the `<x>andeye` rule without a hyphen. Is that the name you want? Deploying it needs your Cloudflare account: `cd relay && npx wrangler deploy`, then enter its https address in the app under Group, Internet route.
+- [ ] **Push notifications.** Waking a responder's phone over the internet needs an APNs key from your Apple developer account, stored as a Worker secret. Until then the internet route reaches a phone only while the app is open; the mesh route works in the background.
+
+## Open (work)
+
+- [ ] Push from the relay through APNs once a key exists (see above).
+- [ ] Caller's typed text and position over the mesh as direct messages (decision 12).
+- [ ] Battery and power-cut reports from the box (decisions 3 and 4).
+- [ ] Check-in schedule (decision 16).

@@ -127,7 +127,7 @@ public struct ResponderInbox: Sendable {
             r.acknowledgedBy.append(responder)
             requests[key] = r
             return .updated(key)
-        case .availability:
+        case .availability, .noticeAck:
             return .ignored
         }
     }

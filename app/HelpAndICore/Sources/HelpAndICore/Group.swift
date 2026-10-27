@@ -16,9 +16,12 @@ public struct Member: Codable, Equatable, Sendable, Identifiable {
     /// Optional, for the ready-written text when nothing else gets through. Kept on members'
     /// phones only.
     public var phone: String?
+    /// Ed25519 key the phone signs relay requests with.
+    public var signingKey: Data?
 
-    public init(number: UInt16, name: String, role: Role, publicKey: Data, unit: UInt32? = nil, phone: String? = nil) {
-        self.number = number; self.name = name; self.role = role; self.publicKey = publicKey; self.unit = unit; self.phone = phone
+    public init(number: UInt16, name: String, role: Role, publicKey: Data, unit: UInt32? = nil, phone: String? = nil, signingKey: Data? = nil) {
+        self.number = number; self.name = name; self.role = role; self.publicKey = publicKey; self.unit = unit
+        self.phone = phone; self.signingKey = signingKey
     }
 
     public var canCall: Bool { role != .responder && unit != nil }
@@ -55,6 +58,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var members: [Member]
     public var removedUnits: Set<UInt32> = []
     public var policy: StoredPolicy = .init()
+    /// The relay for the internet route, such as https://helprelayandeye.example.workers.dev.
+    public var relayURL: String?
 
     public struct StoredPolicy: Codable, Equatable, Sendable {
         public var useDistance = false
@@ -96,13 +101,26 @@ public struct GroupState: Codable, Equatable, Sendable {
     }
 }
 
-/// The phone's own identity. The private key never leaves the phone.
+/// The phone's own identity: one key pair for sealing, one for signing relay requests. The
+/// private keys never leave the phone.
 public struct DeviceIdentity: Sendable {
     public let privateKey: Curve25519.KeyAgreement.PrivateKey
+    public let signingKey: Curve25519.Signing.PrivateKey
     public var publicKey: Data { privateKey.publicKey.rawRepresentation }
+    public var signingPublicKey: Data { signingKey.publicKey.rawRepresentation }
 
-    public init(privateKey: Curve25519.KeyAgreement.PrivateKey = .init()) { self.privateKey = privateKey }
-    public init(rawRepresentation: Data) throws { privateKey = try .init(rawRepresentation: rawRepresentation) }
+    public init(privateKey: Curve25519.KeyAgreement.PrivateKey = .init(), signingKey: Curve25519.Signing.PrivateKey = .init()) {
+        self.privateKey = privateKey; self.signingKey = signingKey
+    }
+
+    /// The 64 bytes kept in the keychain: the sealing key, then the signing key.
+    public var rawRepresentation: Data { privateKey.rawRepresentation + signingKey.rawRepresentation }
+
+    public init(rawRepresentation raw: Data) throws {
+        guard raw.count == 64 else { throw Joining.Failure.badCode }
+        privateKey = try .init(rawRepresentation: raw.prefix(32))
+        signingKey = try .init(rawRepresentation: raw.suffix(32))
+    }
 }
 
 /// Joining a group in person, with no network: three QR codes.
@@ -129,6 +147,7 @@ public enum Joining {
         public let wantsToRespond: Bool
         public let publicKey: Data
         public var phone: String? = nil
+        public var signingKey: Data? = nil
     }
 
     public struct Welcome: Codable, Equatable, Sendable {
@@ -144,7 +163,8 @@ public enum Joining {
     }
 
     public static func request(_ invite: Invitation, name: String, call: Bool, respond: Bool, phone: String? = nil, me: DeviceIdentity) -> JoinRequest {
-        JoinRequest(token: invite.token, name: name, wantsToCall: call, wantsToRespond: respond, publicKey: me.publicKey, phone: phone)
+        JoinRequest(token: invite.token, name: name, wantsToCall: call, wantsToRespond: respond, publicKey: me.publicKey,
+                    phone: phone, signingKey: me.signingPublicKey)
     }
 
     /// Adds the member and seals the group for them. Run on the coordinator's phone.
@@ -154,7 +174,8 @@ public enum Joining {
         let role: Member.Role = request.wantsToCall && request.wantsToRespond ? .both : (request.wantsToCall ? .caller : .responder)
         let number = group.nextMemberNumber
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,
-                                    unit: request.wantsToCall ? group.nextUnit : nil, phone: request.phone))
+                                    unit: request.wantsToCall ? group.nextUnit : nil, phone: request.phone,
+                                    signingKey: request.signingKey))
         let box = try seal(JSONEncoder().encode(group), to: request.publicKey, from: coordinator, context: invite.token)
         return Welcome(groupID: group.secrets.groupID, memberNumber: number, sealed: box)
     }

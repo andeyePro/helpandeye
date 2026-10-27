@@ -1,0 +1,14 @@
+{
+  // The Help&I internet relay. It stores and forwards end-to-end encrypted messages for a group
+  // and never sees what they say. Free tier: one Durable Object (SQLite) per group.
+  "name": "helprelayandeye",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "durable_objects": {
+    "bindings": [
+      { "name": "GROUPS", "class_name": "Group" },
+      { "name": "METER", "class_name": "Meter" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Group", "Meter"] }]
+}

@@ -11,6 +11,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var inbox = ResponderInbox()
     @Published var rota = Rota()
     @Published private(set) var lastAnswered: [UInt16: Date] = [:]
+    /// Notices a coordinator must acknowledge. Each phone widens its own copy until it hears an
+    /// acknowledgement (app spec, "Tiers and cost" and "Rota gaps").
+    @Published private(set) var notices: [Notice: CoordinatorAlert] = [:]
 
     let identity = Store.identity()
     let board = BoardLink()
@@ -23,6 +26,7 @@ final class AppModel: ObservableObject {
         rota = saved?.group.defaultRota ?? Rota()
         board.onFrame = { [weak self] in self?.received($0, via: .mesh) }
         relay.onFrame = { [weak self] in self?.received($0, via: .internet) }
+        relay.onAllowanceLow = { [weak self] in self?.raise(.allowanceLow) }
         board.$selfInfo.sink { [weak self] info in
             self?.budget = info?.radio.band.map { AirtimeBudget(dutyCycle: $0.dutyCycle) }
         }.store(in: &bag)
@@ -42,7 +46,8 @@ final class AppModel: ObservableObject {
 
     func createGroup(name: String, myName: String, call: Bool) {
         var g = GroupState(name: name, secrets: .random(), members: [])
-        g.members.append(Member(number: 1, name: myName, role: .coordinator, publicKey: identity.publicKey, unit: call ? g.nextUnit : nil))
+        g.members.append(Member(number: 1, name: myName, role: .coordinator, publicKey: identity.publicKey,
+                                unit: call ? g.nextUnit : nil, signingKey: identity.signingPublicKey))
         setState(SavedState(group: g, me: 1))
     }
 
@@ -66,6 +71,44 @@ final class AppModel: ObservableObject {
     private func applyGroup() {
         board.secrets = [group?.secrets.channelSecret, group?.previousSecrets?.channelSecret].compactMap { $0 }
         relay.configure(group: group, identity: identity)
+        if me?.role == .coordinator, relay.isConfigured { Task { await relay.publishMembers() } }
+        checkGaps()
+    }
+
+    /// Every phone works out gaps for itself, so the coordinator hears with no network at all.
+    private func checkGaps() {
+        if group != nil, !gaps.isEmpty { raise(.rotaGap) } else { notices[.rotaGap] = nil }
+    }
+
+    // MARK: Notices
+
+    func raise(_ notice: Notice) {
+        guard notices[notice] == nil else { return }
+        notices[notice] = CoordinatorAlert(raisedAt: Date())
+    }
+
+    /// Whether this phone should be showing the notice now.
+    func showing(_ notice: Notice) -> Bool {
+        guard let a = notices[notice], let me else { return false }
+        switch a.audience(at: Date()) {
+        case .firstCoordinator?: return me.role == .coordinator && group?.members.first(where: { $0.role == .coordinator })?.number == me.number
+        case .allCoordinators?: return me.role == .coordinator
+        case .wholeGroup?: return true
+        case nil: return false
+        }
+    }
+
+    func acknowledge(_ notice: Notice) {
+        guard let me = saved?.me else { return }
+        notices[notice]?.acknowledge(by: me)
+        let frame = HelpFrame.noticeAck(notice: notice, by: me, at: UInt32(Date().timeIntervalSince1970))
+        for route in RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false) {
+            send(frame, on: route, for: 0, kind: .optional)
+        }
+    }
+
+    func setRelay(_ url: String) {
+        updateGroup { $0.relayURL = url.trimmingCharacters(in: .whitespaces).isEmpty ? nil : url.trimmingCharacters(in: .whitespaces) }
     }
 
     // MARK: Calling for help
@@ -128,7 +171,8 @@ final class AppModel: ObservableObject {
             lastAnswered[who] = Date(timeIntervalSince1970: TimeInterval(at))
             if let i = outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) { outgoing[i].receive(frame) }
         }
-        if case .availability = frame { rota.apply(frame); return }
+        if case .availability = frame { rota.apply(frame); checkGaps(); return }
+        if case let .noticeAck(notice, by, _) = frame { notices[notice]?.acknowledge(by: by); return }
         guard me?.canRespond == true else { return }
         // A phone does not alert for its own calls.
         if case let .call(unit, _, _, _) = frame, unit == me?.unit { return }
@@ -191,6 +235,7 @@ final class AppModel: ObservableObject {
         guard let me = saved?.me else { return }
         let from = Date(), until = from.addingTimeInterval(hours * 3600)
         rota.add(responder: me, from: from, until: until, available: available)
+        checkGaps()
         let frame = HelpFrame.availability(responder: me, from: UInt32(from.timeIntervalSince1970),
                                            until: UInt32(until.timeIntervalSince1970), available: available)
         for route in RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false) {

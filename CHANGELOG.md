@@ -4,6 +4,17 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Internet route through a relay** - `relay/` is a Cloudflare Worker (free tier, one SQLite
+  Durable Object per group) that stores and forwards messages sealed on the phones with the group
+  key, so it holds ciphertext and public keys only. Every request is signed with the phone's
+  Ed25519 key and must be fresh; only a coordinator can set the member list, a removed phone is
+  refused at once, and messages are kept a week at most. A meter warns, on every response, once 80%
+  of Cloudflare's free daily allowance is used. The app seals, signs, posts and polls every 10
+  seconds while open, and shows coordinators a notice that widens to everyone until someone
+  acknowledges it; rota gaps raise the same notice. Tests: 6 for the relay (`npm test`, including
+  one that checks the relay verifies a request signed by the app) and 49 in HelpAndICore. Not yet
+  done: push notifications to wake phones, so the internet route only reaches a phone while the
+  app is open.
 - [x] **First iOS and watchOS app** - `app/` builds an unsigned iOS app with an embedded watch app
   (XcodeGen, Xcode 27.1). Callers get the three buttons, a status card that never implies help is
   coming before a responder acknowledges, a cross with reasons when nothing was sent, follow-up

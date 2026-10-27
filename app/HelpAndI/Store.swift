@@ -15,7 +15,7 @@ enum Store {
     static func identity() -> DeviceIdentity {
         if let raw = read("identity"), let id = try? DeviceIdentity(rawRepresentation: raw) { return id }
         let id = DeviceIdentity()
-        write("identity", id.privateKey.rawRepresentation)
+        write("identity", id.rawRepresentation)
         return id
     }
 
