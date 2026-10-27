@@ -4,7 +4,7 @@ import HelpAndICore
 /// The internet route: the group's relay (relay/ in this repository). Frames are sealed with the
 /// group key on this phone; the relay stores ciphertext and public keys only.
 @MainActor
-final class Relay: ObservableObject {
+final class Relay: ObservableObject, RelayLink {
     var onFrame: ((HelpFrame) -> Void)?
     /// Set when the relay says Cloudflare's free daily allowance is nearly used.
     var onAllowanceLow: (() -> Void)?
@@ -41,13 +41,11 @@ final class Relay: ObservableObject {
         _ = await request("PUT", RelayProtocol.path(for: group.secrets, "members"), body: body)
     }
 
-    enum Wake: String { case call, quiet }
-
     /// `wake` asks the relay to push to the other members: `.call` visibly (a new call), `.quiet`
     /// to wake their app without showing anything (an acknowledgement). Resends do not push.
     /// During a changeover after a removal, the message is sealed and posted once with each key, so
     /// members who have not scanned their update yet can still open it.
-    func send(_ frame: HelpFrame, wake: Wake? = nil) async -> String? {
+    func send(_ frame: HelpFrame, wake: RelayWake?) async -> String? {
         guard let group else { return "Internet route not set up" }
         var failure: String?
         for (n, secrets) in group.listening(at: Date()).enumerated() {

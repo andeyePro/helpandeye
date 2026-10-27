@@ -77,7 +77,7 @@ final class BoardLink: NSObject, ObservableObject {
     }
 
     /// Sends a direct message, which MeshCore encrypts to the receiving box's own key.
-    func sendText(_ text: String, to key: Data) async -> SendResult {
+    func sendText(_ text: String, to key: Data) async -> MeshSendResult {
         guard state == .ready, key.count == 32 else { return .refused("Box not connected") }
         let cmd = MeshCore.Command.sendText(publicKeyPrefix: key.prefix(6), text: text, sentAt: UInt32(Date().timeIntervalSince1970), attempt: 0)
         switch await run(cmd, expect: { if case .sent = $0 { return true }; if case .error = $0 { return true }; return false }) {
@@ -87,20 +87,8 @@ final class BoardLink: NSObject, ObservableObject {
         }
     }
 
-    enum SendResult: Equatable {
-        case sent
-        /// It certainly did not go on air.
-        case refused(String)
-        /// The box did not answer, so it may or may not have gone on air.
-        case unknown(String)
-
-        var failure: String? {
-            switch self { case .sent: nil; case let .refused(why), let .unknown(why): why }
-        }
-    }
-
     /// Sends a Help&I frame as a datagram on the group's channel.
-    func send(_ frame: HelpFrame, urgent: Bool = false) async -> SendResult {
+    func send(_ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
         guard state == .ready, let ch = helpChannel else { return .refused("Box not connected") }
         let result = await sendOn(ch, frame, urgent: urgent)
         if let old = previousChannel, old != ch { _ = await sendOn(old, frame, urgent: urgent) }
@@ -110,7 +98,7 @@ final class BoardLink: NSObject, ObservableObject {
     /// How many packets a send puts on air, for the airtime budget.
     var channelsPerSend: Int { previousChannel == nil || previousChannel == helpChannel ? 1 : 2 }
 
-    private func sendOn(_ ch: UInt8, _ frame: HelpFrame, urgent: Bool) async -> SendResult {
+    private func sendOn(_ ch: UInt8, _ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
         let cmd = MeshCore.Command.sendChannelData(index: ch, dataType: HelpFrame.meshDataType, payload: frame.encoded())
         switch await run(cmd, urgent: urgent, expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
         case .ok?: return .sent
@@ -352,5 +340,19 @@ extension BoardLink: @preconcurrency CBPeripheralDelegate {
 
     func peripheral(_ p: CBPeripheral, didUpdateValueFor ch: CBCharacteristic, error: Error?) {
         if let v = ch.value { handle(v) }
+    }
+}
+
+extension BoardLink: MeshLink {
+    var isReady: Bool { state == .ready }
+    var boxPublicKey: Data? { selfInfo?.publicKey }
+
+    var unavailableReason: String {
+        switch state {
+        case .ready: "Box not ready"
+        case .off: "No box connected"
+        case let .failed(why): why
+        default: "Box not connected"
+        }
     }
 }

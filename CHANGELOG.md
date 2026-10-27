@@ -4,6 +4,19 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **The rules move into a tested engine** - about 560 lines of untested app logic (which acks
+  count, when alerts start and stop, resends, re-acks, the personal-content guard, airtime) are now
+  `HelpEngine` in HelpAndICore, behind small interfaces for the box, relay, alerts, storage and
+  clock; the app plugs in the real ones and the tests plug in fakes. Twelve end-to-end tests run a
+  coordinator, a caller and a responder over a fake radio and relay: a press reaches responders and
+  only a human ack shows "seen"; a lost first packet is repaired by a resend; forged and removed
+  acks never reassure; no route gives the cross at once; nothing closes and alerts never stop
+  without a human, over thirty simulated days; an ack cancels alerts everywhere; re-acks are rate
+  limited; personal content never goes on the group channel; direct messages from the wrong box
+  are ignored; resends never take the airtime a new press needs; members who have not updated still
+  hear during a changeover; and a second coordinator takes the first one's membership changes,
+  which it did not before. The internet-only path, with its push requests, is tested too. 104
+  tests. Manual checks 1 to 19 need running again on hardware at this commit.
 - [x] **Everyone hears who joined or left** - adding someone used to change only the coordinator's
   copy of the group, so a caller's phone would reject a new responder's acknowledgement and never
   show "seen". A coordinator's phone now sends a signed member-added or member-removed frame over

@@ -2,32 +2,13 @@ import Foundation
 import HelpAndICore
 import Security
 
-/// The group, this phone's place in it, and its request counter. Kept in the keychain, marked
-/// "this device only" so it is never backed up or synced. The counter lives here rather than in
-/// user defaults because the keychain survives deleting the app: request numbers must never
-/// restart while the unit number stays the same.
-struct SavedState: Codable {
-    var group: GroupState
-    var me: UInt16
-    var lastRequest: UInt16 = 0
-    var checkIn: CheckInSchedule?
-    var checkInSince: Date?
-}
-
-/// What is happening now: open calls, the responder's list, the rota. Saved to a file so that a
-/// request still open when the app is closed is still there, unacknowledged, when it reopens.
-struct Activity: Codable {
-    var outgoing: [OutgoingRequest] = []
-    var inbox = ResponderInbox()
-    var rota = Rota()
-    var lastAnswered: [UInt16: Date] = [:]
-    var greens: [Date] = []
-    /// This phone's own radio use in the last hour (IR 2030), kept across relaunches and re-pairing.
-    var airtime: AirtimeBudget?
-    /// Other callers' check-ins, so this phone notices a missed one too.
-    var checkInWatch = CheckInWatch()
-    /// Members' boxes, by member number, for direct messages over the mesh.
-    var boardKeys: [UInt16: Data] = [:]
+/// Saves the engine's state: the group and request counter in the keychain, marked "this device
+/// only" so it is never backed up or synced, because the keychain survives deleting the app and
+/// request numbers must never restart while the unit number stays the same; the activity in a
+/// protected file, so a request still open when the app is closed is still there when it reopens.
+@MainActor final class AppStore: EngineStore {
+    func save(_ state: SavedState?) { Store.save(state) }
+    func save(_ activity: Activity) { Store.save(activity) }
 }
 
 enum Store {
