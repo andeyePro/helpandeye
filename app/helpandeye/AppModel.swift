@@ -55,7 +55,8 @@ final class AppModel: ObservableObject {
     func name(ofUnit unit: UInt32) -> String { engine.name(ofUnit: unit) }
     func name(ofMember n: UInt16) -> String { engine.name(ofMember: n) }
 
-    func createGroup(name: String, myName: String, call: Bool) { engine.createGroup(name: name, myName: myName, call: call) }
+    func createGroup(name: String, myName: String, call: Bool, phone: String?) { engine.createGroup(name: name, myName: myName, call: call, phone: phone) }
+    func setMyPhone(_ phone: String) { engine.setMyPhone(phone) }
     func joined(_ group: GroupState, as number: UInt16, invitedBy: UInt16?) { engine.joined(group, as: number, invitedBy: invitedBy) }
     func updateGroup(_ change: (inout GroupState) -> Void) { engine.updateGroup(change) }
     func leave() { engine.leave() }

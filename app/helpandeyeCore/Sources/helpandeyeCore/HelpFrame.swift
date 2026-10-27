@@ -64,6 +64,8 @@ public enum HelpFrame: Equatable, Sendable {
     case memberRole(member: UInt16, role: Member.Role, block: UInt16, version: UInt32)
     /// A member's name, from a coordinator. Personal, so internet only. Signed too.
     case memberName(member: UInt16, name: String)
+    /// A member's mobile number, for the ready-written text; empty clears it. `at` orders changes.
+    case memberPhone(member: UInt16, phone: String, at: UInt32)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -75,17 +77,19 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10, memberAdded = 11, memberRemoved = 12, memberName = 13, memberRole = 14 }
+    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10, memberAdded = 11, memberRemoved = 12, memberName = 13, memberRole = 14, memberPhone = 15 }
 
     /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
     public static let maxNoteBytes = 120
+    /// Room for an international mobile number.
+    public static let maxPhoneBytes = 20
 
     /// Whether this frame may go on the shared group channel. Notes and positions may not: they
     /// travel only end-to-end encrypted to the group key over the internet, or (later) as direct
     /// messages under each responder's own key (decision 12).
     public var mayGoOnGroupChannel: Bool {
         switch self {
-        case .note, .position, .checkIns, .memberName: false
+        case .note, .position, .checkIns, .memberName, .memberPhone: false
         // A signed frame may go only if what it wraps may.
         case let .signed(_, inner, _): HelpFrame(inner)?.mayGoOnGroupChannel ?? false
         default: true
@@ -137,6 +141,9 @@ public enum HelpFrame: Equatable, Sendable {
         case let .memberName(member, name):
             let bytes = Data(MeshText.fit(name, bytes: 40).utf8)
             w.u8(Self.header(.memberName)); w.u16(member); w.u8(UInt8(bytes.count)); w.bytes(bytes)
+        case let .memberPhone(member, phone, at):
+            let bytes = Data(phone.prefix(Self.maxPhoneBytes).utf8)
+            w.u8(Self.header(.memberPhone)); w.u16(member); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
         case let .signed(signer, inner, signature):
             w.u8(Self.header(.signed)); w.u16(signer); w.u8(UInt8(min(inner.count, 80))); w.bytes(inner.prefix(80))
             w.bytes(signature.count == 64 ? signature : Data(count: 64))
@@ -199,6 +206,10 @@ public enum HelpFrame: Equatable, Sendable {
             guard let member = r.u16(), let n = r.u8(), n <= 40, let bytes = r.take(Int(n)),
                   let name = String(bytes: bytes, encoding: .utf8) else { return nil }
             self = .memberName(member: member, name: name)
+        case .memberPhone:
+            guard let member = r.u16(), let at = r.u32(), let n = r.u8(), n <= Self.maxPhoneBytes, let bytes = r.take(Int(n)),
+                  let phone = String(bytes: bytes, encoding: .utf8) else { return nil }
+            self = .memberPhone(member: member, phone: phone, at: at)
         case .signed:
             guard let signer = r.u16(), let n = r.u8(), n <= 80, let inner = r.take(Int(n)), let sig = r.take(64) else { return nil }
             self = .signed(signer: signer, inner: Data(inner), signature: Data(sig))
@@ -260,6 +271,8 @@ public enum HelpFrame: Equatable, Sendable {
         case let .noticeAck(_, by, _) where by == signer: return frame
         // The caller of this checks that the signer is a coordinator.
         case .memberAdded, .memberRemoved, .memberName, .memberRole: return frame
+        // The caller of this checks that the signer is the member or a coordinator.
+        case .memberPhone: return frame
         // The caller of this checks that the signer owns the unit.
         case .checkIns: return frame
         default: return nil

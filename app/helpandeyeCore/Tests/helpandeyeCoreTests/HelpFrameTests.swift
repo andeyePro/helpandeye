@@ -69,6 +69,13 @@ final class PersonalContentTests: XCTestCase {
         XCTAssertTrue(HelpFrame.call(unit: 1, request: 1, colour: .red, sentAt: 0).mayGoOnGroupChannel)
     }
 
+    func testMobileNumbersRoundTripButStayOffTheGroupChannel() {
+        let f = HelpFrame.memberPhone(member: 7, phone: "+447700900123", at: 1_793_000_000)
+        XCTAssertEqual(HelpFrame(f.encoded()), f)
+        XCTAssertFalse(f.mayGoOnGroupChannel)
+        XCTAssertFalse(HelpFrame.signing(f, as: 7, identity: DeviceIdentity(), group: Data(count: 16)).mayGoOnGroupChannel)
+    }
+
     func testLongNotesAreCutAtACharacterBoundary() {
         let f = HelpFrame.note(unit: 1, request: 1, part: 1, typed: String(repeating: "é", count: 100))
         guard case let .note(_, _, _, text) = f else { return XCTFail() }

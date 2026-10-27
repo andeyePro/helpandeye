@@ -32,7 +32,7 @@ struct CallView: View {
         .padding()
         .sheet(isPresented: $composingSMS) {
             if let r = model.current {
-                SMSComposer(recipients: model.group?.members.filter(\.canRespond).compactMap(\.phone) ?? [],
+                SMSComposer(recipients: RoutePlan.smsRecipients(in: model.group, me: model.saved?.me),
                             body: RoutePlan.smsBody(for: r))
             }
         }
@@ -88,7 +88,8 @@ struct StatusCard: View {
             if request.status == .notSent {
                 HStack {
                     Button("Try again") { model.press(request.colour) }.buttonStyle(.borderedProminent)
-                    if RoutePlan.offerManualSMS(for: request, smsAvailable: MFMessageComposeViewController.canSendText(), smsIsAutomatic: false) {
+                    if RoutePlan.offerManualSMS(for: request, smsAvailable: MFMessageComposeViewController.canSendText(), smsIsAutomatic: false,
+                                                recipients: RoutePlan.smsRecipients(in: model.group, me: model.saved?.me)) {
                         Button("Send as a text") { composingSMS = true }.buttonStyle(.bordered)
                     }
                 }

@@ -184,10 +184,10 @@ public final class HelpEngine: ObservableObject {
 
     // MARK: Group
 
-    public func createGroup(name: String, myName: String, call: Bool) {
+    public func createGroup(name: String, myName: String, call: Bool, phone: String? = nil) {
         var g = GroupState(name: name, secrets: .forOwner(signingKey: identity.signingPublicKey), members: [])
         g.members.append(Member(number: 1, name: myName, role: .coordinator, publicKey: identity.publicKey,
-                                unit: call ? g.nextUnit : nil, signingKey: identity.signingPublicKey))
+                                unit: call ? g.nextUnit : nil, phone: phone, signingKey: identity.signingPublicKey))
         g.highestMember = 1
         setState(SavedState(group: g, me: 1))
     }
@@ -237,7 +237,25 @@ public final class HelpEngine: ObservableObject {
             guard let m = g.member(n) else { continue }
             let signed = HelpFrame.signing(.memberName(member: n, name: m.name), as: me, identity: identity, group: gid)
             spawn { _ = await self.relay.send(signed, wake: nil) }
+            if let phone = m.phone {
+                let at = g.phoneVersions[n] ?? UInt32(now().timeIntervalSince1970)
+                let signed = HelpFrame.signing(.memberPhone(member: n, phone: phone, at: at), as: me, identity: identity, group: gid)
+                spawn { _ = await self.relay.send(signed, wake: nil) }
+            }
         }
+    }
+
+    /// Changes this member's own mobile number and tells the group over the internet: a number is
+    /// personal, so it never goes on the radio (decision 12).
+    public func setMyPhone(_ phone: String?) {
+        guard var s = saved, let i = s.group.members.firstIndex(where: { $0.number == s.me }) else { return }
+        let number = String((phone ?? "").filter { "0123456789+".contains($0) }.prefix(HelpFrame.maxPhoneBytes))
+        let at = UInt32(now().timeIntervalSince1970)
+        s.group.members[i].phone = number.isEmpty ? nil : number
+        s.group.phoneVersions[s.me] = at
+        setState(s)
+        let signed = HelpFrame.signing(.memberPhone(member: s.me, phone: number, at: at), as: s.me, identity: identity, group: groupID)
+        spawn { _ = await self.relay.send(signed, wake: nil) }
     }
 
     public func leave() {
@@ -615,7 +633,7 @@ public final class HelpEngine: ObservableObject {
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
             }
-        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole:
+        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone:
             // Counted only when signed (below), so a removed phone cannot fake them.
             return
         case let .signed(signer, _, _):
@@ -634,12 +652,14 @@ public final class HelpEngine: ObservableObject {
             case let .memberAdded(n, _, _, _, _, _) where n == saved?.me && signer == group?.primaryCoordinator:
                 // The first coordinator lists this phone: the whole group knows it is in.
                 if var s = saved, !s.confirmed { s.confirmed = true; saved = s; store.save(s); activity.notices[.unconfirmed] = nil }
-            case .memberAdded, .memberRemoved, .memberName, .memberRole:
+            case .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone:
                 // Any coordinator can add people; only the first can remove people or change roles,
                 // so the group can never be split onto different keys or numbers.
                 let allowed: Bool
                 switch inner {
                 case .memberRemoved, .memberRole: allowed = signer == group?.primaryCoordinator
+                // Members keep their own number up to date.
+                case let .memberPhone(n, _, _): allowed = signer == n || sender.role == .coordinator
                 default: allowed = sender.role == .coordinator
                 }
                 // Nothing changes, nothing is redone.

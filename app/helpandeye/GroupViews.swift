@@ -30,18 +30,20 @@ struct CreateGroupView: View {
     @State private var name = ""
     @State private var myName = ""
     @State private var call = false
+    @State private var phone = ""
 
     var body: some View {
         Form {
             Section("Group") { TextField("Group name, such as your street", text: $name) }
             Section("You") {
                 TextField("Your name, as the group will see it", text: $myName)
+                TextField("Mobile number (optional)", text: $phone).keyboardType(.phonePad)
                 Toggle("I may also call for help", isOn: $call)
             }
             Section {
                 Text("You will coordinate this group: invite people, and be told when nobody is available to respond.")
                     .font(.footnote)
-                Button("Start the group") { model.createGroup(name: name, myName: myName, call: call) }
+                Button("Start the group") { model.createGroup(name: name, myName: myName, call: call, phone: phone.isEmpty ? nil : phone) }
                     .disabled(name.isEmpty || myName.isEmpty)
             }
         }
@@ -115,6 +117,7 @@ struct GroupView: View {
                         }
                     }
                 }
+                MyPhoneSection()
                 if model.me?.canCall == true { CheckInSection() }
                 if model.me?.role == .coordinator {
                     Section("Gaps in the next 24 hours") {
@@ -172,6 +175,7 @@ struct GroupView: View {
         case .both: parts.append("Calls for help and responds")
         }
         if let u = m.unit { parts.append("unit \(u)") }
+        if m.canRespond, m.phone == nil { parts.append("no mobile number") }
         return parts.joined(separator: ", ")
     }
 }
@@ -262,6 +266,24 @@ struct ReceiveUpdateSection: View {
             }
             if let message { Text(message) }
         }
+    }
+}
+
+/// The number a caller's ready-written text goes to, if nothing else got through.
+struct MyPhoneSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var phone = ""
+    @State private var saved = false
+
+    var body: some View {
+        Section("Your mobile number") {
+            TextField("Mobile number", text: $phone).keyboardType(.phonePad)
+            Button("Save") { model.setMyPhone(phone); saved = true }
+            Text(saved ? "Saved. Members with the internet route get it now; others when they next scan a code."
+                       : "If a call cannot go any other way, the caller can send it to responders as a text.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+        .onAppear { phone = model.me?.phone ?? "" }
     }
 }
 

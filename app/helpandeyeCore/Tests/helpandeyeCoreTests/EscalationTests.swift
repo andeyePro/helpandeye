@@ -140,11 +140,24 @@ final class RoutePlanTests: XCTestCase {
 
     func testManualSMSOfferedOnlyAfterEverythingFailed() {
         var r = OutgoingRequest(unit: 70001, number: 3, colour: .red, createdAt: Date())
+        let to = ["+447700900123"]
         r.update(.mesh, .failed("x")); r.update(.internet, .sending)
-        XCTAssertFalse(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: false))
+        XCTAssertFalse(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: false, recipients: to))
         r.update(.internet, .failed("x"))
-        XCTAssertTrue(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: false))
-        XCTAssertFalse(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: true))
+        XCTAssertTrue(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: false, recipients: to))
+        XCTAssertFalse(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: true, recipients: to))
+        XCTAssertFalse(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: false, recipients: []),
+                       "a text with nobody to send it to is not offered")
         XCTAssertEqual(RoutePlan.smsBody(for: r), "Help&I Come now. Unit 70001, request 3. Reply in the Help&I app.")
+    }
+
+    func testTheTextGoesToEveryOtherResponderWithANumber() {
+        var g = GroupState(name: "g", secrets: .forOwner(signingKey: Data(count: 32)), members: [])
+        g.members = [Member(number: 1, name: "Coordinator", role: .coordinator, publicKey: Data(), phone: "+441"),
+                     Member(number: 2, name: "Caller", role: .caller, publicKey: Data(), unit: 70001, phone: "+442"),
+                     Member(number: 3, name: "Both", role: .both, publicKey: Data(), unit: 70002, phone: "+443"),
+                     Member(number: 4, name: "No number", role: .responder, publicKey: Data())]
+        XCTAssertEqual(RoutePlan.smsRecipients(in: g, me: 3), ["+441"], "not the caller's own phone, not a caller, not a member with no number")
+        XCTAssertEqual(RoutePlan.smsRecipients(in: g, me: 2), ["+441", "+443"])
     }
 }

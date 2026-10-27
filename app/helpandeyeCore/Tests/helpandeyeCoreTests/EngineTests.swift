@@ -306,6 +306,43 @@ final class RelayModel {
         XCTAssertFalse(caller.relay.sent.dropFirst().contains { $0.1 == .call }, "resends do not push")
     }
 
+    func testTheCoordinatorsNumberReachesMembersWhoJoin() async {
+        let other = Phone(air: air, clock: clock)
+        coordinator.engine.setMyPhone("+44 7700 900111")
+        join(other, call: true, respond: false)
+        XCTAssertEqual(other.engine.group?.member(1)?.phone, "+447700900111")
+        XCTAssertEqual(RoutePlan.smsRecipients(in: other.engine.group, me: other.engine.saved?.me), ["+447700900111"])
+    }
+
+    func testAMembersOwnNumberReachesTheGroupOverTheInternetOnly() async {
+        for p in air.phones { p.relay.isConfigured = true }
+        await relaySetUp()
+        let n = responder.engine.saved!.me
+        responder.engine.setMyPhone("07700 900222")
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.member(n)?.phone, "07700900222")
+        XCTAssertEqual(coordinator.engine.group?.member(n)?.phone, "07700900222")
+        XCTAssertFalse(air.groupSends.contains { $0.encoded().contains(Data("07700900222".utf8)) }, "a number never goes on the radio")
+        await advance(60)
+        responder.engine.setMyPhone("")
+        await air.run()
+        XCTAssertNil(caller.engine.group?.member(n)?.phone, "clearing it clears it everywhere")
+    }
+
+    func testOnlyTheMemberOrACoordinatorCanChangeTheirNumber() async {
+        let n = responder.engine.saved!.me
+        let callerNumber = caller.engine.saved!.me
+        let forged = HelpFrame.signing(.memberPhone(member: n, phone: "+449999", at: UInt32(clock.now.timeIntervalSince1970) + 10),
+                                       as: callerNumber, identity: caller.identity, group: gid)
+        coordinator.engine.receive(forged, via: .internet)
+        XCTAssertNil(coordinator.engine.group?.member(n)?.phone, "another member cannot redirect someone's texts")
+        let old = HelpFrame.signing(.memberPhone(member: n, phone: "+441111", at: 5), as: n, identity: responder.identity, group: gid)
+        let new = HelpFrame.signing(.memberPhone(member: n, phone: "+442222", at: 6), as: n, identity: responder.identity, group: gid)
+        coordinator.engine.receive(new, via: .internet)
+        coordinator.engine.receive(old, via: .internet)
+        XCTAssertEqual(coordinator.engine.group?.member(n)?.phone, "+442222", "an older change heard late does not win")
+    }
+
     func testNoRouteGivesTheCrossAtOnce() async {
         caller.mesh.isReady = false
         caller.engine.press(.amber)

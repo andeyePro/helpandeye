@@ -55,7 +55,7 @@ Pass: phone A shows "Sending…", then "Sent. Waiting for a responder to see it.
 1. Switch off phone A's board (or forget it in Box).
 2. On phone A, press Come when convenient.
 
-Pass: phone A shows a cross and "Not sent. Nobody has been told.", lists why each route failed, offers Try again, and says "If you need help now, call 999." With a SIM in phone A, it also offers Send as a text, which opens a ready-written message naming no one.
+Pass: phone A shows a cross and "Not sent. Nobody has been told.", lists why each route failed, offers Try again, and says "If you need help now, call 999." With a SIM in phone A and a mobile number saved by at least one responder (Group, Your mobile number), it also offers Send as a text, which opens a ready-written message naming no one, addressed to every responder with a number. With no responder number saved, Send as a text is not offered at all.
 
 ## 5. Follow-ups arrive with their call
 

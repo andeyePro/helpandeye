@@ -97,6 +97,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var highestMember: UInt16 = 0
     /// The membership version of each member's last role change, so an old one replayed is ignored.
     public var roleVersions: [UInt16: UInt32] = [:]
+    /// When each member's mobile number was last set, so an older change heard late is ignored.
+    public var phoneVersions: [UInt16: UInt32] = [:]
     /// The highest number block ever given to a coordinator.
     public var highestBlock: UInt16 {
         get { max(members.compactMap(\.block).max() ?? 0, roleBlocksSeen) }
@@ -123,7 +125,7 @@ public struct GroupState: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, highestMember, roleVersions
-        case policy, relayURL, membershipVersion, roleBlocksSeen
+        case policy, relayURL, membershipVersion, roleBlocksSeen, phoneVersions
     }
 
     /// Fields added after the first release are optional when reading, so a group saved by an
@@ -140,6 +142,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         removedKeys = try c.decodeIfPresent(Set<Data>.self, forKey: .removedKeys) ?? []
         highestMember = try c.decodeIfPresent(UInt16.self, forKey: .highestMember) ?? 0
         roleVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .roleVersions) ?? [:]
+        phoneVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .phoneVersions) ?? [:]
         policy = try c.decodeIfPresent(StoredPolicy.self, forKey: .policy) ?? .init()
         relayURL = try c.decodeIfPresent(String.self, forKey: .relayURL)
         membershipVersion = try c.decodeIfPresent(UInt32.self, forKey: .membershipVersion) ?? 1
@@ -267,6 +270,10 @@ public struct GroupState: Codable, Equatable, Sendable {
         case let .memberName(number, name):
             guard let i = members.firstIndex(where: { $0.number == number }), !name.isEmpty else { return }
             members[i].name = name
+        case let .memberPhone(number, phone, at):
+            guard let i = members.firstIndex(where: { $0.number == number }), at > (phoneVersions[number] ?? 0) else { return }
+            members[i].phone = phone.isEmpty ? nil : phone
+            phoneVersions[number] = at
         default: break
         }
     }

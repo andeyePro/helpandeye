@@ -8,8 +8,16 @@ public enum RoutePlan {
         Route.allCases.filter { available.contains($0) && ($0 != .sms || smsIsAutomatic) }
     }
 
-    public static func offerManualSMS(for request: OutgoingRequest, smsAvailable: Bool, smsIsAutomatic: Bool) -> Bool {
-        smsAvailable && !smsIsAutomatic && request.status == .notSent
+    /// Offered only with someone to send it to: a text with no recipient would leave the caller
+    /// typing a number while they need help.
+    public static func offerManualSMS(for request: OutgoingRequest, smsAvailable: Bool, smsIsAutomatic: Bool, recipients: [String]) -> Bool {
+        smsAvailable && !smsIsAutomatic && request.status == .notSent && !recipients.isEmpty
+    }
+
+    /// Every other member who responds and has saved a mobile number. The numbers are kept on the
+    /// phone, so the text needs no internet; it goes to all of them, as anyone may be free.
+    public static func smsRecipients(in group: GroupState?, me: UInt16?) -> [String] {
+        (group?.members ?? []).filter { $0.canRespond && $0.number != me }.compactMap(\.phone)
     }
 
     /// The text of a ready-written SMS. It names no one: the responder's app maps the unit number
