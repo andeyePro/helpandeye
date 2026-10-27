@@ -4,6 +4,11 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Group keys and joining in person** - `Group.swift` in HelpAndICore makes each group's
+  secrets at random, joins a member with three QR codes and no network (the group sealed to the
+  new phone's key with X25519 and ChaCha20-Poly1305), gives both phones a six-digit safety number
+  for joining at a distance, and rotates the secrets when a phone is removed without ever reusing
+  its unit number. 7 new tests, 42 in all.
 - [x] **HelpAndICore Swift package** - `app/HelpAndICore` holds the app's logic with no UI, tested
   by 35 tests (`swift test` on macOS): the 12-byte Help&I frame on the MeshCore group channel (data
   type `0xFF48`), caller status with no "delivered" state and the cross only when every route
