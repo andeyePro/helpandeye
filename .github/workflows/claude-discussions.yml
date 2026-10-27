@@ -1,6 +1,7 @@
-# Answers @claude mentions in GitHub Discussions, posting as the Claude GitHub App.
-# Needs: the Claude GitHub App installed on this repository, and a repository secret
-# CLAUDE_CODE_OAUTH_TOKEN made with `claude setup-token` on a Claude subscription.
+# Answers @claude mentions in GitHub Discussions. Replies are posted by github-actions[bot] and
+# say they come from Claude: Anthropic's app-token exchange only accepts its own action, which
+# does not handle Discussions. Needs a repository secret CLAUDE_CODE_OAUTH_TOKEN made with
+# `claude setup-token` on a Claude subscription.
 name: Claude in Discussions
 
 on:
@@ -22,8 +23,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      discussions: read
-      id-token: write
+      discussions: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
@@ -69,8 +69,9 @@ jobs:
             < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/result.json"
           jq -e '.structured_output.reply | length > 0 and length < 6000' "$RUNNER_TEMP/result.json" > /dev/null
 
-      - name: Post as Claude
+      - name: Post the reply
         env:
+          GH_TOKEN: ${{ github.token }}
           DISCUSSION_ID: ${{ steps.thread.outputs.discussion_id }}
           REPLY_TO: ${{ steps.thread.outputs.reply_to }}
         run: |
@@ -78,21 +79,11 @@ jobs:
           if grep -Eq 'sk-ant-|gh[pousr]_[A-Za-z0-9]{20}|github_pat_|eyJ[A-Za-z0-9_-]{20}' <<<"$reply"; then
             echo "::error::Reply looks like it contains a credential; not posting."; exit 1
           fi
-          # The same OIDC exchange anthropics/claude-code-action uses, so the reply comes from the Claude app.
-          oidc=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=claude-code-github-action" | jq -r .value)
-          echo "::add-mask::$oidc"
-          exchange=$(curl -sS -X POST -H "Authorization: Bearer $oidc" -H "Content-Type: application/json" \
-            -d '{"permissions":{"discussions":"write"}}' \
-            https://api.anthropic.com/api/github/github-app-token-exchange)
-          app=$(jq -r '.token // .app_token // empty' <<<"$exchange")
-          [ -n "$app" ] || { echo "::error::Claude app token exchange failed: $(jq -c '.error // .message // .' <<<"$exchange")"; exit 1; }
-          echo "::add-mask::$app"
-          trap 'curl -sS -X DELETE -H "Authorization: Bearer $app" https://api.github.com/installation/token > /dev/null || true' EXIT
+          reply="**Claude** (Anthropic's AI assistant):"$'\n\n'"$reply"
           if [ -n "$REPLY_TO" ]; then
-            GH_TOKEN="$app" gh api graphql -f d="$DISCUSSION_ID" -f r="$REPLY_TO" -f b="$reply" -f query='
+            gh api graphql -f d="$DISCUSSION_ID" -f r="$REPLY_TO" -f b="$reply" -f query='
               mutation($d:ID!,$r:ID!,$b:String!){addDiscussionComment(input:{discussionId:$d,replyToId:$r,body:$b}){comment{url}}}'
           else
-            GH_TOKEN="$app" gh api graphql -f d="$DISCUSSION_ID" -f b="$reply" -f query='
+            gh api graphql -f d="$DISCUSSION_ID" -f b="$reply" -f query='
               mutation($d:ID!,$b:String!){addDiscussionComment(input:{discussionId:$d,body:$b}){comment{url}}}'
           fi
