@@ -68,6 +68,10 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var previousUntil: Date?
     public var members: [Member]
     public var removedUnits: Set<UInt32> = []
+    /// Member numbers are never reused, and a removed one can never be added back, so an old
+    /// signed "member added" replayed by a removed phone cannot let it back in.
+    public var removedMembers: Set<UInt16> = []
+    public var highestMember: UInt16 = 0
     public var policy: StoredPolicy = .init()
     /// The relay for the internet route, such as https://helprelayandeye.example.workers.dev.
     public var relayURL: String?
@@ -89,7 +93,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     public func member(_ number: UInt16) -> Member? { members.first { $0.number == number } }
     public func member(unit: UInt32) -> Member? { members.first { $0.unit == unit } }
 
-    public var nextMemberNumber: UInt16 { (members.map(\.number).max() ?? 0) + 1 }
+    public var nextMemberNumber: UInt16 { max(highestMember, members.map(\.number).max() ?? 0, removedMembers.max() ?? 0) + 1 }
 
     /// Unit numbers are never reused, even after a phone is removed.
     public var nextUnit: UInt32 {
@@ -103,6 +107,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         guard let m = member(number) else { return }
         members.removeAll { $0.number == number }
         membershipVersion += 1
+        removedMembers.insert(number)
         if let u = m.unit { removedUnits.insert(u) }
         previousSecrets = secrets
         previousUntil = now.addingTimeInterval(Self.changeoverPeriod)
@@ -119,7 +124,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// and able to respond, and the ack must carry their signature.
     public func acceptsAck(_ frame: HelpFrame) -> Bool {
         guard case let .ack(_, _, who, _, _) = frame, let m = member(who), m.canRespond else { return false }
-        return frame.isValidAck(signedBy: m.signingKey)
+        return frame.isValidAck(signedBy: m.signingKey, group: secrets.groupID)
     }
 
     /// The rota, with every responder available unless they have said otherwise.
@@ -132,13 +137,18 @@ public struct GroupState: Codable, Equatable, Sendable {
     public mutating func apply(membership frame: HelpFrame, at now: Date = Date()) {
         switch frame {
         case let .memberAdded(number, role, unit, key):
-            guard member(number) == nil, !removedUnits.contains(unit) else { return }
-            members.append(Member(number: number, name: "Member \(number)", role: role, publicKey: Data(),
-                                  unit: role == .responder ? nil : unit, signingKey: key))
+            let u: UInt32? = role == .responder || unit == 0 ? nil : unit
+            guard member(number) == nil, !removedMembers.contains(number), u.map({ !removedUnits.contains($0) }) ?? true else { return }
+            members.append(Member(number: number, name: "Member \(number)", role: role, publicKey: Data(), unit: u, signingKey: key))
+            highestMember = max(highestMember, number)
         case let .memberRemoved(number):
+            removedMembers.insert(number)
             guard let m = member(number) else { return }
             members.removeAll { $0.number == number }
             if let u = m.unit { removedUnits.insert(u) }
+        case let .memberName(number, name):
+            guard let i = members.firstIndex(where: { $0.number == number }), !name.isEmpty else { return }
+            members[i].name = name
         default: break
         }
     }
@@ -227,6 +237,7 @@ public enum Joining {
         let role: Member.Role = request.wantsToCall && request.wantsToRespond ? .both : (request.wantsToCall ? .caller : .responder)
         let number = group.nextMemberNumber
         group.membershipVersion += 1
+        group.highestMember = max(group.highestMember, number)
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,
                                     unit: request.wantsToCall ? group.nextUnit : nil, phone: request.phone,
                                     signingKey: request.signingKey))

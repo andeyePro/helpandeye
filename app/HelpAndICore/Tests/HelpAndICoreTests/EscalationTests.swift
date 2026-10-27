@@ -117,8 +117,8 @@ final class AirtimeTests: XCTestCase {
         b.record(17, at: t0)
         XCTAssertTrue(b.allows(1, kind: .optional, at: t0))
         XCTAssertFalse(b.allows(1.5, kind: .optional, at: t0))
-        XCTAssertTrue(b.allows(18, kind: .call, at: t0))
-        XCTAssertFalse(b.allows(20, kind: .call, at: t0))
+        XCTAssertTrue(b.allows(15, kind: .call, at: t0), "calls may use up to 90%: 32.4 s")
+        XCTAssertFalse(b.allows(16, kind: .call, at: t0))
         XCTAssertTrue(b.allows(18, kind: .optional, at: t0.addingTimeInterval(3600)))
     }
 

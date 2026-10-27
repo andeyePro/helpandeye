@@ -152,3 +152,12 @@ Pass: phone B alerts. (A shared read position used to make it miss the new group
 2. On phone A, press Come now. Acknowledge on phone C.
 
 Pass: phone A shows "Member <n> has seen your call." within a minute. Then remove phone C on phone B, press Come now again on phone A, and acknowledge on phone C: phone A must not show it as seen.
+
+## 20. Acknowledging from a responder's watch
+
+Needs phone B paired with an Apple Watch with Help&I on it.
+
+1. On phone A, press Come now.
+2. On phone B's watch, open Help&I.
+
+Pass: the watch lists the caller's name and "Come now" with an Acknowledge button. Tapping it acknowledges exactly as on the phone: phone A shows "<name> has seen your call", and the entry leaves the watch. With phone B out of the watch's range, tapping it shows "Not acknowledged" and nothing is sent.

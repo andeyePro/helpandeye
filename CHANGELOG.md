@@ -4,6 +4,26 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Fixes from the third code review** - a third independent review, which ran the tests, found
+  1 blocker and 9 major issues. Fixed, each with a test: a removed phone could replay its old
+  coordinator-signed "member added" during the changeover and get its acknowledgements counted
+  again (member numbers are now never reused and a removed one can never be re-added); a removed
+  member's box key, rota entries and answering record are forgotten, so nothing private goes to
+  their box; "I'm OK now" alerts once and no longer counts as open, so many greens cannot squeeze a
+  red call down to three alerts; a call that first reaches the relay on a resend asks for a push;
+  membership messages that change nothing no longer reconfigure the relay and box on every phone,
+  and the coordinator repeats the member list at most once a day; leaving and rejoining keeps the
+  airtime record and the mesh route; every signature now covers the group's ID; direct messages
+  check the frequency band; a removed caller's press shows the cross; unacknowledged calls survive
+  the 50-request cap; acks heard before a call are checked once it arrives; late results of an
+  earlier ack attempt are ignored; calls may use only 90% of the legal duty cycle, leaving room for
+  the firmware's own traffic; a send counts as sent if either channel took it. New members' names
+  follow over the internet. Relay: a cursor that moves past expired messages, a first read that
+  hears calls still open, 20 posts and 2 pushes per phone per minute, one push per call during a
+  changeover, slower polling when nothing is open, deleted push tokens for removed members, and a
+  shown error if the member list is refused. The contrived second-coordinator test is replaced and
+  multiple coordinators are marked not built (TODO.md). Responders can also acknowledge from their
+  watch. 113 core tests, 14 relay tests; manual check 20.
 - [x] **The rules move into a tested engine** - about 560 lines of untested app logic (which acks
   count, when alerts start and stop, resends, re-acks, the personal-content guard, airtime) are now
   `HelpEngine` in HelpAndICore, behind small interfaces for the box, relay, alerts, storage and

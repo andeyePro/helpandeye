@@ -54,6 +54,8 @@ public enum HelpFrame: Equatable, Sendable {
     case memberAdded(member: UInt16, role: Member.Role, unit: UInt32, signingKey: Data)
     /// A coordinator removed someone; their acknowledgements stop counting at once. Signed too.
     case memberRemoved(member: UInt16)
+    /// A member's name, from a coordinator. Personal, so internet only. Signed too.
+    case memberName(member: UInt16, name: String)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -65,7 +67,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10, memberAdded = 11, memberRemoved = 12 }
+    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10, memberAdded = 11, memberRemoved = 12, memberName = 13 }
 
     /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
     public static let maxNoteBytes = 120
@@ -74,7 +76,12 @@ public enum HelpFrame: Equatable, Sendable {
     /// travel only end-to-end encrypted to the group key over the internet, or (later) as direct
     /// messages under each responder's own key (decision 12).
     public var mayGoOnGroupChannel: Bool {
-        switch self { case .note, .position, .checkIns: false; default: true }
+        switch self {
+        case .note, .position, .checkIns, .memberName: false
+        // A signed frame may go only if what it wraps may.
+        case let .signed(_, inner, _): HelpFrame(inner)?.mayGoOnGroupChannel ?? false
+        default: true
+        }
     }
 
     /// Makes a note, cutting the text at a character boundary to fit.
@@ -117,6 +124,9 @@ public enum HelpFrame: Equatable, Sendable {
             w.bytes(key.count == 32 ? key : Data(count: 32))
         case let .memberRemoved(member):
             w.u8(Self.header(.memberRemoved)); w.u16(member)
+        case let .memberName(member, name):
+            let bytes = Data(MeshText.fit(name, bytes: 40).utf8)
+            w.u8(Self.header(.memberName)); w.u16(member); w.u8(UInt8(bytes.count)); w.bytes(bytes)
         case let .signed(signer, inner, signature):
             w.u8(Self.header(.signed)); w.u16(signer); w.u8(UInt8(min(inner.count, 80))); w.bytes(inner.prefix(80))
             w.bytes(signature.count == 64 ? signature : Data(count: 64))
@@ -171,6 +181,10 @@ public enum HelpFrame: Equatable, Sendable {
         case .memberRemoved:
             guard let member = r.u16() else { return nil }
             self = .memberRemoved(member: member)
+        case .memberName:
+            guard let member = r.u16(), let n = r.u8(), n <= 40, let bytes = r.take(Int(n)),
+                  let name = String(bytes: bytes, encoding: .utf8) else { return nil }
+            self = .memberName(member: member, name: name)
         case .signed:
             guard let signer = r.u16(), let n = r.u8(), n <= 80, let inner = r.take(Int(n)), let sig = r.take(64) else { return nil }
             self = .signed(signer: signer, inner: Data(inner), signature: Data(sig))
@@ -180,70 +194,74 @@ public enum HelpFrame: Equatable, Sendable {
 
     private static func header(_ kind: Kind) -> UInt8 { formatVersion << 4 | kind.rawValue }
 
-    static func ackInput(unit: UInt32, request: UInt16, responder: UInt16, ackedAt: UInt32) -> Data {
+    // Every signature covers the group's ID too, so one made in one group is worthless in another,
+    // where the same unit, member and request numbers can easily occur.
+
+    static func ackInput(unit: UInt32, request: UInt16, responder: UInt16, ackedAt: UInt32, group: Data) -> Data {
         var w = ByteWriter()
-        w.bytes(Data("HELPANDI-ACK-1".utf8)); w.u32(unit); w.u16(request); w.u16(responder); w.u32(ackedAt)
+        w.bytes(Data("HELPANDI-ACK-2".utf8)); w.bytes(group); w.u32(unit); w.u16(request); w.u16(responder); w.u32(ackedAt)
         return w.data
     }
 
-    public static func signedAck(unit: UInt32, request: UInt16, responder: UInt16, at: Date, identity: DeviceIdentity) -> HelpFrame {
+    public static func signedAck(unit: UInt32, request: UInt16, responder: UInt16, at: Date, identity: DeviceIdentity, group: Data) -> HelpFrame {
         let t = UInt32(max(at.timeIntervalSince1970, 0))
-        let sig = (try? identity.signingKey.signature(for: ackInput(unit: unit, request: request, responder: responder, ackedAt: t))) ?? Data(count: 64)
+        let input = ackInput(unit: unit, request: request, responder: responder, ackedAt: t, group: group)
+        let sig = (try? identity.signingKey.signature(for: input)) ?? Data(count: 64)
         return .ack(unit: unit, request: request, responder: responder, ackedAt: t, signature: sig)
     }
 
-    static func boardInput(member: UInt16, key: Data) -> Data {
+    static func boardInput(member: UInt16, key: Data, group: Data) -> Data {
         var w = ByteWriter()
-        w.bytes(Data("HELPANDI-BOARD-1".utf8)); w.u16(member); w.bytes(key)
+        w.bytes(Data("HELPANDI-BOARD-2".utf8)); w.bytes(group); w.u16(member); w.bytes(key)
         return w.data
     }
 
-    public static func signedBoard(member: UInt16, publicKey: Data, identity: DeviceIdentity) -> HelpFrame {
-        let sig = (try? identity.signingKey.signature(for: boardInput(member: member, key: publicKey))) ?? Data(count: 64)
+    public static func signedBoard(member: UInt16, publicKey: Data, identity: DeviceIdentity, group: Data) -> HelpFrame {
+        let sig = (try? identity.signingKey.signature(for: boardInput(member: member, key: publicKey, group: group))) ?? Data(count: 64)
         return .board(member: member, publicKey: publicKey, signature: sig)
     }
 
-    static func signedInput(signer: UInt16, inner: Data) -> Data {
+    static func signedInput(signer: UInt16, inner: Data, group: Data) -> Data {
         var w = ByteWriter()
-        w.bytes(Data("HELPANDI-SIGNED-1".utf8)); w.u16(signer); w.bytes(inner)
+        w.bytes(Data("HELPANDI-SIGNED-2".utf8)); w.bytes(group); w.u16(signer); w.bytes(inner)
         return w.data
     }
 
     /// Wraps a frame in the sender's signature. Only small frames that carry no personal content.
-    public static func signing(_ frame: HelpFrame, as signer: UInt16, identity: DeviceIdentity) -> HelpFrame {
+    public static func signing(_ frame: HelpFrame, as signer: UInt16, identity: DeviceIdentity, group: Data) -> HelpFrame {
         let inner = frame.encoded()
-        let sig = (try? identity.signingKey.signature(for: signedInput(signer: signer, inner: inner))) ?? Data(count: 64)
+        let sig = (try? identity.signingKey.signature(for: signedInput(signer: signer, inner: inner, group: group))) ?? Data(count: 64)
         return .signed(signer: signer, inner: inner, signature: sig)
     }
 
     /// The wrapped frame, if the signature is the given key's and the frame is about the signer
     /// themselves: their own availability, or a notice they acknowledged.
-    public func verifiedInner(signedBy key: Data?) -> HelpFrame? {
+    public func verifiedInner(signedBy key: Data?, group: Data) -> HelpFrame? {
         guard case let .signed(signer, inner, sig) = self, let key,
               let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
-              pub.isValidSignature(sig, for: Self.signedInput(signer: signer, inner: inner)),
+              pub.isValidSignature(sig, for: Self.signedInput(signer: signer, inner: inner, group: group)),
               let frame = HelpFrame(inner) else { return nil }
         switch frame {
         case let .availability(who, _, _, _) where who == signer: return frame
         case let .noticeAck(_, by, _) where by == signer: return frame
         // The caller of this checks that the signer is a coordinator.
-        case .memberAdded, .memberRemoved: return frame
+        case .memberAdded, .memberRemoved, .memberName: return frame
         default: return nil
         }
     }
 
     /// True only for a box key signed by the given member's key.
-    public func isValidBoard(signedBy key: Data?) -> Bool {
+    public func isValidBoard(signedBy key: Data?, group: Data) -> Bool {
         guard case let .board(member, boardKey, sig) = self, let key,
               let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key) else { return false }
-        return pub.isValidSignature(sig, for: Self.boardInput(member: member, key: boardKey))
+        return pub.isValidSignature(sig, for: Self.boardInput(member: member, key: boardKey, group: group))
     }
 
     /// True only for an acknowledgement signed by the given member's key.
-    public func isValidAck(signedBy key: Data?) -> Bool {
+    public func isValidAck(signedBy key: Data?, group: Data) -> Bool {
         guard case let .ack(unit, request, responder, at, sig) = self, let key,
               let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key) else { return false }
-        return pub.isValidSignature(sig, for: Self.ackInput(unit: unit, request: request, responder: responder, ackedAt: at))
+        return pub.isValidSignature(sig, for: Self.ackInput(unit: unit, request: request, responder: responder, ackedAt: at, group: group))
     }
 }
 

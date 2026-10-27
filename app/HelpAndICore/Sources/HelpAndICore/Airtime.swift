@@ -65,8 +65,10 @@ public struct AirtimeBudget: Sendable, Codable {
         log.filter { now.timeIntervalSince($0.at) < window }.reduce(0) { $0 + $1.seconds }
     }
 
+    /// Calls may use up to 90% of the legal allowance, leaving a margin for what the firmware sends
+    /// itself (adverts, direct-message acknowledgements), which is not counted here.
     public func allows(_ seconds: TimeInterval, kind: Kind, at now: Date) -> Bool {
-        let limit = dutyCycle * window * (kind == .call ? 1 : 0.5)
+        let limit = dutyCycle * window * (kind == .call ? 0.9 : 0.5)
         return used(at: now) + seconds <= limit
     }
 

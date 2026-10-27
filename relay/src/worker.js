@@ -54,8 +54,10 @@ export class Group {
       }
       if (kind === "messages" && request.method === "POST") {
         const msg = JSON.parse(body);
+        const wakes = msg.wake === "call" || msg.wake === "quiet";
+        const mayWake = await this.relay.limit(key, wakes);
         const seq = await this.relay.post(key, msg.sealed);
-        if (msg.wake === "call" || msg.wake === "quiet") {
+        if (wakes && mayWake) {
           const targets = await this.relay.pushTargets(key);
           this.state.waitUntil(Promise.all(targets.map((t) => push(this.env, t, msg.wake))));
         }

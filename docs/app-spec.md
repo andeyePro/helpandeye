@@ -18,7 +18,8 @@ lists what is still open. Items marked **Proposed** are not yet agreed.
 - **Responders** enter their availability. The coordinator is told when the rota has a gap.
 - **Peer-to-peer groups** are allowed: every member is both caller and responder, as on a street
   or a works team.
-- A group can have more than one coordinator, so that it does not depend on one person.
+- A group can have more than one coordinator, so that it does not depend on one person. Not
+  built yet: today the person who starts a group is its only coordinator (TODO.md).
 - Groups are on a free or a Pro tier. See [Tiers and cost](#tiers-and-cost).
 
 ## Who is alerted
@@ -135,8 +136,10 @@ Decided for now, following common practice for end-to-end encrypted apps (Martin
 
 - When a coordinator adds or removes someone, their phone tells every member at once, in a frame
   signed by the coordinator, over the internet and the mesh. So a new responder's acknowledgement
-  counts on every phone straight away, and a removed one's stops counting. Names follow later, in
-  a key update: until then a new member shows as "Member" and their number.
+  counts on every phone straight away, and a removed one's stops counting. The new member's name
+  follows over the internet only; with no internet they show as "Member" and their number.
+- Member numbers are never reused, and a removed member can never be added back under the same
+  number, so an old signed message replayed by a removed phone cannot let it back in.
 
 ## Rota gaps without internet
 

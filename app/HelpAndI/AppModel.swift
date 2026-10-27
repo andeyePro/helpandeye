@@ -31,7 +31,12 @@ final class AppModel: ObservableObject {
             publisher.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         }
         ticker = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.engine.tick() }
+            Task { @MainActor in
+                guard let self else { return }
+                self.engine.tick()
+                self.relay.busy = self.engine.activity.outgoing.contains { $0.nextResend != nil && $0.unit != 0 }
+                    || self.engine.activity.inbox.requests.values.contains { !$0.isAcknowledged && $0.colour != .green }
+            }
         }
         Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
     }

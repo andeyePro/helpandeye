@@ -16,6 +16,9 @@ export const MAX_BODY = 512;
 // before that.
 export const FREE_DAILY_REQUESTS = 50_000;
 export const WARN_FRACTION = 0.8;
+// A phone posts a call, its follow-ups and acknowledgements; nothing real needs more than this.
+export const MAX_POSTS_PER_MINUTE = 20;
+export const MAX_WAKES_PER_MINUTE = 2;
 
 const enc = new TextEncoder();
 
@@ -95,6 +98,11 @@ export class GroupRelay {
     }
     if (!list.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(400, "the signer must stay a coordinator");
     await this.storage.put("members", { generation: list.generation, members: list.members.map(({ key, role }) => ({ key, role })) });
+    // Push tokens of anyone no longer listed are deleted, not just ignored.
+    const keep = new Set(list.members.map((m) => "p:" + m.key));
+    const tokens = await this.storage.list({ prefix: "p:" });
+    const gone = [...tokens.keys()].filter((k) => !keep.has(k));
+    if (gone.length) await this.storage.delete(gone);
   }
 
   async requireMember(key) {
@@ -124,6 +132,20 @@ export class GroupRelay {
     return "m:" + String(seq).padStart(12, "0");
   }
 
+  /// Counts a member's posts (and pushes asked for) in the current minute, refusing past the limit,
+  /// so one phone cannot use up the group's free allowance or flood everyone with pushes.
+  async limit(sender, wake) {
+    const minute = Math.floor(this.now() / 60000);
+    const key = "r:" + sender;
+    const cur = (await this.storage.get(key)) ?? { minute, posts: 0, wakes: 0 };
+    const c = cur.minute === minute ? cur : { minute, posts: 0, wakes: 0 };
+    c.posts += 1;
+    if (wake) c.wakes += 1;
+    await this.storage.put(key, c);
+    if (c.posts > MAX_POSTS_PER_MINUTE) throw new RelayError(429, "too many messages");
+    return !wake || c.wakes <= MAX_WAKES_PER_MINUTE;
+  }
+
   async post(sender, sealed) {
     await this.requireMember(sender);
     if (typeof sealed !== "string" || sealed.length === 0 || sealed.length > MAX_BODY) throw new RelayError(400, "bad message");
@@ -140,10 +162,14 @@ export class GroupRelay {
   async since(reader, after) {
     await this.requireMember(reader);
     const latest = (await this.storage.get("seq")) ?? 0;
-    const from = Math.max(Number(after) || 0, 0);
+    // A negative `after` asks for the last that many messages, for a phone's first read.
+    const asked = Number(after) || 0;
+    const from = asked < 0 ? Math.max(latest + asked, 0) : asked;
     const cutoff = this.now() - KEEP_MS;
-    const page = await this.storage.list({ prefix: "m:", start: GroupRelay.key(from + 1), limit: 200 });
-    return { latest, messages: [...page.values()].filter((m) => m.at >= cutoff) };
+    const page = [...(await this.storage.list({ prefix: "m:", start: GroupRelay.key(from + 1), limit: 200 })).values()];
+    // `next` is the last sequence scanned, kept or expired, so a reader never stalls on old ones.
+    const next = page.length ? page[page.length - 1].seq : Math.max(from, latest);
+    return { latest, next, messages: page.filter((m) => m.at >= cutoff) };
   }
 
   async prune(latest) {

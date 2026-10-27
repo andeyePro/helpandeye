@@ -16,7 +16,7 @@ Every request is signed by the phone's Ed25519 key. The headers are:
 |---|---|---|
 | `PUT /g/<group>/members` | a coordinator | `{"generation": n, "members": [{"key": "...", "role": "coordinator" or "member"}]}` |
 | `POST /g/<group>/messages` | a member | `{"sealed": "<base64 ChaCha20-Poly1305 box>"}` |
-| `GET /g/<group>/messages?after=<seq>` | a member | none; the reply is `{"latest": n, "messages": [...]}` |
+| `GET /g/<group>/messages?after=<seq>` | a member | none; the reply is `{"latest": n, "next": n, "messages": [...]}`. A negative `after` asks for the last that many messages. Read on from `next`, which moves past expired messages. |
 | `PUT /g/<group>/push` | a member | `{"token": "<hex APNs device token>", "sandbox": true or false}` |
 
 A posted message may add `"wake": "call"`, which sends every other member a visible push ("A call
@@ -31,14 +31,18 @@ current list can change it, only to a newer version (sending the same list again
 and a phone left out of it is refused at once. Each message is its own storage key, at most 512
 characters, kept for seven days, 2,000 at most.
 
-A phone starts reading from `latest` the first time, so a new member is not alerted for a week of
-old calls; calls still open are repeated by their callers within minutes.
+A phone's first read asks for the last 200 messages and acts only on the last quarter of an hour
+of them, so a call still open is heard at once and a week of old ones is not.
+
+Each phone may post 20 messages a minute and ask for 2 pushes a minute; past that, posts are
+refused with 429 and pushes are not sent. Push tokens of anyone left out of a new member list are
+deleted.
 
 Every response carries `X-HelpAndI-Allowance-Low: 1` once 40,000 relay requests have been made in
 the day, so coordinators hear before the free tier runs out. Each relay request uses two Durable
 Object requests (the group's and the meter's), so the free 100,000 Durable Object requests a day
 are reached at 50,000 relay requests, before the Worker limit. A phone polls every 30 seconds while
-Help&I is open.
+a call is open on it and every two minutes otherwise, while Help&I is open.
 
 ## Run the tests
 

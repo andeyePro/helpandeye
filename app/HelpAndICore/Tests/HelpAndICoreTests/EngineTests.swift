@@ -63,7 +63,8 @@ import XCTest
     var lastProblem: String?
     var sent: [(HelpFrame, RelayWake?)] = []
 
-    func configure(group: GroupState?, identity: DeviceIdentity) {}
+    var configured = 0
+    func configure(group: GroupState?, identity: DeviceIdentity) { configured += 1 }
     func publishMembers() async {}
 
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String? {
@@ -146,6 +147,7 @@ import XCTest
         await air.run()
     }
 
+    var gid: Data { caller.engine.group!.secrets.groupID }
     var key: IncomingRequest.Key { IncomingRequest.Key(unit: caller.request!.unit, request: caller.request!.number) }
 
     func testAPressReachesRespondersAndOnlyAHumanAckShowsSeen() async {
@@ -182,12 +184,12 @@ import XCTest
         await air.run()
         let responderNumber = responder.engine.saved!.me
         let stranger = DeviceIdentity()
-        caller.engine.receive(.signedAck(unit: key.unit, request: key.request, responder: responderNumber, at: clock.now, identity: stranger), via: .mesh)
+        caller.engine.receive(.signedAck(unit: key.unit, request: key.request, responder: responderNumber, at: clock.now, identity: stranger, group: gid), via: .mesh)
         XCTAssertEqual(caller.request?.status, .waitingForResponder, "a forged signature does not count")
         coordinator.engine.updateGroup { $0.remove(responderNumber, at: clock.now) }
         await air.run()
         XCTAssertNil(caller.engine.group?.member(responderNumber), "the caller heard of the removal")
-        caller.engine.receive(.signedAck(unit: key.unit, request: key.request, responder: responderNumber, at: clock.now, identity: responder.identity), via: .mesh)
+        caller.engine.receive(.signedAck(unit: key.unit, request: key.request, responder: responderNumber, at: clock.now, identity: responder.identity, group: gid), via: .mesh)
         XCTAssertEqual(caller.request?.status, .waitingForResponder, "a removed responder's ack does not count")
     }
 
@@ -239,7 +241,8 @@ import XCTest
         for p in air.phones where p !== caller { p.engine.receive(caller.request!.callFrame, via: .mesh) }
         for p in air.phones where p !== caller { p.engine.receive(caller.request!.callFrame, via: .mesh) }
         await air.run()
-        XCTAssertLessThanOrEqual(acks() - first, 2, "one repeat from the responder and at most one passed on, not one per repeat")
+        XCTAssertGreaterThanOrEqual(acks() - first, 1, "the ack was repeated")
+        XCTAssertLessThanOrEqual(acks() - first, 2, "once by the responder and at most once passed on by the coordinator, not once per repeat")
         air.keep = { _, _, _ in true }
         await advance(30)
         XCTAssertEqual(caller.request?.status, .seen(responder: responder.engine.saved!.me), "the repeated ack got through")
@@ -297,19 +300,119 @@ import XCTest
         XCTAssertEqual(coordinator.mesh.secrets.count, 1, "the old channel is dropped after the changeover")
     }
 
-    func testASecondCoordinatorTakesTheFirstOnesMembershipChanges() async {
-        let second = Phone(air: air, clock: clock)
-        join(second, call: false, respond: true)
-        coordinator.engine.updateGroup { g in
-            if let i = g.members.firstIndex(where: { $0.publicKey == second.identity.publicKey }) { g.members[i].role = .coordinator }
+    func testAReplayedMemberAddedCannotLetARemovedPhoneBackIn() async {
+        let lost = Phone(air: air, clock: clock)
+        join(lost, call: false, respond: true)
+        await air.run()
+        let n = lost.engine.saved!.me
+        // The lost phone kept the signed "member added" it heard when it joined.
+        let replay = HelpFrame.signing(coordinator.engine.group!.addedFrame(n)!, as: 1, identity: coordinator.identity, group: gid)
+        coordinator.engine.updateGroup { $0.remove(n, at: clock.now) }
+        await air.run()
+        caller.engine.press(.red)
+        await air.run()
+        for p in air.phones where p !== lost { p.engine.receive(replay, via: .mesh) }
+        XCTAssertNil(caller.engine.group?.member(n))
+        caller.engine.receive(.signedAck(unit: key.unit, request: key.request, responder: n, at: clock.now, identity: lost.identity, group: gid), via: .mesh)
+        XCTAssertEqual(caller.request?.status, .waitingForResponder)
+    }
+
+    func testRemovedMembersNumbersAndBoxesAreNeverReused() async {
+        let old = Phone(air: air, clock: clock)
+        join(old, call: false, respond: true)
+        await air.run()
+        await old.engine.boxReady()
+        await air.run()
+        let n = old.engine.saved!.me
+        XCTAssertNotNil(caller.engine.activity.boardKeys[n])
+        coordinator.engine.updateGroup { $0.remove(n, at: clock.now) }
+        await air.run()
+        XCTAssertNil(caller.engine.activity.boardKeys[n], "the removed box is forgotten")
+        let new = Phone(air: air, clock: clock)
+        join(new, call: false, respond: true)
+        XCTAssertNotEqual(new.engine.saved!.me, n)
+        caller.engine.press(.red)
+        await air.run()
+        air.directSends = []
+        _ = caller.engine.addNote("private")
+        await air.run()
+        XCTAssertFalse(air.phones.contains { $0 === old && $0.engine.activity.inbox.requests[key]?.orderedNotes.isEmpty == false })
+    }
+
+    func testIAmOKAlertsOnceAndNeverCrowdsOutARedCall() async {
+        for _ in 0..<20 {
+            caller.engine.press(.green)
+            await air.run()
+            await advance(600)
         }
-        let welcome = try! Joining.update(coordinator.engine.group!, for: coordinator.engine.group!.members.last!, coordinator: coordinator.identity)
-        _ = welcome
+        let greenKeys = responder.engine.activity.inbox.requests.values.filter { $0.colour == .green }.map(\.key)
+        XCTAssertEqual(greenKeys.count, 20)
+        let first = greenKeys.min { $0.request < $1.request }!
+        XCTAssertNil(responder.alerts.scheduled[first].map { a in a.times.filter { $0 > clock.now } }.flatMap { $0.isEmpty ? nil : $0 },
+                     "an old green is not alerted again")
+        caller.engine.press(.red)
         await air.run()
-        second.engine.joined(coordinator.engine.group!, as: second.engine.saved!.me)
-        let late = Phone(air: air, clock: clock)
-        join(late, call: false, respond: true)
+        XCTAssertEqual(responder.alerts.scheduled[key]?.times.count, 58, "a red call gets its full set of alerts")
+    }
+
+    func testACallFirstReachingTheRelayOnAResendStillWakesPhones() async {
+        for p in air.phones { p.mesh.isReady = false }
+        caller.engine.press(.red)
         await air.run()
-        XCTAssertNotNil(second.engine.group?.member(late.engine.saved!.me), "the second coordinator heard of the new member")
+        XCTAssertEqual(caller.request?.status, .notSent)
+        for p in air.phones { p.relay.isConfigured = true }
+        await advance(30)
+        XCTAssertEqual(caller.relay.sent.first?.1, .call, "the first post to the relay asks for a push")
+        XCTAssertNotNil(responder.alerts.scheduled[key])
+    }
+
+    func testRepeatedMembershipFromABoxReconnectChangesNothingElsewhere() async {
+        let before = air.phones.map { $0.relay.configured }
+        coordinator.engine.resetMembershipRepeatForTesting()
+        await coordinator.engine.boxReady()
+        await air.run()
+        XCTAssertEqual(air.phones.map { $0.relay.configured }, before, "no phone reconfigured its relay for a change that changed nothing")
+    }
+
+    func testAfterLeavingAndJoiningTheMeshStillWorks() async {
+        caller.engine.leave()
+        join(caller, call: true, respond: false)
+        await air.run()
+        caller.engine.press(.red)
+        await air.run()
+        XCTAssertEqual(caller.request?.routes[.mesh], .sent)
+    }
+
+    func testDirectMessagesStayOffAFrequencyHelpAndIWillNotUse() async {
+        caller.engine.press(.red)
+        await air.run()
+        caller.mesh.radio = RadioSettings(frequencyMHz: 870.0, bandwidthKHz: 62.5, spreadingFactor: 8, codingRate: 8)
+        air.directSends = []
+        _ = caller.engine.addNote("hello")
+        await air.run()
+        XCTAssertTrue(air.directSends.isEmpty)
+    }
+
+    func testARemovedCallerGetsTheCrossNotNothing() async {
+        coordinator.engine.updateGroup { $0.remove(self.caller.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        caller.engine.press(.red)
+        XCTAssertEqual(caller.request?.status, .notSent)
+        await advance(3600)
+        XCTAssertFalse(air.groupSends.contains { if case .call(0, _, _, _) = $0 { return true }; return false })
+    }
+
+    func testAnUnacknowledgedRedSurvivesTheListCap() async {
+        caller.engine.press(.red)
+        await air.run()
+        let red = caller.request!
+        for _ in 0..<60 { caller.engine.press(.green) }
+        XCTAssertTrue(caller.engine.activity.outgoing.contains { $0.number == red.number }, "the red call is still being sent")
+    }
+
+    func testAMissedCheckInIsRaisedEndToEnd() async {
+        caller.engine.setCheckIn(CheckInSchedule(times: [Calendar(identifier: .gregorian).component(.hour, from: clock.now) * 60 + 60]))
+        await advance(3600 + 31 * 60)
+        XCTAssertTrue(responder.engine.activity.inbox.requests.values.contains { $0.orderedCategories.contains(.missedCheckIn) })
     }
 }

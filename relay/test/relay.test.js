@@ -121,3 +121,34 @@ test("push tokens belong to current members and the sender is not woken", async 
   assert.deepEqual(await relay.pushTargets(coord.key), []);
   assert.deepEqual(await relay.pushTargets(member.key), [{ token: "a".repeat(64), sandbox: true }]);
 });
+
+test("a first read can ask for the last few messages, and the cursor moves past expired ones", async () => {
+  let now = 0;
+  const relay = new GroupRelay(new MapStorage(), () => now);
+  const coord = await phone();
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }] });
+  for (let i = 0; i < 5; i++) await relay.post(coord.key, "AA==");
+  assert.deepEqual((await relay.since(coord.key, -2)).messages.map((m) => m.seq), [4, 5]);
+  now = KEEP_MS + 1;
+  const page = await relay.since(coord.key, 0);
+  assert.deepEqual(page.messages, []);
+  assert.equal(page.next, 5, "past the expired ones");
+});
+
+test("posts and pushes are limited per phone per minute, and old push tokens are deleted", async () => {
+  let now = 0;
+  const storage = new MapStorage();
+  const relay = new GroupRelay(storage, () => now);
+  const coord = await phone(), member = await phone();
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }] });
+  assert.equal(await relay.limit(member.key, true), true);
+  assert.equal(await relay.limit(member.key, true), true);
+  assert.equal(await relay.limit(member.key, true), false, "a third push in a minute is not sent");
+  for (let i = 3; i < 20; i++) await relay.limit(member.key, false);
+  await rejects(relay.limit(member.key, false), 429);
+  now = 60_000;
+  assert.equal(await relay.limit(member.key, true), true, "a new minute");
+  await relay.setPushToken(member.key, { token: "b".repeat(64) });
+  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }] });
+  assert.equal(storage.m.has("p:" + member.key), false);
+});

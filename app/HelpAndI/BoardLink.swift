@@ -24,7 +24,7 @@ final class BoardLink: NSObject, ObservableObject {
     var onText: ((Data, String) -> Void)?
     /// The channel secrets to listen on: the current one first, then the previous one while boards
     /// move to new secrets.
-    var secrets: [Data] = [] { didSet { if state == .ready { Task { await setUpChannels() } } } }
+    var secrets: [Data] = [] { didSet { if state == .ready, secrets != oldValue { Task { await setUpChannels() } } } }
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -91,8 +91,10 @@ final class BoardLink: NSObject, ObservableObject {
     func send(_ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
         guard state == .ready, let ch = helpChannel else { return .refused("Box not connected") }
         let result = await sendOn(ch, frame, urgent: urgent)
-        if let old = previousChannel, old != ch { _ = await sendOn(old, frame, urgent: urgent) }
-        return result
+        guard let old = previousChannel, old != ch else { return result }
+        // Sent if either channel took it, so airtime is never given back for a packet on air.
+        let second = await sendOn(old, frame, urgent: urgent)
+        return result == .sent || second == .sent ? .sent : result
     }
 
     /// How many packets a send puts on air, for the airtime budget.

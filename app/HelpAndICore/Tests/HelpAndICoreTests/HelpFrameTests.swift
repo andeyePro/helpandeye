@@ -19,14 +19,14 @@ final class HelpFrameTests: XCTestCase {
 
     func testAckIsSignedAndFits() {
         let me = DeviceIdentity()
-        let f = HelpFrame.signedAck(unit: 1, request: 2, responder: 3, at: Date(timeIntervalSince1970: 100), identity: me)
+        let f = HelpFrame.signedAck(unit: 1, request: 2, responder: 3, at: Date(timeIntervalSince1970: 100), identity: me, group: Data())
         XCTAssertEqual(f.encoded().count, 77)
         XCTAssertEqual(HelpFrame(f.encoded()), f)
-        XCTAssertTrue(f.isValidAck(signedBy: me.signingPublicKey))
+        XCTAssertTrue(f.isValidAck(signedBy: me.signingPublicKey, group: Data()))
         guard case let .ack(u, r, _, at, s) = f else { return XCTFail() }
-        XCTAssertFalse(HelpFrame.ack(unit: u, request: r, responder: 4, ackedAt: at, signature: s).isValidAck(signedBy: me.signingPublicKey),
+        XCTAssertFalse(HelpFrame.ack(unit: u, request: r, responder: 4, ackedAt: at, signature: s).isValidAck(signedBy: me.signingPublicKey, group: Data()),
                        "a signature cannot be moved to another responder")
-        XCTAssertFalse(f.isValidAck(signedBy: nil))
+        XCTAssertFalse(f.isValidAck(signedBy: nil, group: Data()))
     }
 
     func testCallIsTwelveBytesAndCarriesNoText() {
@@ -120,14 +120,14 @@ final class MeshTextTests: XCTestCase {
 
     func testBoardKeyFrameIsSignedPublicAndRoundTrips() {
         let me = DeviceIdentity()
-        let f = HelpFrame.signedBoard(member: 3, publicKey: Data(repeating: 9, count: 32), identity: me)
+        let f = HelpFrame.signedBoard(member: 3, publicKey: Data(repeating: 9, count: 32), identity: me, group: Data())
         XCTAssertEqual(HelpFrame(f.encoded()), f)
         XCTAssertTrue(f.mayGoOnGroupChannel)
         XCTAssertEqual(f.encoded().count, 99)
-        XCTAssertTrue(f.isValidBoard(signedBy: me.signingPublicKey))
-        XCTAssertFalse(f.isValidBoard(signedBy: DeviceIdentity().signingPublicKey))
+        XCTAssertTrue(f.isValidBoard(signedBy: me.signingPublicKey, group: Data()))
+        XCTAssertFalse(f.isValidBoard(signedBy: DeviceIdentity().signingPublicKey, group: Data()))
         guard case let .board(_, k, s) = f else { return XCTFail() }
-        XCTAssertFalse(HelpFrame.board(member: 4, publicKey: k, signature: s).isValidBoard(signedBy: me.signingPublicKey))
+        XCTAssertFalse(HelpFrame.board(member: 4, publicKey: k, signature: s).isValidBoard(signedBy: me.signingPublicKey, group: Data()))
     }
 }
 
@@ -135,20 +135,20 @@ final class SignedFrameTests: XCTestCase {
     func testAvailabilityCountsOnlyWhenSignedByThatResponder() {
         let me = DeviceIdentity(), other = DeviceIdentity()
         let mine = HelpFrame.availability(responder: 3, from: 10, until: 20, available: false)
-        let f = HelpFrame.signing(mine, as: 3, identity: me)
+        let f = HelpFrame.signing(mine, as: 3, identity: me, group: Data())
         XCTAssertEqual(HelpFrame(f.encoded()), f)
         XCTAssertLessThanOrEqual(f.encoded().count, HelpFrame.maxPayload)
-        XCTAssertEqual(f.verifiedInner(signedBy: me.signingPublicKey), mine)
-        XCTAssertNil(f.verifiedInner(signedBy: other.signingPublicKey))
-        XCTAssertNil(HelpFrame.signing(mine, as: 4, identity: me).verifiedInner(signedBy: me.signingPublicKey),
+        XCTAssertEqual(f.verifiedInner(signedBy: me.signingPublicKey, group: Data()), mine)
+        XCTAssertNil(f.verifiedInner(signedBy: other.signingPublicKey, group: Data()))
+        XCTAssertNil(HelpFrame.signing(mine, as: 4, identity: me, group: Data()).verifiedInner(signedBy: me.signingPublicKey, group: Data()),
                      "a responder cannot sign someone else's availability")
-        XCTAssertNil(HelpFrame.signing(.call(unit: 1, request: 1, colour: .red, sentAt: 0), as: 3, identity: me)
-            .verifiedInner(signedBy: me.signingPublicKey), "only availability and notice acks are unwrapped")
+        XCTAssertNil(HelpFrame.signing(.call(unit: 1, request: 1, colour: .red, sentAt: 0), as: 3, identity: me, group: Data())
+            .verifiedInner(signedBy: me.signingPublicKey, group: Data()), "only availability and notice acks are unwrapped")
     }
 
     func testNoticeAckCountsOnlyFromItsSigner() {
         let me = DeviceIdentity()
         let ack = HelpFrame.noticeAck(notice: .rotaGap, by: 1, at: 5)
-        XCTAssertEqual(HelpFrame.signing(ack, as: 1, identity: me).verifiedInner(signedBy: me.signingPublicKey), ack)
+        XCTAssertEqual(HelpFrame.signing(ack, as: 1, identity: me, group: Data()).verifiedInner(signedBy: me.signingPublicKey, group: Data()), ack)
     }
 }

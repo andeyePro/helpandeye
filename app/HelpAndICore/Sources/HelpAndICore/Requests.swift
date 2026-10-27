@@ -158,7 +158,24 @@ public struct ResponderInbox: Sendable, Codable {
             if var existing = requests[key] {
                 let changed = existing.colour == nil || !existing.heardOn.contains(route)
                 existing.colour = existing.colour ?? colour
-                existing.sentAt = existing.sentAt ?? pressed
+                if existing.sentAt == nil {
+                    existing.sentAt = pressed
+                    // Acknowledgements heard before the call can now be checked: ones from before
+                    // it was pressed belong to an older call with the same numbers.
+                    let cutoff = pressed.timeIntervalSince1970 - OutgoingRequest.clockAllowance
+                    let wasAcknowledged = existing.isAcknowledged
+                    for (who, f) in existing.acks {
+                        if case let .ack(_, _, _, at, _) = f, TimeInterval(at) < cutoff {
+                            existing.acks[who] = nil
+                            existing.acknowledgedBy.removeAll { $0 == who }
+                        }
+                    }
+                    if wasAcknowledged && !existing.isAcknowledged {
+                        existing.heardOn.insert(route)
+                        requests[key] = existing
+                        return .new(key)
+                    }
+                }
                 existing.heardOn.insert(route)
                 requests[key] = existing
                 return changed ? .updated(key) : .duplicate
@@ -209,20 +226,23 @@ public struct ResponderInbox: Sendable, Codable {
             r.heardOn.insert(route)
             requests[key] = r
             return isNew ? .new(key) : (changed ? .updated(key) : .duplicate)
-        case .availability, .noticeAck, .checkIns, .board, .signed, .memberAdded, .memberRemoved:
+        case .availability, .noticeAck, .checkIns, .board, .signed, .memberAdded, .memberRemoved, .memberName:
             return .ignored
         }
     }
 
     /// Called only from the acknowledge button. Returns the signed frame to send back.
-    public mutating func acknowledge(_ key: IncomingRequest.Key, by responder: UInt16, at now: Date, identity: DeviceIdentity) -> HelpFrame? {
+    public mutating func acknowledge(_ key: IncomingRequest.Key, by responder: UInt16, at now: Date, identity: DeviceIdentity, group: Data) -> HelpFrame? {
         guard var r = requests[key] else { return nil }
-        let frame = HelpFrame.signedAck(unit: key.unit, request: key.request, responder: responder, at: now, identity: identity)
+        let frame = HelpFrame.signedAck(unit: key.unit, request: key.request, responder: responder, at: now, identity: identity, group: group)
         if !r.acknowledgedBy.contains(responder) { r.acknowledgedBy.append(responder) }
         r.acks[responder] = frame
         requests[key] = r
         return frame
     }
+
+    /// Forgets requests, for pruning old ones. Callers must never remove one nobody acknowledged.
+    public mutating func remove(_ keys: [IncomingRequest.Key]) { for k in keys { requests[k] = nil } }
 
     /// Open requests, most urgent first: unacknowledged before acknowledged, red before amber
     /// before green, then oldest first.

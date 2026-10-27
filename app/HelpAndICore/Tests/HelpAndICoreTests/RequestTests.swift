@@ -83,13 +83,13 @@ final class RequestTests: XCTestCase {
         let key = IncomingRequest.Key(unit: 5, request: 1)
         inbox.receive(.call(unit: 5, request: 1, colour: .red, sentAt: 0), via: .mesh, at: t0)
         let me = DeviceIdentity()
-        let frame = inbox.acknowledge(key, by: 4, at: t0, identity: me)
+        let frame = inbox.acknowledge(key, by: 4, at: t0, identity: me, group: Data())
         guard case let .ack(5, 1, 4, at, _)? = frame else { return XCTFail() }
         XCTAssertEqual(at, at0)
-        XCTAssertTrue(frame!.isValidAck(signedBy: me.signingPublicKey))
-        XCTAssertFalse(frame!.isValidAck(signedBy: DeviceIdentity().signingPublicKey))
+        XCTAssertTrue(frame!.isValidAck(signedBy: me.signingPublicKey, group: Data()))
+        XCTAssertFalse(frame!.isValidAck(signedBy: DeviceIdentity().signingPublicKey, group: Data()))
         XCTAssertTrue(inbox.requests[key]!.isAcknowledged)
-        XCTAssertNil(inbox.acknowledge(IncomingRequest.Key(unit: 9, request: 9), by: 4, at: t0, identity: me))
+        XCTAssertNil(inbox.acknowledge(IncomingRequest.Key(unit: 9, request: 9), by: 4, at: t0, identity: me, group: Data()))
     }
 
     func testAckBeforeCallMeansTheCallArrivesAlreadyInHand() {
@@ -125,7 +125,7 @@ final class RequestTests: XCTestCase {
         inbox.receive(.call(unit: 1, request: 1, colour: .amber, sentAt: 0), via: .mesh, at: t0)
         inbox.receive(.call(unit: 2, request: 1, colour: .red, sentAt: 0), via: .mesh, at: t0.addingTimeInterval(5))
         inbox.receive(.call(unit: 3, request: 1, colour: .red, sentAt: 0), via: .mesh, at: t0.addingTimeInterval(9))
-        _ = inbox.acknowledge(IncomingRequest.Key(unit: 2, request: 1), by: 1, at: t0, identity: DeviceIdentity())
+        _ = inbox.acknowledge(IncomingRequest.Key(unit: 2, request: 1), by: 1, at: t0, identity: DeviceIdentity(), group: Data())
         XCTAssertEqual(inbox.sorted.map(\.key.unit), [3, 1, 2])
     }
 }

@@ -26,6 +26,11 @@ public struct Rota: Equatable, Sendable, Codable {
         entries.append(Entry(responder: responder, interval: DateInterval(start: from, end: until), available: available))
     }
 
+    /// Drops everything said by people no longer in the group.
+    public mutating func keepOnly(_ members: Set<UInt16>) {
+        entries.removeAll { !members.contains($0.responder) }
+    }
+
     public mutating func apply(_ frame: HelpFrame) {
         guard case let .availability(who, from, until, available) = frame else { return }
         add(responder: who, from: Date(timeIntervalSince1970: TimeInterval(from)),
@@ -64,8 +69,8 @@ public struct Rota: Equatable, Sendable, Codable {
 /// An alert a coordinator must acknowledge, such as a rota gap or the free relay allowance running
 /// low. If they do not, it widens: other coordinators, then responders. Like a call for help, it
 /// only ever widens and is closed only by a person.
-public struct CoordinatorAlert: Equatable, Sendable {
-    public enum Audience: Equatable, Sendable { case firstCoordinator, allCoordinators, wholeGroup }
+public struct CoordinatorAlert: Equatable, Sendable, Codable {
+    public enum Audience: Equatable, Sendable, Codable { case firstCoordinator, allCoordinators, wholeGroup }
     public let raisedAt: Date
     public let interval: TimeInterval
     public private(set) var acknowledgedBy: UInt16?

@@ -6,6 +6,8 @@ import HelpAndICore
 @MainActor
 final class Relay: ObservableObject, RelayLink {
     var onFrame: ((HelpFrame) -> Void)?
+    /// Set while a call is open on this phone, as caller or responder, to poll more often.
+    var busy = false
     /// Set when the relay says Cloudflare's free daily allowance is nearly used.
     var onAllowanceLow: (() -> Void)?
     @Published private(set) var isConfigured = false
@@ -25,12 +27,12 @@ final class Relay: ObservableObject, RelayLink {
         poller?.cancel()
         guard isConfigured else { return }
         Task { await publishPushToken() }
-        // Every 30 seconds while open: each poll costs two of the free tier's daily Durable Object
-        // requests, shared by every group.
+        // Every 30 seconds while something is open, every two minutes otherwise: each poll costs two
+        // of the free tier's daily Durable Object requests, shared by every group.
         poller = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.poll()
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(for: .seconds(self?.busy == true ? 30 : 120))
             }
         }
     }
@@ -38,7 +40,9 @@ final class Relay: ObservableObject, RelayLink {
     /// Sends the member list. Only a coordinator's list is accepted by the relay.
     func publishMembers() async {
         guard let group, let body = try? JSONEncoder().encode(RelayProtocol.memberList(group)) else { return }
-        _ = await request("PUT", RelayProtocol.path(for: group.secrets, "members"), body: body)
+        if case let .some((status, _)) = await request("PUT", RelayProtocol.path(for: group.secrets, "members"), body: body), status != 200 {
+            lastProblem = "The relay did not take the member list (\(status))."
+        }
     }
 
     /// `wake` asks the relay to push to the other members: `.call` visibly (a new call), `.quiet`
@@ -52,7 +56,8 @@ final class Relay: ObservableObject, RelayLink {
             var fields = ["sealed": ""]
             guard let sealed = try? RelayProtocol.seal(frame, with: secrets) else { return "Could not seal the message" }
             fields["sealed"] = sealed
-            if let wake { fields["wake"] = wake.rawValue }
+            // One push per call, not one per key.
+            if let wake, n == 0 { fields["wake"] = wake.rawValue }
             guard let body = try? JSONEncoder().encode(fields) else { return "Could not seal the message" }
             let result: String?
             switch await request("POST", RelayProtocol.path(for: group.secrets, "messages"), body: body) {
@@ -89,25 +94,26 @@ final class Relay: ObservableObject, RelayLink {
 
     func poll() async {
         guard let group, let positionKey else { return }
-        struct Page: Decodable { struct M: Decodable { let seq: Int; let sealed: String }; let latest: Int; let messages: [M] }
+        struct Page: Decodable {
+            struct M: Decodable { let seq: Int; let at: Double; let sealed: String }
+            let latest: Int; let next: Int; let messages: [M]
+        }
         let stored = UserDefaults.standard.object(forKey: positionKey) as? Int
-        let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(stored ?? 0)", body: Data())
+        // A first poll reads only the last few hundred messages, and acts on the last quarter of an
+        // hour of them: a call still open is heard at once, a week of old ones is not.
+        let first = stored == nil
+        let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(stored ?? -200)", body: Data())
         if case .some((403, _)) = response { lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return }
         guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(Page.self, from: data) else { return }
-        // A first poll starts from now rather than replaying a week of old calls as new alerts;
-        // calls still open are sent again by their callers, so they arrive within minutes. A place
-        // ahead of the relay means the relay was reset: start again from its beginning.
-        guard let stored, stored <= page.latest else {
-            UserDefaults.standard.set(stored == nil ? page.latest : 0, forKey: positionKey)
-            return
-        }
+        // A place ahead of the relay means the relay was reset: start again from its beginning.
+        if let stored, stored > page.latest { UserDefaults.standard.set(0, forKey: positionKey); return }
         let keys = group.listening(at: Date())
-        var position = stored
-        for m in page.messages.sorted(by: { $0.seq < $1.seq }) {
+        let recent = Date().addingTimeInterval(-15 * 60).timeIntervalSince1970 * 1000
+        for m in page.messages.sorted(by: { $0.seq < $1.seq }) where !first || m.at >= recent {
             if let f = RelayProtocol.open(m.sealed, with: keys) { onFrame?(f) }
-            position = max(position, m.seq)
         }
-        UserDefaults.standard.set(position, forKey: positionKey)
+        // `next` moves past expired messages too, so the place never stalls.
+        UserDefaults.standard.set(max(stored ?? 0, page.next), forKey: positionKey)
     }
 
     private func request(_ method: String, _ path: String, body: Data) async -> (Int, Data)? {

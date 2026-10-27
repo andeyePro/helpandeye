@@ -32,6 +32,14 @@ final class PhoneWatchLink: NSObject, ObservableObject {
             }
             context["failed"] = r.status == .notSent
         }
+        // Open requests this person can acknowledge from the wrist, most urgent first. Names stay on
+        // the paired watch, which is this person's own device.
+        if model.me?.canRespond == true {
+            context["open"] = model.inbox.sorted.filter { !$0.isAcknowledged }.prefix(5).map { r -> [String: Any] in
+                ["unit": Int(r.key.unit), "request": Int(r.key.request), "colour": Int(r.colour?.rawValue ?? 1),
+                 "who": model.name(ofUnit: r.key.unit)]
+            }
+        }
         try? WCSession.default.updateApplicationContext(context)
     }
 }
@@ -44,6 +52,17 @@ extension PhoneWatchLink: WCSessionDelegate {
     nonisolated func sessionDidDeactivate(_ s: WCSession) { s.activate() }
 
     nonisolated func session(_ s: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
+        if let unit = message["ackUnit"] as? Int, let request = message["ackRequest"] as? Int {
+            // A person pressed Acknowledge on the watch: the same as pressing it on the phone.
+            Task { @MainActor in
+                guard let u = UInt32(exactly: unit), let r = UInt16(exactly: request) else { replyHandler(["ok": false]); return }
+                let key = IncomingRequest.Key(unit: u, request: r)
+                let known = self.model?.inbox.requests[key] != nil
+                if known { self.model?.acknowledge(key) }
+                replyHandler(["ok": known])
+            }
+            return
+        }
         let raw = message["press"] as? Int
         Task { @MainActor in
             guard let raw, let colour = Colour(rawValue: UInt8(raw)), self.model?.me?.canCall == true else {

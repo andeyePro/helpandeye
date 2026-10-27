@@ -49,6 +49,10 @@ Integers are little-endian.
 | 10 | signed | signer u16, length u8, inner frame, Ed25519 signature (64) | yes |
 | 11 | member added | member u16, role u8, unit u32, signing key (32) | inside 10, from a coordinator |
 | 12 | member removed | member u16 | inside 10, from a coordinator |
+| 13 | member name | member u16, length u8, UTF-8 name (up to 40) | no; inside 10, from a coordinator |
+
+Every signature (kinds 3, 9 and 10) also covers the group's ID, so one made in one group is
+worthless in another.
 
 Availability (4) and notice acknowledgements (5) count only inside a signed frame (10) from the
 member they are about.

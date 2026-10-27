@@ -91,6 +91,10 @@ public struct Activity: Codable, Sendable {
     public var checkInWatch = CheckInWatch()
     /// Members' boxes, by member number, for direct messages over the mesh.
     public var boardKeys: [UInt16: Data] = [:]
+    /// Notices a coordinator must acknowledge. Saved, so a relaunch does not restart their widening.
+    public var notices: [Notice: CoordinatorAlert] = [:]
+    /// "I'm OK now" calls already alerted once; they are never alerted again.
+    public var alertedGreens: Set<IncomingRequest.Key> = []
 
     public init() {}
 }
@@ -101,7 +105,7 @@ public final class HelpEngine: ObservableObject {
     @Published public private(set) var activity: Activity { didSet { store.save(activity) } }
     /// Notices a coordinator must acknowledge. Each phone widens its own copy until it hears an
     /// acknowledgement (app spec, "Tiers and cost" and "Rota gaps").
-    @Published public private(set) var notices: [Notice: CoordinatorAlert] = [:]
+    public var notices: [Notice: CoordinatorAlert] { activity.notices }
     /// Whether this responder's own acknowledgements went out.
     @Published public private(set) var ackSends: [IncomingRequest.Key: [Route: RouteState]] = [:]
 
@@ -115,6 +119,8 @@ public final class HelpEngine: ObservableObject {
 
     private var lastReAck: [IncomingRequest.Key: Date] = [:]
     private var lastTopUp: [IncomingRequest.Key: Date] = [:]
+    private var ackAttempt: [IncomingRequest.Key: UUID] = [:]
+    private var lastMembershipRepeat: Date?
     private var tasks: [UUID: Task<Void, Never>] = [:]
 
     public init(identity: DeviceIdentity, mesh: MeshLink, relay: RelayLink, alerts: AlertScheduler, store: EngineStore,
@@ -125,6 +131,7 @@ public final class HelpEngine: ObservableObject {
     }
 
     public var group: GroupState? { saved?.group }
+    private var groupID: Data { group?.secrets.groupID ?? Data() }
     public var me: Member? { saved.flatMap { $0.group.member($0.me) } }
     public var current: OutgoingRequest? { activity.outgoing.last }
 
@@ -170,16 +177,26 @@ public final class HelpEngine: ObservableObject {
 
     private func announce(membershipOf g: GroupState, added: Set<UInt16>, removed: Set<UInt16>) {
         guard let me = saved?.me else { return }
+        let gid = g.secrets.groupID
         let frames = added.sorted().compactMap { g.addedFrame($0) } + removed.sorted().map { HelpFrame.memberRemoved(member: $0) }
         for f in frames {
-            let signed = HelpFrame.signing(f, as: me, identity: identity)
+            let signed = HelpFrame.signing(f, as: me, identity: identity, group: gid)
             spawn { await self.sendToAll(signed) }
+        }
+        // Names are personal, so they go over the internet only.
+        for n in added.sorted() {
+            guard let m = g.member(n) else { continue }
+            let signed = HelpFrame.signing(.memberName(member: n, name: m.name), as: me, identity: identity, group: gid)
+            spawn { _ = await self.relay.send(signed, wake: nil) }
         }
     }
 
     public func leave() {
         setState(nil)
-        activity = Activity()
+        // The radio's record of the last hour belongs to the box, not the group: keep it.
+        var fresh = Activity()
+        fresh.airtime = activity.airtime
+        activity = fresh
         alerts.cancelAll()
     }
 
@@ -194,7 +211,15 @@ public final class HelpEngine: ObservableObject {
         // respond follows the group.
         activity.rota.responders = group?.members.filter(\.canRespond).map(\.number) ?? []
         activity.rota.defaultAvailable = true
-        mesh.secrets = group?.listening(at: now()).map(\.channelSecret) ?? []
+        // Forget removed members' boxes, availability and answering record, so nothing meant for a
+        // current member can reach a removed one.
+        let current = Set(group?.members.map(\.number) ?? [])
+        if activity.boardKeys.keys.contains(where: { !current.contains($0) }) { activity.boardKeys = activity.boardKeys.filter { current.contains($0.key) } }
+        if activity.lastAnswered.keys.contains(where: { !current.contains($0) }) { activity.lastAnswered = activity.lastAnswered.filter { current.contains($0.key) } }
+        if activity.rota.entries.contains(where: { !current.contains($0.responder) }) { activity.rota.keepOnly(current) }
+        let listening = group?.listening(at: now()).map(\.channelSecret) ?? []
+        if mesh.secrets != listening { mesh.secrets = listening }
+        if activity.airtime == nil { bandChanged(mesh.radio?.band) }
         relay.configure(group: group, identity: identity)
         if me?.role == .coordinator, relay.isConfigured { spawn { await self.relay.publishMembers() } }
         checkGaps()
@@ -208,6 +233,7 @@ public final class HelpEngine: ObservableObject {
     }
 
     func setAirtimeForTesting(_ budget: AirtimeBudget) { activity.airtime = budget }
+    func resetMembershipRepeatForTesting() { lastMembershipRepeat = nil }
 
     // MARK: Calling for help
 
@@ -231,14 +257,21 @@ public final class HelpEngine: ObservableObject {
     /// Routes that are not available are shown as not sent, with the reason, so that a press with
     /// no route at all gives the cross at once.
     public func press(_ colour: Colour) {
-        guard let unit = me?.unit else { return }
+        guard let unit = me?.unit else {
+            // Removed from the group, or not a caller: say so with the cross, never nothing.
+            guard saved != nil else { return }
+            var r = OutgoingRequest(unit: 0, number: 0, colour: colour, createdAt: now())
+            for route in [Route.mesh, .internet] { r.update(route, .failed("You are not a caller in this group")) }
+            activity.outgoing.append(r)
+            return
+        }
         var r = OutgoingRequest(unit: unit, number: nextRequestNumber(), colour: colour, createdAt: now())
         let routes = RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false)
         if !routes.contains(.mesh) { r.update(.mesh, .failed(mesh.unavailableReason)) }
         if !routes.contains(.internet) { r.update(.internet, .failed(relay.lastProblem ?? "Internet route not set up")) }
         for route in routes { r.update(route, .sending) }
         activity.outgoing.append(r)
-        if activity.outgoing.count > 50 { activity.outgoing.removeFirst(activity.outgoing.count - 50) }
+        trimOutgoing()
         if colour == .green { activity.greens.append(r.createdAt) }
         let frame = r.callFrame
         for route in routes {
@@ -246,6 +279,18 @@ public final class HelpEngine: ObservableObject {
                 let failure = route == .internet ? await self.relay.send(frame, wake: .call) : await self.send(frame, on: route, kind: .call)
                 self.updateOutgoing(r, route, failure.map(RouteState.failed) ?? .sent)
             }
+        }
+    }
+
+    /// Keeps the list short by dropping "I'm OK now" calls and acknowledged ones, oldest first.
+    /// A call nobody has acknowledged is never dropped: it keeps being sent.
+    private func trimOutgoing() {
+        while activity.outgoing.count > 50, let i = activity.outgoing.indices.dropLast().first(where: { i in
+            let r = activity.outgoing[i]
+            if case .seen = r.status { return true }
+            return r.colour == .green || r.number == 0
+        }) {
+            activity.outgoing.remove(at: i)
         }
     }
 
@@ -283,7 +328,7 @@ public final class HelpEngine: ObservableObject {
 
     private func sendPersonal(_ frame: HelpFrame) async {
         if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return }
-        guard let text = MeshText.encode(frame), let radio = mesh.radio, activity.airtime != nil else { return }
+        guard mesh.isReady, let text = MeshText.encode(frame), let radio = mesh.radio, radio.band != nil, activity.airtime != nil else { return }
         let seconds = radio.airtime(bytes: meshPacketBytes(payload: text.utf8.count + 8))
         for m in group?.members ?? [] where m.canRespond && m.number != saved?.me {
             guard let key = activity.boardKeys[m.number], activity.airtime!.allows(seconds, kind: .optional, at: now()) else { continue }
@@ -336,11 +381,12 @@ public final class HelpEngine: ObservableObject {
         guard let myNumber = saved?.me, let key = mesh.boxPublicKey else { return }
         activity.boardKeys[myNumber] = key
         for (member, k) in activity.boardKeys where member != myNumber { await mesh.addContact(k, name: "Help&I \(member)") }
-        await sendToAll(.signedBoard(member: myNumber, publicKey: key, identity: identity))
-        // A coordinator repeats who is in the group, for members who missed it.
-        if me?.role == .coordinator, let g = group {
+        await sendToAll(.signedBoard(member: myNumber, publicKey: key, identity: identity, group: groupID))
+        // A coordinator repeats who is in the group, for members who missed it, at most once a day.
+        if me?.role == .coordinator, let g = group, now().timeIntervalSince(lastMembershipRepeat ?? .distantPast) > 86_400 {
+            lastMembershipRepeat = now()
             for m in g.members where m.number != myNumber {
-                if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity)) }
+                if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
             }
         }
     }
@@ -349,6 +395,7 @@ public final class HelpEngine: ObservableObject {
 
     /// Runs every 15 seconds while the app runs, and whenever the box or relay wakes it.
     public func tick() {
+        pruneInbox()
         checkResends()
         checkMissedCheckIn()
         watchOthersCheckIns()
@@ -358,18 +405,35 @@ public final class HelpEngine: ObservableObject {
         if mesh.secrets != listening { mesh.secrets = listening }
     }
 
+    /// Drops "I'm OK now" calls and acknowledged requests after a week. A request nobody has
+    /// acknowledged stays, however old.
+    private func pruneInbox() {
+        let cutoff = now().addingTimeInterval(-7 * 86_400)
+        let stale = activity.inbox.requests.values.filter { r in
+            (r.isAcknowledged || r.colour == .green) && r.firstHeardAt < cutoff
+        }.map(\.key)
+        guard !stale.isEmpty else { return }
+        activity.inbox.remove(stale)
+        for k in stale { activity.alertedGreens.remove(k) }
+    }
+
     /// Sends every call nobody has acknowledged yet again (see `Resend`), not only the latest, so a
     /// later press never strands an earlier one. A route that failed before is tried again, so a
     /// box that comes back in range still gets the call out.
     private func checkResends() {
         let t = now()
-        for i in activity.outgoing.indices where activity.outgoing[i].resendDue(at: t) {
+        for i in activity.outgoing.indices where activity.outgoing[i].unit != 0 && activity.outgoing[i].resendDue(at: t) {
             activity.outgoing[i].markResent(at: t)
             let r = activity.outgoing[i]
             for route in RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false) {
+                // The first time a call reaches the relay, ask it to wake the others, even if that is
+                // on a resend because the internet came back.
+                let firstOnInternet = route == .internet && r.routes[.internet] != .sent
                 spawn {
                     // Resends count as optional airtime, so they never use up what a new press needs.
-                    if await self.send(r.callFrame, on: route, kind: .optional) == nil { self.updateOutgoing(r, route, .sent) }
+                    let failure = firstOnInternet ? await self.relay.send(r.callFrame, wake: .call)
+                        : await self.send(r.callFrame, on: route, kind: .optional)
+                    if failure == nil { self.updateOutgoing(r, route, .sent) }
                 }
             }
         }
@@ -398,28 +462,32 @@ public final class HelpEngine: ObservableObject {
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
             }
-        case .availability, .noticeAck, .memberAdded, .memberRemoved:
+        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName:
             // Counted only when signed (below), so a removed phone cannot fake them.
             return
         case let .signed(signer, _, _):
-            guard let sender = group?.member(signer), let inner = frame.verifiedInner(signedBy: sender.signingKey) else { return }
+            guard let sender = group?.member(signer), let inner = frame.verifiedInner(signedBy: sender.signingKey, group: groupID) else { return }
             switch inner {
-            case let .noticeAck(notice, by, _):
-                if sender.role == .coordinator { notices[notice]?.acknowledge(by: by) }
+            case let .noticeAck(notice, by, at):
+                // An old acknowledgement, replayed, must not clear a newer notice.
+                if sender.role == .coordinator, let raised = activity.notices[notice]?.raisedAt,
+                   TimeInterval(at) >= raised.timeIntervalSince1970 - OutgoingRequest.clockAllowance {
+                    activity.notices[notice]?.acknowledge(by: by)
+                }
             case .availability:
                 if sender.canRespond { activity.rota.apply(inner); checkGaps() }
-            case .memberAdded, .memberRemoved:
-                // Only a coordinator changes who is in the group; another coordinator's phone
-                // takes it too, but does not announce it again.
+            case .memberAdded, .memberRemoved, .memberName:
+                // Only a coordinator changes who is in the group. Nothing changes, nothing is redone.
                 if sender.role == .coordinator, signer != saved?.me, var s = saved {
+                    let before = s.group
                     s.group.apply(membership: inner, at: now())
-                    setState(s)
+                    if s.group != before { setState(s) }
                 }
             default: break
             }
             return
         case let .board(member, key, _):
-            guard member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey),
+            guard member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey, group: groupID),
                   activity.boardKeys[member] != key else { return }
             activity.boardKeys[member] = key
             spawn { await self.mesh.addContact(key, name: "Help&I \(member)") }
@@ -461,7 +529,7 @@ public final class HelpEngine: ObservableObject {
     // MARK: Responding
 
     public func acknowledge(_ key: IncomingRequest.Key) {
-        guard let me = saved?.me, let frame = activity.inbox.acknowledge(key, by: me, at: now(), identity: identity) else { return }
+        guard let me = saved?.me, let frame = activity.inbox.acknowledge(key, by: me, at: now(), identity: identity, group: groupID) else { return }
         activity.lastAnswered[me] = now()
         alerts.cancel(key)
         sendAck(frame, for: key)
@@ -469,15 +537,20 @@ public final class HelpEngine: ObservableObject {
 
     public func retryAck(_ key: IncomingRequest.Key) {
         guard let me = saved?.me else { return }
-        sendAck(.signedAck(unit: key.unit, request: key.request, responder: me, at: now(), identity: identity), for: key)
+        sendAck(.signedAck(unit: key.unit, request: key.request, responder: me, at: now(), identity: identity, group: groupID), for: key)
     }
 
     private func sendAck(_ frame: HelpFrame, for key: IncomingRequest.Key) {
         let routes = RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false)
         ackSends[key] = Dictionary(uniqueKeysWithValues: routes.map { ($0, RouteState.sending) })
+        if routes.isEmpty { ackSends[key] = [.mesh: .failed(mesh.unavailableReason)] }
+        // Results from an earlier attempt must not overwrite this one's.
+        let attempt = UUID()
+        ackAttempt[key] = attempt
         for route in routes {
             spawn {
                 let failure = route == .internet ? await self.relay.send(frame, wake: .quiet) : await self.send(frame, on: route, kind: .call)
+                guard self.ackAttempt[key] == attempt else { return }
                 self.ackSends[key]?[route] = failure.map(RouteState.failed) ?? .sent
             }
         }
@@ -507,14 +580,19 @@ public final class HelpEngine: ObservableObject {
         guard let r = activity.inbox.requests[key], !r.isAcknowledged, let e = escalation(for: r), let me = saved?.me else { return }
         let turn = TimeInterval(e.order.firstIndex(of: me) ?? e.order.count) * e.interval
         let turnAt = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn)
+        // "I'm OK now" asks for no one: tell them once, calmly, and never again.
+        if r.colour == .green {
+            guard !activity.alertedGreens.contains(key) else { return }
+            activity.alertedGreens.insert(key)
+        }
         // iOS keeps at most 64 pending notifications per app: up to four go to check-in reminders,
         // the rest are shared between open requests. A long tail keeps alerting with the app asleep.
-        let open = max(activity.inbox.requests.values.filter { !$0.isAcknowledged }.count, 1)
+        let open = max(activity.inbox.requests.values.filter { !$0.isAcknowledged && $0.colour != .green }.count, 1)
         let count = max(3, 58 / open)
         let t = now()
         let times: [Date]
         switch r.colour {
-        case .green?: times = [max(turnAt, t)]  // "I'm OK now" asks for no one: tell them once, calmly.
+        case .green?: times = [max(turnAt, t)]
         case .amber?: times = alertTimes(turnAt: turnAt, every: 300, quick: 6, later: 1800, from: t, count: count)
         default: times = alertTimes(turnAt: turnAt, every: 60, quick: 10, later: 600, from: t, count: count)
         }
@@ -531,7 +609,7 @@ public final class HelpEngine: ObservableObject {
 
     /// Re-schedules each open request's alerts from now, so they keep coming however long it takes.
     private func topUpAlerts() {
-        for r in activity.inbox.requests.values where !r.isAcknowledged {
+        for r in activity.inbox.requests.values where !r.isAcknowledged && r.colour != .green {
             guard now().timeIntervalSince(lastTopUp[r.key] ?? .distantPast) > 120 else { continue }
             lastTopUp[r.key] = now()
             scheduleAlerts(for: r.key)
@@ -547,7 +625,7 @@ public final class HelpEngine: ObservableObject {
         checkGaps()
         let frame = HelpFrame.availability(responder: me, from: UInt32(from.timeIntervalSince1970),
                                            until: UInt32(until.timeIntervalSince1970), available: available)
-        let signed = HelpFrame.signing(frame, as: me, identity: identity)
+        let signed = HelpFrame.signing(frame, as: me, identity: identity, group: groupID)
         spawn { _ = await self.sendOptional(signed) }
     }
 
@@ -555,12 +633,12 @@ public final class HelpEngine: ObservableObject {
 
     /// Every phone works out gaps for itself, so the coordinator hears with no network at all.
     private func checkGaps() {
-        if group != nil, !gaps.isEmpty { raise(.rotaGap) } else { notices[.rotaGap] = nil }
+        if group != nil, !gaps.isEmpty { raise(.rotaGap) } else if activity.notices[.rotaGap] != nil { activity.notices[.rotaGap] = nil }
     }
 
     public func raise(_ notice: Notice) {
-        guard notices[notice] == nil else { return }
-        notices[notice] = CoordinatorAlert(raisedAt: now())
+        guard activity.notices[notice] == nil else { return }
+        activity.notices[notice] = CoordinatorAlert(raisedAt: now())
     }
 
     /// Whether this phone should be showing the notice now.
@@ -576,8 +654,9 @@ public final class HelpEngine: ObservableObject {
 
     public func acknowledge(_ notice: Notice) {
         guard let me = saved?.me else { return }
-        notices[notice]?.acknowledge(by: me)
-        let frame = HelpFrame.signing(.noticeAck(notice: notice, by: me, at: UInt32(now().timeIntervalSince1970)), as: me, identity: identity)
+        activity.notices[notice]?.acknowledge(by: me)
+        let frame = HelpFrame.signing(.noticeAck(notice: notice, by: me, at: UInt32(now().timeIntervalSince1970)), as: me,
+                                      identity: identity, group: groupID)
         spawn { _ = await self.sendOptional(frame) }
     }
 
