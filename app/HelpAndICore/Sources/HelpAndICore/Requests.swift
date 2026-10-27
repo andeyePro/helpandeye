@@ -32,6 +32,12 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     public private(set) var categories: [CallCategory] = []
     public private(set) var notes: [String] = []
     public private(set) var acknowledgedBy: [UInt16] = []
+    /// Takes back acknowledgements from people no longer in the group: one heard from a phone
+    /// before this phone learned it had been removed must not go on reassuring the caller.
+    public mutating func revoke(keeping members: Set<UInt16>) {
+        acknowledgedBy.removeAll { !members.contains($0) }
+    }
+
     /// Follow-ups, notes and positions share one numbering, so each part is distinct.
     private var parts: UInt8 = 0
     /// How many times the call has been sent again (see `Resend`).
@@ -239,6 +245,19 @@ public struct ResponderInbox: Sendable, Codable {
         r.acks[responder] = frame
         requests[key] = r
         return frame
+    }
+
+    /// Takes back acknowledgements from people no longer in the group. Returns the requests that
+    /// are open again, so their alerts can start again.
+    public mutating func revoke(keeping members: Set<UInt16>) -> [IncomingRequest.Key] {
+        var reopened: [IncomingRequest.Key] = []
+        for (k, var r) in requests where r.acknowledgedBy.contains(where: { !members.contains($0) }) {
+            r.acknowledgedBy.removeAll { !members.contains($0) }
+            r.acks = r.acks.filter { members.contains($0.key) }
+            requests[k] = r
+            if !r.isAcknowledged { reopened.append(k) }
+        }
+        return reopened
     }
 
     /// Forgets requests, for pruning old ones. Callers must never remove one nobody acknowledged.

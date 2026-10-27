@@ -225,6 +225,16 @@ public final class HelpEngine: ObservableObject {
         if activity.boardKeys.keys.contains(where: { !current.contains($0) }) { activity.boardKeys = activity.boardKeys.filter { current.contains($0.key) } }
         if activity.lastAnswered.keys.contains(where: { !current.contains($0) }) { activity.lastAnswered = activity.lastAnswered.filter { current.contains($0.key) } }
         if activity.rota.entries.contains(where: { !current.contains($0.responder) }) { activity.rota.keepOnly(current) }
+        // An acknowledgement from someone since removed stops counting: the caller is told they are
+        // waiting again, the call is resent, and responders are alerted again.
+        if group != nil {
+            for i in activity.outgoing.indices where activity.outgoing[i].acknowledgedBy.contains(where: { !current.contains($0) }) {
+                activity.outgoing[i].revoke(keeping: current)
+            }
+            if activity.inbox.requests.values.contains(where: { $0.acknowledgedBy.contains { !current.contains($0) } }) {
+                for k in activity.inbox.revoke(keeping: current) { scheduleAlerts(for: k) }
+            }
+        }
         let units = Set(group?.members.compactMap(\.unit) ?? [])
         if activity.checkInWatch.callers.keys.contains(where: { !units.contains($0) }) { activity.checkInWatch.keepOnly(units: units) }
         let listening = group?.listening(at: now()).map(\.channelSecret) ?? []

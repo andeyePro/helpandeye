@@ -4,6 +4,20 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **A fuzz test of the safety rules** - `EngineFuzzTests` runs groups of four to six phones
+  through 250 random steps per seed: presses, acknowledgements, retries, availability, promotions
+  and removals, links going up and down, lost packets, clock jumps of up to a day, typed messages,
+  positions and check-ins, while removed phones keep acknowledging and replaying captured signed
+  messages. After every step it checks that every acknowledgement anywhere is one a person made
+  (or, on a phone not yet told of a removal, from that removed member), that every open call keeps
+  alerting each responder who heard it, that nothing personal goes on the group channel and no
+  direct message goes to a box the sender does not list, that numbers and units never clash, that
+  airtime stays within the limit, and that all phones agree on the members once links heal. 60
+  seeds run in `swift test` (`HELPANDI_FUZZ_SEEDS` for more; 400 pass). It was checked by planting
+  two bugs, both caught at once. It found one real gap: an acknowledgement from a member who is
+  later removed went on reassuring the caller after the phone heard of the removal. Now it is taken
+  back: the caller sees "waiting" again, the call is resent, and responders are alerted again. 126
+  core tests.
 - [x] **Fixes from the fourth code review** - a fourth independent review of the multi-coordinator,
   check-in, Bluetooth-code and watch changes found 1 blocker and 7 major issues. Two coordinators
   out of touch could hand out the same number block, or each remove someone and split the group

@@ -12,6 +12,7 @@ import XCTest
     var keep: (HelpFrame, Phone, Phone) -> Bool = { _, _, _ in true }
     var groupSends: [HelpFrame] = []
     var directSends: [String] = []
+    var violations: [String] = []
 
     func run() async {
         for _ in 0..<50 {
@@ -47,6 +48,7 @@ import XCTest
     func sendText(_ text: String, to key: Data) async -> MeshSendResult {
         guard isReady, let air, let me = phone, let mine = boxPublicKey else { return .refused("No box connected") }
         air.directSends.append(text)
+        if !(phone?.engine.activity.boardKeys.values.contains(key) ?? false) { air.violations.append("direct message to a box this phone does not list") }
         for p in air.phones where p.mesh.boxPublicKey == key {
             air.queue.append((me, p, { p.engine.receiveText(from: mine.prefix(6), text) }))
         }
@@ -470,6 +472,22 @@ import XCTest
         let forged = HelpFrame.checkIns(unit: unit, since: 0, grace: 30, times: [0])
         responder.engine.receiveText(from: Data(repeating: 7, count: 6), MeshText.encode(forged)!)
         XCTAssertNil(responder.engine.activity.checkInWatch.callers[unit])
+    }
+
+    func testAnAckFromSomeoneLaterRemovedStopsReassuring() async {
+        caller.engine.press(.red)
+        await air.run()
+        let r = responder.engine.saved!.me
+        coordinator.mesh.isReady = false  // the caller will hear of the removal late
+        responder.engine.acknowledge(key)
+        await air.run()
+        XCTAssertEqual(caller.request?.status, .seen(responder: r))
+        coordinator.mesh.isReady = true
+        coordinator.engine.removeMember(r)
+        await air.run()
+        XCTAssertEqual(caller.request?.status, .waitingForResponder, "the removed person's ack no longer counts")
+        XCTAssertNotNil(caller.request?.nextResend, "so the call goes out again")
+        XCTAssertNotNil(coordinator.alerts.scheduled[key], "and the coordinator is alerted again")
     }
 
     func testAPhoneThatMissedARemovalCatchesUp() async {
