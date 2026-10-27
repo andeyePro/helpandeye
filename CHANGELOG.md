@@ -4,6 +4,13 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **HelpAndICore Swift package** - `app/HelpAndICore` holds the app's logic with no UI, tested
+  by 35 tests (`swift test` on macOS): the 12-byte Help&I frame on the MeshCore group channel (data
+  type `0xFF48`), caller status with no "delivered" state and the cross only when every route
+  failed, the responder inbox that dedupes across routes and never closes or acknowledges by
+  itself, escalation that only widens (2 min red, 15 min amber), closest-then-fairest ordering, the
+  rota with gap detection and coordinator alerts, IR 2030 duty-cycle budgeting, iPhone SMS left out
+  of the first attempt, and the MeshCore companion protocol frames the app needs.
 - [x] **Keys, lost phones and rota gaps decided for now** - `docs/app-spec.md` settles its three
   open questions with common practice: per-phone keys that never leave the phone, group secrets
   made by the coordinator's app and shared by QR or a verified link, relays that hold public keys
