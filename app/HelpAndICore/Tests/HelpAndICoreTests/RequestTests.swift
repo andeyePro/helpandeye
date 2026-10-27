@@ -2,11 +2,13 @@ import XCTest
 @testable import HelpAndICore
 
 final class RequestTests: XCTestCase {
+    let sig = Data(repeating: 7, count: 64)
+    var at0: UInt32 { UInt32(t0.timeIntervalSince1970) }
     let t0 = Date(timeIntervalSince1970: 1_793_000_000)
 
     func testCallerSeesSendingThenWaitingNeverDelivered() {
         var r = OutgoingRequest(unit: 5, number: 1, colour: .red, createdAt: t0)
-        XCTAssertEqual(r.status, .sending)
+        XCTAssertEqual(r.status, .notSent, "nothing attempted is nothing sent")
         r.update(.mesh, .sending); r.update(.internet, .sending)
         XCTAssertEqual(r.status, .sending)
         r.update(.internet, .sent)
@@ -26,12 +28,14 @@ final class RequestTests: XCTestCase {
     func testOnlyAMatchingAckReassures() {
         var r = OutgoingRequest(unit: 5, number: 1, colour: .red, createdAt: t0)
         r.update(.mesh, .sent)
-        r.receive(.ack(unit: 5, request: 2, responder: 9, ackedAt: 0))
-        r.receive(.ack(unit: 6, request: 1, responder: 9, ackedAt: 0))
+        r.receive(.ack(unit: 5, request: 2, responder: 9, ackedAt: at0, signature: sig))
+        r.receive(.ack(unit: 6, request: 1, responder: 9, ackedAt: at0, signature: sig))
         r.receive(.call(unit: 5, request: 1, colour: .red, sentAt: 0))
         XCTAssertEqual(r.status, .waitingForResponder)
-        r.receive(.ack(unit: 5, request: 1, responder: 9, ackedAt: 0))
-        XCTAssertEqual(r.status, .seen(responder: 9))
+        r.receive(.ack(unit: 5, request: 1, responder: 9, ackedAt: at0 - 3600, signature: sig))
+        XCTAssertEqual(r.status, .waitingForResponder, "an ack from before this request was made is stale")
+        r.receive(.ack(unit: 5, request: 1, responder: 9, ackedAt: at0 - 60, signature: sig))
+        XCTAssertEqual(r.status, .seen(responder: 9), "a minute of clock difference is allowed")
     }
 
     func testFollowUpsAreNumbered() {
@@ -78,19 +82,42 @@ final class RequestTests: XCTestCase {
         var inbox = ResponderInbox()
         let key = IncomingRequest.Key(unit: 5, request: 1)
         inbox.receive(.call(unit: 5, request: 1, colour: .red, sentAt: 0), via: .mesh, at: t0)
-        let frame = inbox.acknowledge(key, by: 4, at: t0)
-        XCTAssertEqual(frame, .ack(unit: 5, request: 1, responder: 4, ackedAt: UInt32(t0.timeIntervalSince1970)))
+        let me = DeviceIdentity()
+        let frame = inbox.acknowledge(key, by: 4, at: t0, identity: me)
+        guard case let .ack(5, 1, 4, at, _)? = frame else { return XCTFail() }
+        XCTAssertEqual(at, at0)
+        XCTAssertTrue(frame!.isValidAck(signedBy: me.signingPublicKey))
+        XCTAssertFalse(frame!.isValidAck(signedBy: DeviceIdentity().signingPublicKey))
         XCTAssertTrue(inbox.requests[key]!.isAcknowledged)
-        XCTAssertNil(inbox.acknowledge(IncomingRequest.Key(unit: 9, request: 9), by: 4, at: t0))
+        XCTAssertNil(inbox.acknowledge(IncomingRequest.Key(unit: 9, request: 9), by: 4, at: t0, identity: me))
     }
 
-    func testAckFromAnotherResponderIsShownButUnknownAckIgnored() {
+    func testAckBeforeCallMeansTheCallArrivesAlreadyInHand() {
         var inbox = ResponderInbox()
-        XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: 0), via: .mesh, at: t0), .ignored)
-        inbox.receive(.call(unit: 5, request: 1, colour: .amber, sentAt: 0), via: .mesh, at: t0)
         let key = IncomingRequest.Key(unit: 5, request: 1)
-        XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: 0), via: .mesh, at: t0), .updated(key))
-        XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: 0), via: .internet, at: t0), .duplicate)
+        XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: 0, signature: sig), via: .mesh, at: t0), .updated(key))
+        XCTAssertEqual(inbox.receive(.call(unit: 5, request: 1, colour: .amber, sentAt: 0), via: .mesh, at: t0), .updated(key))
+        XCTAssertEqual(inbox.receive(.followUp(unit: 5, request: 1, part: 1, category: .fallen), via: .mesh, at: t0), .updated(key))
+        XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: 0, signature: sig), via: .internet, at: t0), .duplicate)
+        XCTAssertEqual(inbox.requests[key]?.colour, .amber)
+        XCTAssertTrue(inbox.requests[key]!.isAcknowledged)
+    }
+
+    func testCallRecordsWhenItWasPressed() {
+        var inbox = ResponderInbox()
+        inbox.receive(.call(unit: 5, request: 1, colour: .red, sentAt: at0 - 30), via: .mesh, at: t0)
+        XCTAssertEqual(inbox.requests[IncomingRequest.Key(unit: 5, request: 1)]?.sentAt, t0.addingTimeInterval(-30))
+    }
+
+    func testInboxAndRequestsSurviveARestart() throws {
+        var inbox = ResponderInbox()
+        inbox.receive(.call(unit: 5, request: 1, colour: .red, sentAt: at0), via: .mesh, at: t0)
+        inbox.receive(.followUp(unit: 5, request: 1, part: 1, category: .fallen), via: .internet, at: t0)
+        let back = try JSONDecoder().decode(ResponderInbox.self, from: JSONEncoder().encode(inbox))
+        XCTAssertEqual(back.requests, inbox.requests)
+        var out = OutgoingRequest(unit: 5, number: 1, colour: .red, createdAt: t0)
+        out.update(.mesh, .failed("x")); out.update(.internet, .sent)
+        XCTAssertEqual(try JSONDecoder().decode(OutgoingRequest.self, from: JSONEncoder().encode(out)), out)
     }
 
     func testSortPutsUnacknowledgedRedFirst() {
@@ -98,7 +125,7 @@ final class RequestTests: XCTestCase {
         inbox.receive(.call(unit: 1, request: 1, colour: .amber, sentAt: 0), via: .mesh, at: t0)
         inbox.receive(.call(unit: 2, request: 1, colour: .red, sentAt: 0), via: .mesh, at: t0.addingTimeInterval(5))
         inbox.receive(.call(unit: 3, request: 1, colour: .red, sentAt: 0), via: .mesh, at: t0.addingTimeInterval(9))
-        _ = inbox.acknowledge(IncomingRequest.Key(unit: 2, request: 1), by: 1, at: t0)
+        _ = inbox.acknowledge(IncomingRequest.Key(unit: 2, request: 1), by: 1, at: t0, identity: DeviceIdentity())
         XCTAssertEqual(inbox.sorted.map(\.key.unit), [3, 1, 2])
     }
 }

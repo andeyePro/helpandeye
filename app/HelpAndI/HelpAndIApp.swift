@@ -3,15 +3,21 @@ import SwiftUI
 
 @main
 struct HelpAndIApp: App {
-    @StateObject private var model = AppModel()
-    @StateObject private var watch = PhoneWatchLink()
+    @UIApplicationDelegateAdaptor private var delegate: AppDelegate
 
     var body: some Scene {
-        WindowGroup {
-            RootView()
-                .environmentObject(model)
-                .onAppear { watch.attach(model) }
-        }
+        WindowGroup { RootView().environmentObject(AppModel.shared) }
+    }
+}
+
+/// Creates the model and the watch link at launch, before any screen, so that a launch in the
+/// background (a watch button, or Bluetooth restoring the box connection) finds them ready.
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    private let watch = PhoneWatchLink()
+
+    func application(_ app: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        MainActor.assumeIsolated { watch.attach(AppModel.shared) }
+        return true
     }
 }
 
@@ -96,7 +102,8 @@ extension CallCategory {
     var label: String {
         switch self {
         case .fallen: "I've fallen"; case .unwell: "I feel unwell"; case .lockedOut: "I'm locked out"
-        case .powerCut: "Power cut"; case .needCompany: "I'd like company"; case .other: "Something else"
+        case .powerCut: "Power cut"; case .needCompany: "I'd like company"; case .missedCheckIn: "Missed a check-in"
+        case .other: "Something else"
         }
     }
 }

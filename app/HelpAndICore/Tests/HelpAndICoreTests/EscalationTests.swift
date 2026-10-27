@@ -121,6 +121,15 @@ final class AirtimeTests: XCTestCase {
         XCTAssertFalse(b.allows(20, kind: .call, at: t0))
         XCTAssertTrue(b.allows(18, kind: .optional, at: t0.addingTimeInterval(3600)))
     }
+
+    func testReservationsCountAtOnceAndCanBeGivenBack() {
+        let t0 = Date(timeIntervalSince1970: 0)
+        var b = AirtimeBudget(dutyCycle: 0.01)
+        let first = b.record(18, at: t0)
+        XCTAssertFalse(b.allows(1, kind: .optional, at: t0), "a send still in flight already counts")
+        b.cancel(first)
+        XCTAssertTrue(b.allows(18, kind: .optional, at: t0))
+    }
 }
 
 final class RoutePlanTests: XCTestCase {

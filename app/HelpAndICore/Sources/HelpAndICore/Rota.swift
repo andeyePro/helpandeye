@@ -2,8 +2,8 @@ import Foundation
 
 /// The group's rota: each responder's stated availability. Every phone keeps a copy and works out
 /// gaps for itself, so a coordinator learns of a gap with no network (app spec, "Rota gaps").
-public struct Rota: Equatable, Sendable {
-    public struct Entry: Equatable, Sendable {
+public struct Rota: Equatable, Sendable, Codable {
+    public struct Entry: Equatable, Sendable, Codable {
         public let responder: UInt16
         public let interval: DateInterval
         public let available: Bool

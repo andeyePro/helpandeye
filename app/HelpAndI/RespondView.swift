@@ -39,6 +39,16 @@ struct RequestRow: View {
                 Text("Acknowledged by " + request.acknowledgedBy.map(model.name(ofMember:)).joined(separator: ", "))
                     .font(.callout.bold()).foregroundStyle(.secondary)
             }
+            switch model.ackSendStatus(request.key) {
+            case .sending?: Text("Sending your acknowledgement…").font(.footnote)
+            case .notSent?:
+                HStack {
+                    Image(systemName: "xmark").foregroundStyle(.red).accessibilityLabel("Not sent")
+                    Text("Your acknowledgement did not go out, so the caller has not seen it.").font(.footnote)
+                    Button("Try again") { model.retryAck(request.key) }.buttonStyle(.bordered)
+                }
+            default: EmptyView()
+            }
             if !request.acknowledgedBy.contains(model.saved?.me ?? 0) {
                 Button { model.acknowledge(request.key) } label: {
                     Text("Acknowledge: I'm dealing with it").font(.headline).frame(maxWidth: .infinity, minHeight: 50)

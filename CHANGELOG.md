@@ -4,6 +4,23 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Fixes from the first code review** - a press with no route available now gives the cross at
+  once instead of "Sending…" for ever. Acknowledgements are signed with the responder's own key and
+  checked against the current member list, so a removed or lost phone, or another member, cannot
+  falsely reassure a caller, and old channel keys stop working seven days after a removal. Request
+  numbers live in the keychain with the group so they never restart after a reinstall, and stale
+  acks from before a request was made are ignored. Open requests, the rota and who answered last
+  are saved, so they survive the app closing, and escalation turns are counted from when the caller
+  pressed. The box shows Connected only when the group's channel is on it; message pushes are no
+  longer lost while syncing; calls for help jump the command queue; a timed-out command reconnects
+  instead of risking a late reply being taken for the next; reconnects back off; stale channel
+  slots are reused; Forget this box no longer leaves "Connecting…". Airtime is reserved before each
+  send and the budget is kept across reconnects, so overlapping sends cannot exceed the duty cycle.
+  Follow-ups, availability and notice acks go over the mesh only if the internet did not take them.
+  A responder whose acknowledgement did not go out is told and can retry. The model and watch link
+  start at launch, so a watch press works with the phone app closed. Keychain writes no longer
+  delete before adding. Check-ins are wired in: reminders at the set times, and a missed one sends
+  an amber call. 61 core tests; four new manual checks (10 to 13).
 - [x] **Check-in schedule logic** - `CheckIn.swift` works out when an opt-in check-in was missed:
   agreed times with a grace window, a green press only counting inside its window, nothing missed
   before the schedule started, and times kept on the wall clock across the October and March clock

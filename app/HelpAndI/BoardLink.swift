@@ -29,6 +29,8 @@ final class BoardLink: NSObject, ObservableObject {
     private var queue: [() async -> Void] = []
     private var busy = false
     private var syncing = false
+    private var needsDrain = false
+    private var backoff: TimeInterval = 1
 
     override init() {
         super.init()
@@ -47,6 +49,7 @@ final class BoardLink: NSObject, ObservableObject {
 
     func connect(_ p: CBPeripheral) {
         central.stopScan()
+        if let old = peripheral, old !== p { peripheral = nil; central.cancelPeripheralConnection(old) }
         Store.boardID = p.identifier
         peripheral = p
         p.delegate = self
@@ -55,18 +58,19 @@ final class BoardLink: NSObject, ObservableObject {
     }
 
     func forget() {
-        if let p = peripheral { central.cancelPeripheralConnection(p) }
+        let p = peripheral
         Store.boardID = nil
         peripheral = nil; rx = nil; selfInfo = nil; helpChannel = nil
+        if let p { central.cancelPeripheralConnection(p) }
         state = .off
     }
 
     /// Sends a Help&I frame as a datagram on the group's channel. Returns nil on success or the
     /// reason it failed, which the caller shows next to the cross.
-    func send(_ frame: HelpFrame) async -> String? {
+    func send(_ frame: HelpFrame, urgent: Bool = false) async -> String? {
         guard state == .ready, let ch = helpChannel else { return "Box not connected" }
         let cmd = MeshCore.Command.sendChannelData(index: ch, dataType: HelpFrame.meshDataType, payload: frame.encoded())
-        switch await run(cmd, expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
+        switch await run(cmd, urgent: urgent, expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
         case .ok?: return nil
         case let .error(code)?: return "Box refused it (error \(code))"
         default: return "Box did not answer"
@@ -75,12 +79,15 @@ final class BoardLink: NSObject, ObservableObject {
 
     // MARK: Command queue
 
-    private func run(_ cmd: MeshCore.Command, expect: @escaping (MeshCore.Response) -> Bool) async -> MeshCore.Response? {
+    /// Runs one command and waits for its reply. Calls for help go to the front of the queue, so
+    /// they never wait behind setup or message syncing.
+    private func run(_ cmd: MeshCore.Command, urgent: Bool = false, expect: @escaping (MeshCore.Response) -> Bool) async -> MeshCore.Response? {
         await withCheckedContinuation { (c: CheckedContinuation<MeshCore.Response?, Never>) in
-            queue.append { [weak self] in
+            let job: () async -> Void = { [weak self] in
                 guard let self else { c.resume(returning: nil); return }
                 c.resume(returning: await self.transmit(cmd, expect: expect))
             }
+            if urgent { queue.insert(job, at: 0) } else { queue.append(job) }
             pump()
         }
     }
@@ -100,9 +107,17 @@ final class BoardLink: NSObject, ObservableObject {
             p.writeValue(data, for: rx, type: .withResponse)
             Task { [weak self] in
                 try? await Task.sleep(for: .seconds(5))
-                self?.finish(nil, only: id)
+                self?.timedOut(id)
             }
         }
+    }
+
+    /// Replies carry no command ID, so after a timeout a late reply could be taken for the next
+    /// command's. Reconnecting starts the conversation afresh.
+    private func timedOut(_ id: UUID) {
+        guard pending?.id == id else { return }
+        finish(nil, only: id)
+        if let p = peripheral { central.cancelPeripheralConnection(p) }
     }
 
     private func finish(_ r: MeshCore.Response?, only id: UUID? = nil) {
@@ -118,9 +133,15 @@ final class BoardLink: NSObject, ObservableObject {
             state = .failed("Box did not answer"); return
         }
         selfInfo = info
-        _ = await run(.setDeviceTime(UInt32(Date().timeIntervalSince1970)), expect: { _ in true })
+        _ = await run(.setDeviceTime(UInt32(Date().timeIntervalSince1970)), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false })
         await setUpChannels()
         await refreshBattery()
+        // Ready only if the group's channel is on the board and the link is still up; otherwise
+        // the failure from setUpChannels stays on screen.
+        guard rx != nil, helpChannel != nil || secrets.isEmpty else {
+            if case .failed = state {} else { state = .failed("Box is not set up for this group") }
+            return
+        }
         state = .ready
         await drainMessages()
     }
@@ -131,9 +152,14 @@ final class BoardLink: NSObject, ObservableObject {
         var slots: [UInt8: Data] = [:]
         var free: [UInt8] = []
         for i in 0..<UInt8(clamping: dev.maxChannels) {
-            if case let .channelInfo(_, name, secret)? = await run(.getChannel(index: i), expect: { if case .channelInfo = $0 { return true }; if case .error = $0 { return true }; return false }) {
+            if case let .channelInfo(index, name, secret)? = await run(.getChannel(index: i), expect: {
+                if case let .channelInfo(index, _, _) = $0 { return index == i }; if case .error = $0 { return true }; return false
+            }), index == i {
                 slots[i] = secret
-                if name.isEmpty && !secret.contains(where: { $0 != 0 }) { free.append(i) }
+                let empty = name.isEmpty && !secret.contains(where: { $0 != 0 })
+                // Slots this app wrote for keys the group no longer uses are free again.
+                let stale = name.hasPrefix("Help&I") && !secrets.contains(secret)
+                if empty || stale { free.append(i) }
             }
         }
         var listen: Set<UInt8> = []
@@ -160,11 +186,21 @@ final class BoardLink: NSObject, ObservableObject {
         }
     }
 
+    /// Fetches every message waiting on the board. A "messages waiting" push that arrives while
+    /// this runs sets `needsDrain`, so it is never lost.
     private func drainMessages() async {
+        needsDrain = true
         guard !syncing else { return }
         syncing = true
         defer { syncing = false }
-        for _ in 0..<64 {
+        while needsDrain {
+            needsDrain = false
+            await drainOnce()
+        }
+    }
+
+    private func drainOnce() async {
+        for _ in 0..<1000 {
             let r = await run(.syncNextMessage, expect: {
                 switch $0 { case .channelData, .channelText, .contactText, .noMoreMessages: return true; default: return false }
             })
@@ -206,26 +242,41 @@ extension BoardLink: @preconcurrency CBCentralManagerDelegate {
     }
 
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
+        guard p === peripheral else { return }
+        backoff = 1
         p.discoverServices([CBUUID(string: MeshCore.serviceUUID)])
     }
 
     func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
+        guard p === peripheral else { return }
+        if (error as? CBError)?.code == .peerRemovedPairingInformation {
+            state = .failed("The box was reset. In iPhone Settings, Bluetooth, forget it, then pair it again here.")
+            return
+        }
         state = .failed("Could not connect to the box")
         reconnectLater(p)
     }
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
+        guard p === peripheral else { return }
         rx = nil; helpChannel = nil
         finish(nil)
         state = .connecting
         reconnectLater(p)
     }
 
-    /// Bluetooth links drop (decision 9). iOS keeps a pending connection open indefinitely and
-    /// completes it when the box comes back in range, even with the app in the background.
+    /// Bluetooth links drop (decision 9). A pending connection stays open until the box is back in
+    /// range, even with the app in the background; failures that come back at once are retried
+    /// with a growing pause so they cannot drain the battery.
     private func reconnectLater(_ p: CBPeripheral) {
         guard Store.boardID == p.identifier else { return }
-        central.connect(p)
+        let wait = backoff
+        backoff = min(backoff * 2, 60)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard let self, self.peripheral === p, Store.boardID == p.identifier else { return }
+            self.central.connect(p)
+        }
     }
 }
 

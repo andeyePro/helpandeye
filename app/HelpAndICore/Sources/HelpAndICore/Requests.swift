@@ -5,7 +5,7 @@ public enum Route: String, Sendable, CaseIterable, Codable {
     case internet, sms, mesh
 }
 
-public enum RouteState: Equatable, Sendable {
+public enum RouteState: Equatable, Sendable, Codable {
     case sending
     case sent
     case failed(String)
@@ -23,7 +23,7 @@ public enum CallerStatus: Equatable, Sendable {
 }
 
 /// A request as the caller's app tracks it.
-public struct OutgoingRequest: Equatable, Sendable {
+public struct OutgoingRequest: Equatable, Sendable, Codable {
     public let unit: UInt32
     public let number: UInt16
     public let colour: Colour
@@ -44,10 +44,16 @@ public struct OutgoingRequest: Equatable, Sendable {
         return .followUp(unit: unit, request: number, part: UInt8(min(categories.count, 255)), category: category)
     }
 
+    /// How far a responder's clock may be behind the caller's.
+    public static let clockAllowance: TimeInterval = 300
+
     /// Records an acknowledgement that came back over any route. Only a frame for this request
-    /// counts, so an acknowledgement of some other request can never reassure this caller.
+    /// counts, so an acknowledgement of some other request can never reassure this caller, and
+    /// nor can one made before this request existed (a stale one for a reused number). Check the
+    /// signature with `HelpFrame.isValidAck` before calling this.
     public mutating func receive(_ frame: HelpFrame) {
-        guard case let .ack(u, r, who, _) = frame, u == unit, r == number else { return }
+        guard case let .ack(u, r, who, at, _) = frame, u == unit, r == number,
+              TimeInterval(at) >= createdAt.timeIntervalSince1970 - Self.clockAllowance else { return }
         if !acknowledgedBy.contains(who) { acknowledgedBy.append(who) }
     }
 
@@ -55,7 +61,8 @@ public struct OutgoingRequest: Equatable, Sendable {
         if let first = acknowledgedBy.first { return .seen(responder: first) }
         let states = Array(routes.values)
         if states.contains(.sent) { return .waitingForResponder }
-        if states.contains(.sending) || states.isEmpty { return .sending }
+        if states.contains(.sending) { return .sending }
+        // Nothing attempted is nothing sent: the caller gets the cross, not "Sending…" for ever.
         return .notSent
     }
 
@@ -66,12 +73,15 @@ public struct OutgoingRequest: Equatable, Sendable {
 
 /// A request as a responder's app sees it, assembled from frames that may arrive in any order,
 /// more than once, and over several routes.
-public struct IncomingRequest: Equatable, Sendable, Identifiable {
-    public struct Key: Hashable, Sendable { public let unit: UInt32; public let request: UInt16 }
+public struct IncomingRequest: Equatable, Sendable, Identifiable, Codable {
+    public struct Key: Hashable, Sendable, Codable { public let unit: UInt32; public let request: UInt16 }
     public var id: Key { key }
     public let key: Key
     public internal(set) var colour: Colour?
     public internal(set) var firstHeardAt: Date
+    /// When the caller pressed, from the call itself. Escalation counts from this, so every phone
+    /// works out the same turns however late it heard.
+    public internal(set) var sentAt: Date?
     public internal(set) var categories: [UInt8: CallCategory] = [:]
     public internal(set) var heardOn: Set<Route> = []
     public internal(set) var acknowledgedBy: [UInt16] = []
@@ -90,7 +100,7 @@ public enum InboxEvent: Equatable, Sendable {
 
 /// The responder's list of requests. It never closes, expires or acknowledges anything by itself:
 /// a request leaves the open list only when a person presses acknowledge (decision 6).
-public struct ResponderInbox: Sendable {
+public struct ResponderInbox: Sendable, Codable {
     public private(set) var requests: [IncomingRequest.Key: IncomingRequest] = [:]
 
     public init() {}
@@ -98,33 +108,39 @@ public struct ResponderInbox: Sendable {
     @discardableResult
     public mutating func receive(_ frame: HelpFrame, via route: Route, at now: Date) -> InboxEvent {
         switch frame {
-        case let .call(unit, request, colour, _):
+        case let .call(unit, request, colour, sentAt):
             let key = IncomingRequest.Key(unit: unit, request: request)
+            let pressed = Date(timeIntervalSince1970: TimeInterval(sentAt))
             if var existing = requests[key] {
                 let changed = existing.colour == nil || !existing.heardOn.contains(route)
                 existing.colour = existing.colour ?? colour
+                existing.sentAt = existing.sentAt ?? pressed
                 existing.heardOn.insert(route)
                 requests[key] = existing
                 return changed ? .updated(key) : .duplicate
             }
-            requests[key] = IncomingRequest(key: key, colour: colour, firstHeardAt: now, heardOn: [route])
+            requests[key] = IncomingRequest(key: key, colour: colour, firstHeardAt: now, sentAt: pressed, heardOn: [route])
             return .new(key)
         case let .followUp(unit, request, part, category):
             let key = IncomingRequest.Key(unit: unit, request: request)
             // A follow-up can overtake its call. Keep it, so the call completes the request when it
             // arrives, and alert now: a follow-up means somebody pressed for help.
             var r = requests[key] ?? IncomingRequest(key: key, colour: nil, firstHeardAt: now)
-            let isNew = requests[key] == nil
+            let isNew = requests[key] == nil && !r.isAcknowledged
             let changed = r.categories[part] != category
             r.categories[part] = category
             r.heardOn.insert(route)
             requests[key] = r
             return isNew ? .new(key) : (changed ? .updated(key) : .duplicate)
-        case let .ack(unit, request, responder, _):
+        case let .ack(unit, request, responder, _, _):
+            // Check the signature with `HelpFrame.isValidAck` before calling this. An ack can
+            // overtake its call; keep it, so the call arrives already acknowledged and nobody is
+            // alerted for something already in hand.
             let key = IncomingRequest.Key(unit: unit, request: request)
-            guard var r = requests[key] else { return .ignored }
+            var r = requests[key] ?? IncomingRequest(key: key, colour: nil, firstHeardAt: now)
             guard !r.acknowledgedBy.contains(responder) else { return .duplicate }
             r.acknowledgedBy.append(responder)
+            r.heardOn.insert(route)
             requests[key] = r
             return .updated(key)
         case .availability, .noticeAck:
@@ -132,12 +148,12 @@ public struct ResponderInbox: Sendable {
         }
     }
 
-    /// Called only from the acknowledge button. Returns the frame to send back to the caller.
-    public mutating func acknowledge(_ key: IncomingRequest.Key, by responder: UInt16, at now: Date) -> HelpFrame? {
+    /// Called only from the acknowledge button. Returns the signed frame to send back.
+    public mutating func acknowledge(_ key: IncomingRequest.Key, by responder: UInt16, at now: Date, identity: DeviceIdentity) -> HelpFrame? {
         guard var r = requests[key] else { return nil }
         if !r.acknowledgedBy.contains(responder) { r.acknowledgedBy.append(responder) }
         requests[key] = r
-        return .ack(unit: key.unit, request: key.request, responder: responder, ackedAt: UInt32(now.timeIntervalSince1970))
+        return .signedAck(unit: key.unit, request: key.request, responder: responder, at: now, identity: identity)
     }
 
     /// Open requests, most urgent first: unacknowledged before acknowledged, red before amber

@@ -54,7 +54,7 @@ public struct AirtimeBudget: Sendable {
     public enum Kind: Sendable { case call, optional }
     public let window: TimeInterval = 3600
     public let dutyCycle: Double
-    private var log: [(at: Date, seconds: TimeInterval)] = []
+    private var log: [(id: UUID, at: Date, seconds: TimeInterval)] = []
 
     public init(dutyCycle: Double) { self.dutyCycle = max(dutyCycle, 0) }
 
@@ -67,10 +67,17 @@ public struct AirtimeBudget: Sendable {
         return used(at: now) + seconds <= limit
     }
 
-    public mutating func record(_ seconds: TimeInterval, at now: Date) {
+    /// Reserves airtime before sending, so sends that overlap cannot each see the same allowance.
+    @discardableResult
+    public mutating func record(_ seconds: TimeInterval, at now: Date) -> UUID {
         log.removeAll { now.timeIntervalSince($0.at) >= window }
-        log.append((now, seconds))
+        let id = UUID()
+        log.append((id, now, seconds))
+        return id
     }
+
+    /// Gives back a reservation for a send the board refused, which never went on air.
+    public mutating func cancel(_ id: UUID) { log.removeAll { $0.id == id } }
 }
 
 /// Rough size on air of a MeshCore group datagram carrying `payload` bytes: packet header, path

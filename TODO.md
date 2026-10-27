@@ -18,4 +18,4 @@
 - [ ] Push from the relay through APNs once a key exists (see above).
 - [ ] Caller's typed text and position over the mesh as direct messages (decision 12).
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).
-- [ ] Check-in schedule (decision 16).
+- [ ] Responders' phones should also notice a missed check-in, so it is raised even if the caller's phone is flat. Needs the schedule shared with the group (relay or key update). Today only the caller's phone raises it, and only while Help&I is running or woken.

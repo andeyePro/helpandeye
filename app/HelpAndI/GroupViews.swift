@@ -114,6 +114,7 @@ struct GroupView: View {
                         }
                     }
                 }
+                if model.me?.canCall == true { CheckInSection() }
                 if model.me?.role == .coordinator {
                     Section("Gaps in the next 24 hours") {
                         if model.gaps.isEmpty { Text("Someone is available all the time.") }
@@ -272,4 +273,41 @@ struct RelaySection: View {
         }
         .onAppear { url = model.group?.relayURL ?? "" }
     }
+}
+
+/// The opt-in check-in schedule (decision 16). Off unless the caller turns it on.
+struct CheckInSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var on = false
+    @State private var morning = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: Date())!
+    @State private var evening = Calendar.current.date(bySettingHour: 21, minute: 0, second: 0, of: Date())!
+    @State private var twice = true
+
+    var body: some View {
+        Section("Check-ins") {
+            Toggle("Check in at set times", isOn: $on)
+            if on {
+                DatePicker("First check-in", selection: $morning, displayedComponents: .hourAndMinute)
+                Toggle("A second check-in", isOn: $twice)
+                if twice { DatePicker("Second check-in", selection: $evening, displayedComponents: .hourAndMinute) }
+                Text("Press I'm OK now within half an hour of each time. If you do not, your responders get a come-when-convenient call.")
+                    .font(.footnote)
+            }
+            Button("Save") { model.setCheckIn(on ? CheckInSchedule(times: [minutes(morning)] + (twice ? [minutes(evening)] : [])) : nil) }
+        }
+        .onAppear {
+            guard let s = model.checkIn else { return }
+            on = true
+            twice = s.times.count > 1
+            if let t = s.times.first { morning = date(t) }
+            if s.times.count > 1 { evening = date(s.times[1]) }
+        }
+    }
+
+    private func minutes(_ d: Date) -> Int {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: d)
+        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    }
+
+    private func date(_ m: Int) -> Date { Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date())! }
 }

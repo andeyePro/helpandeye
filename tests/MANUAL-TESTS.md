@@ -76,3 +76,31 @@ Pass: phone B alerts, phone C does not. Phone A's person still has the same unit
 1. On phone B, open Group and tap I'm not available for the next 12 hours.
 
 Pass: with phone B as the only responder, phone B's Group tab lists a gap covering the next 12 hours, and phone A's call alerts the whole group at once rather than waiting.
+
+## 10. A request survives closing the app
+
+1. On phone A, press Come now. On phone B, wait for the alert but do not acknowledge.
+2. On phone B, swipe the app away in the app switcher, then open it again.
+
+Pass: the request is still at the top of phone B's Respond list, unacknowledged, and can be acknowledged. Phone A's status card still shows the call after phone A's app is closed and reopened.
+
+## 11. The box link recovers
+
+1. With both phones connected, switch phone A's board off for a minute, then on.
+2. On phone A, open Box and tap Forget this box.
+
+Pass: after step 1, phone A shows "Connecting to your box…" while it is off and "Connected" again within a minute of it coming back, without touching the phone. After step 2, it shows "No box connected", not "Connecting…". A call pressed during step 1 shows "Local radio: not sent" with the reason, never "Sending…" for ever.
+
+## 12. A call with no route at all
+
+1. Forget the box on phone A, and leave the internet route unset.
+2. Press Come now.
+
+Pass: the cross and "Not sent. Nobody has been told." appear at once, not "Sending…".
+
+## 13. Check-ins
+
+1. On phone A, open Group, turn on Check in at set times, set the first check-in to two minutes from now with no second one, and tap Save.
+2. Wait for the reminder notification and do nothing for 32 minutes.
+
+Pass: the reminder arrives at the set time. About 30 minutes later (within a minute of that, with Help&I open) phone B gets a come-when-convenient call showing "Missed a check-in". Repeat, pressing I'm OK now when the reminder comes: phone B gets the green call and no missed check-in.

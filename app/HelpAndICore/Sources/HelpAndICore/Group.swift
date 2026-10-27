@@ -53,8 +53,10 @@ public struct GroupSecrets: Codable, Equatable, Sendable {
 public struct GroupState: Codable, Equatable, Sendable {
     public var name: String
     public var secrets: GroupSecrets
-    /// Kept while boards move to new secrets, so they can still listen on the old channel.
+    /// Kept while boards move to new secrets, so they can still listen on the old channel, until
+    /// `previousUntil`. After that a removed phone's key opens nothing.
     public var previousSecrets: GroupSecrets?
+    public var previousUntil: Date?
     public var members: [Member]
     public var removedUnits: Set<UInt32> = []
     public var policy: StoredPolicy = .init()
@@ -82,13 +84,29 @@ public struct GroupState: Codable, Equatable, Sendable {
         max((members.compactMap(\.unit) + removedUnits).max() ?? 70000, 70000) + 1
     }
 
+    public static let changeoverPeriod: TimeInterval = 7 * 24 * 3600
+
     /// Removes a member and rotates the secrets, so a lost phone cannot read new traffic.
-    public mutating func remove(_ number: UInt16) {
+    public mutating func remove(_ number: UInt16, at now: Date = Date()) {
         guard let m = member(number) else { return }
         members.removeAll { $0.number == number }
         if let u = m.unit { removedUnits.insert(u) }
         previousSecrets = secrets
+        previousUntil = now.addingTimeInterval(Self.changeoverPeriod)
         secrets = secrets.rotated()
+    }
+
+    /// The secrets to listen with: the current ones, and the previous ones during a changeover.
+    public func listening(at now: Date) -> [GroupSecrets] {
+        guard let p = previousSecrets, let until = previousUntil, now < until else { return [secrets] }
+        return [secrets, p]
+    }
+
+    /// Whether an acknowledgement from this member should count: they must still be in the group
+    /// and able to respond, and the ack must carry their signature.
+    public func acceptsAck(_ frame: HelpFrame) -> Bool {
+        guard case let .ack(_, _, who, _, _) = frame, let m = member(who), m.canRespond else { return false }
+        return frame.isValidAck(signedBy: m.signingKey)
     }
 
     /// The rota, with every responder available unless they have said otherwise.

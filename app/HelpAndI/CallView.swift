@@ -114,7 +114,7 @@ struct FollowUps: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Tell them more (optional)").font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 8) {
-                ForEach(CallCategory.allCases, id: \.self) { c in
+                ForEach(CallCategory.allCases.filter { $0 != .missedCheckIn }, id: \.self) { c in
                     Button(c.label) { model.add(c) }
                         .buttonStyle(.bordered)
                         .disabled(request.categories.contains(c))

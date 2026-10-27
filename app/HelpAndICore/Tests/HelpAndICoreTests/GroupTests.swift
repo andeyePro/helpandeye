@@ -84,6 +84,29 @@ final class GroupTests: XCTestCase {
         XCTAssertThrowsError(try Joining.openUpdate(forged, current: before, me: stays), "only a coordinator can seal an update")
     }
 
+    func testOldSecretsStopAfterTheChangeover() {
+        let coord = DeviceIdentity()
+        var group = newGroup(coord)
+        group.members.append(Member(number: 2, name: "Lost", role: .caller, publicKey: DeviceIdentity().publicKey, unit: 70001))
+        let t = Date(timeIntervalSince1970: 1_793_000_000)
+        group.remove(2, at: t)
+        XCTAssertEqual(group.listening(at: t).count, 2)
+        XCTAssertEqual(group.listening(at: t.addingTimeInterval(GroupState.changeoverPeriod)), [group.secrets])
+    }
+
+    func testOnlyACurrentRespondersSignedAckCounts() {
+        let coord = DeviceIdentity(), responder = DeviceIdentity(), caller = DeviceIdentity()
+        var group = newGroup(coord)
+        group.members.append(Member(number: 2, name: "R", role: .responder, publicKey: responder.publicKey, signingKey: responder.signingPublicKey))
+        group.members.append(Member(number: 3, name: "C", role: .caller, publicKey: caller.publicKey, unit: 70001, signingKey: caller.signingPublicKey))
+        let now = Date()
+        XCTAssertTrue(group.acceptsAck(.signedAck(unit: 70001, request: 1, responder: 2, at: now, identity: responder)))
+        XCTAssertFalse(group.acceptsAck(.signedAck(unit: 70001, request: 1, responder: 2, at: now, identity: caller)), "someone else's key")
+        XCTAssertFalse(group.acceptsAck(.signedAck(unit: 70001, request: 1, responder: 3, at: now, identity: caller)), "callers cannot acknowledge")
+        group.remove(2)
+        XCTAssertFalse(group.acceptsAck(.signedAck(unit: 70001, request: 1, responder: 2, at: now, identity: responder)), "removed")
+    }
+
     func testBadCodesAreRejected() {
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "hello"))
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPANDI1:%%%"))

@@ -2,11 +2,12 @@ import XCTest
 @testable import HelpAndICore
 
 final class HelpFrameTests: XCTestCase {
+    let sig = Data(repeating: 7, count: 64)
     func testEveryKindRoundTrips() {
         let frames: [HelpFrame] = [
             .call(unit: 70001, request: 12, colour: .red, sentAt: 1_793_000_000),
             .followUp(unit: 70001, request: 12, part: 2, category: .fallen),
-            .ack(unit: 70001, request: 12, responder: 3, ackedAt: 1_793_000_060),
+            .ack(unit: 70001, request: 12, responder: 3, ackedAt: 1_793_000_060, signature: sig),
             .availability(responder: 3, from: 1_793_000_000, until: 1_793_003_600, available: false),
             .noticeAck(notice: .allowanceLow, by: 1, at: 1_793_000_100),
         ]
@@ -14,6 +15,18 @@ final class HelpFrameTests: XCTestCase {
             XCTAssertEqual(HelpFrame(f.encoded()), f)
             XCTAssertLessThanOrEqual(f.encoded().count, HelpFrame.maxPayload)
         }
+    }
+
+    func testAckIsSignedAndFits() {
+        let me = DeviceIdentity()
+        let f = HelpFrame.signedAck(unit: 1, request: 2, responder: 3, at: Date(timeIntervalSince1970: 100), identity: me)
+        XCTAssertEqual(f.encoded().count, 77)
+        XCTAssertEqual(HelpFrame(f.encoded()), f)
+        XCTAssertTrue(f.isValidAck(signedBy: me.signingPublicKey))
+        guard case let .ack(u, r, _, at, s) = f else { return XCTFail() }
+        XCTAssertFalse(HelpFrame.ack(unit: u, request: r, responder: 4, ackedAt: at, signature: s).isValidAck(signedBy: me.signingPublicKey),
+                       "a signature cannot be moved to another responder")
+        XCTAssertFalse(f.isValidAck(signedBy: nil))
     }
 
     func testCallIsTwelveBytesAndCarriesNoText() {
