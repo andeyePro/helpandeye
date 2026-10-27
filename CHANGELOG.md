@@ -4,6 +4,15 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Calls repeat until acknowledged** - an independent planning pass found that a call went out
+  once per route, so one lost radio packet meant nobody was ever alerted. The latest call is now
+  sent again after 30 seconds, 1, 2 and 4 minutes, then every 10 minutes, on every route, until a
+  responder's signed acknowledgement arrives; it never stops on a timer. Resends count as optional
+  airtime, so they can never use up the allowance a new press needs. A responder who has
+  acknowledged and hears the call again sends the acknowledgement again, so a lost ack is
+  repaired. Each responder's alert now repeats (every minute for red, five for amber) from their
+  turn until someone acknowledges, and is topped up while the app runs. 73 core tests; manual
+  checks 15 and 16.
 - [x] **Typed messages and location over the internet** - after a call, the caller can type a short
   message (up to 120 bytes) and share where they are, once, when they choose. Both are sealed with
   the group key and go only over the internet route; `HelpFrame.mayGoOnGroupChannel` keeps them off

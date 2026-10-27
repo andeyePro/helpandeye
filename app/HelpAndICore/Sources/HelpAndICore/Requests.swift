@@ -34,6 +34,10 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     public private(set) var acknowledgedBy: [UInt16] = []
     /// Follow-ups, notes and positions share one numbering, so each part is distinct.
     private var parts: UInt8 = 0
+    /// How many times the call has been sent again (see `Resend`).
+    public private(set) var resends = 0
+
+    public mutating func markResent() { resends += 1 }
 
     public init(unit: UInt32, number: UInt16, colour: Colour, createdAt: Date) {
         self.unit = unit; self.number = number; self.colour = colour; self.createdAt = createdAt
@@ -88,7 +92,11 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
 /// A request as a responder's app sees it, assembled from frames that may arrive in any order,
 /// more than once, and over several routes.
 public struct IncomingRequest: Equatable, Sendable, Identifiable, Codable {
-    public struct Key: Hashable, Sendable, Codable { public let unit: UInt32; public let request: UInt16 }
+    public struct Key: Hashable, Sendable, Codable {
+        public let unit: UInt32
+        public let request: UInt16
+        public init(unit: UInt32, request: UInt16) { self.unit = unit; self.request = request }
+    }
     public var id: Key { key }
     public let key: Key
     public internal(set) var colour: Colour?

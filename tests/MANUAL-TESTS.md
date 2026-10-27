@@ -113,3 +113,17 @@ Needs the relay set up (Group, Internet route) on both phones, with internet on.
 2. Turn phone A's internet off and try to send another message.
 
 Pass: phone B shows the message in quotes and an Open their location in Maps link that opens near phone A. In step 2 nothing typed goes over the local radio: phone B does not receive it, and the call buttons still work over the mesh.
+
+## 15. Calls keep going until someone acknowledges
+
+1. Switch phone B's board off. On phone A, press Come now.
+2. After two minutes, switch phone B's board on. Do not touch phone A.
+3. On phone B, acknowledge, then switch phone B's board off again for one minute, then on.
+
+Pass: within ten minutes of step 2, phone B alerts for the call, although its board was off when the button was pressed. Phone A then shows "<name> has seen your call." If phone A did not hear the first acknowledgement in step 3, it still gets it: phone B sends it again when it hears the call repeated. Phone A stops sending once it has heard an acknowledgement (check with a third board's message log, or that phone B gets no more repeats).
+
+## 16. A responder's alert repeats
+
+1. On phone A, press Come now. On phone B, dismiss the notification without opening Help&I.
+
+Pass: phone B alerts again about a minute later, and keeps doing so (once a minute for red, every five minutes for amber) until someone acknowledges. After an acknowledgement, no more alerts arrive, and the ones already showing are cleared.

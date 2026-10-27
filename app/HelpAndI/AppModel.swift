@@ -36,8 +36,8 @@ final class AppModel: ObservableObject {
         board.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         relay.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &bag)
         applyGroup()
-        ticker = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.checkMissedCheckIn() }
+        ticker = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.tick() }
         }
         Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
     }
@@ -194,6 +194,29 @@ final class AppModel: ObservableObject {
         return failure
     }
 
+    /// Runs every 15 seconds while the app runs, and whenever the box or relay wakes it.
+    func tick() {
+        checkResends()
+        checkMissedCheckIn()
+        topUpAlerts()
+    }
+
+    /// Sends the latest call again until a responder acknowledges it (see `Resend`). A route that
+    /// failed before is tried again, so a box that comes back in range still gets the call out.
+    private func checkResends() {
+        guard let r = current, r.resendDue(at: Date()), let i = activity.outgoing.indices.last else { return }
+        activity.outgoing[i].markResent()
+        let routes = RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false)
+        for route in routes {
+            Task {
+                // Resends count as optional airtime, so they never use up what a new press needs.
+                let failure = await send(r.callFrame, on: route, kind: .optional)
+                guard failure == nil, let j = activity.outgoing.firstIndex(where: { $0.number == r.number && $0.unit == r.unit }) else { return }
+                activity.outgoing[j].update(route, .sent)
+            }
+        }
+    }
+
     // MARK: Receiving
 
     private func received(_ frame: HelpFrame, via route: Route) {
@@ -217,8 +240,22 @@ final class AppModel: ObservableObject {
         switch activity.inbox.receive(frame, via: route, at: Date()) {
         case let .new(key): scheduleAlerts(for: key)
         case let .updated(key) where activity.inbox.requests[key]?.isAcknowledged == true: cancelAlerts(for: key)
+        case .duplicate:
+            // The caller is still sending, so it has not heard an acknowledgement. If this phone
+            // acknowledged, say so again.
+            if case let .call(unit, request, _, _) = frame { reAck(IncomingRequest.Key(unit: unit, request: request)) }
         default: break
         }
+        tick()
+    }
+
+    private var lastReAck: [IncomingRequest.Key: Date] = [:]
+
+    private func reAck(_ key: IncomingRequest.Key) {
+        guard let me = saved?.me, activity.inbox.requests[key]?.acknowledgedBy.contains(me) == true,
+              Date().timeIntervalSince(lastReAck[key] ?? .distantPast) >= 25 else { return }
+        lastReAck[key] = Date()
+        retryAck(key)
     }
 
     // MARK: Responding
@@ -268,9 +305,13 @@ final class AppModel: ObservableObject {
     /// notifications, so they still fire with the app in the background, and they stop only when
     /// someone acknowledges.
     private func scheduleAlerts(for key: IncomingRequest.Key) {
-        guard let r = activity.inbox.requests[key], let e = escalation(for: r), let me = saved?.me else { return }
+        guard let r = activity.inbox.requests[key], !r.isAcknowledged, let e = escalation(for: r), let me = saved?.me else { return }
         let turn = TimeInterval(e.order.firstIndex(of: me) ?? e.order.count) * e.interval
-        let due = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn).timeIntervalSinceNow
+        let turnAt = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn)
+        // iOS keeps at most 64 pending notifications per app, shared between open requests.
+        let open = max(activity.inbox.requests.values.filter { !$0.isAcknowledged }.count, 1)
+        let times = alertTimes(turnAt: turnAt, every: r.colour == .red || r.colour == nil ? 60 : 300, from: Date(),
+                               count: max(2, min(alertsPerRequest, 56 / open)))
         let content = UNMutableNotificationContent()
         let who = name(ofUnit: key.unit)
         switch r.colour {
@@ -281,15 +322,34 @@ final class AppModel: ObservableObject {
         content.body = "Open Help&I to acknowledge."
         content.sound = .defaultCritical
         content.interruptionLevel = .timeSensitive
-        let trigger = due < 1 ? nil : UNTimeIntervalNotificationTrigger(timeInterval: due, repeats: false)
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: alertID(key), content: content, trigger: trigger))
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: alertIDs(key))
+        for (n, at) in times.enumerated() {
+            let due = at.timeIntervalSinceNow
+            let trigger = due < 1 ? nil : UNTimeIntervalNotificationTrigger(timeInterval: due, repeats: false)
+            center.add(UNNotificationRequest(identifier: "\(alertID(key))-\(n)", content: content, trigger: trigger))
+        }
     }
+
+    private let alertsPerRequest = 10
 
     private func cancelAlerts(for key: IncomingRequest.Key) {
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [alertID(key)])
+        let ids = alertIDs(key)
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
     }
 
+    /// Re-schedules each open request's alerts from now, so they keep coming however long it takes.
+    private func topUpAlerts() {
+        let open = activity.inbox.requests.values.filter { !$0.isAcknowledged }
+        let due = open.filter { r in (lastTopUp[r.key] ?? .distantPast).timeIntervalSinceNow < -120 }
+        for r in due { lastTopUp[r.key] = Date(); scheduleAlerts(for: r.key) }
+    }
+
+    private var lastTopUp: [IncomingRequest.Key: Date] = [:]
+
     private func alertID(_ key: IncomingRequest.Key) -> String { "req-\(key.unit)-\(key.request)" }
+    private func alertIDs(_ key: IncomingRequest.Key) -> [String] { (0..<64).map { "\(alertID(key))-\($0)" } }
 
     // MARK: Rota and notices
 
