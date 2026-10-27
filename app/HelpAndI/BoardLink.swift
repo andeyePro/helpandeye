@@ -192,12 +192,16 @@ final class BoardLink: NSObject, ObservableObject {
         // fresh random code at each start, and reports 0; that is left alone.) The code is saved
         // before it is sent, so a dropped link cannot leave a code nobody knows.
         if let id = peripheral?.identifier {
+            var sent: UInt32?
             if dev.blePin == 123_456 {
                 let pin = Store.boxPin(id) ?? UInt32.random(in: 100_000...999_999)
-                Store.setBoxPin(pin, for: id)
-                _ = await run(.setPin(pin), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false })
+                // Only send a code that is safely kept; show it only once the box has taken it.
+                if Store.setBoxPin(pin, for: id),
+                   case .ok? = await run(.setPin(pin), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
+                    sent = pin
+                }
             }
-            boxPin = Store.boxPin(id).flatMap { $0 == dev.blePin || dev.blePin == 123_456 ? $0 : nil }
+            boxPin = sent ?? Store.boxPin(id).flatMap { $0 == dev.blePin ? $0 : nil }
         }
         var slots: [UInt8: Data] = [:]
         var free: [UInt8] = []

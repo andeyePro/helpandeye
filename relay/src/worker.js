@@ -59,7 +59,7 @@ export class Group {
         const seq = await this.relay.post(key, msg.sealed);
         if (wakes && mayWake) {
           const targets = await this.relay.pushTargets(key);
-          this.state.waitUntil(Promise.all(targets.map((t) => push(this.env, t, msg.wake))));
+          this.state.waitUntil(Promise.all(targets.map((t) => push(this.env, t, msg.wake, { sealed: msg.sealed }))));
         }
         return json(200, { seq });
       }

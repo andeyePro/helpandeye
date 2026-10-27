@@ -16,4 +16,6 @@
 
 ## Open (work)
 
+- [ ] Someone invited by a second coordinator who is removed before the first coordinator hears of the invitation is never accepted by the rest of the group, though their own phone thinks they are in. Safe (their acknowledgements count nowhere else; their calls still reach responders), but they must be invited again and are not told. Tell them, or let the first coordinator confirm such members.
+- [ ] Name callers in pushes: built (`app/HelpAndINotify`), but needs signing with a shared keychain group. Set `HelpAndIKeychainGroup` in both Info.plist sections of `app/project.yml` to `$(AppIdentifierPrefix)org.andeye.helpandi.shared`, and add the matching keychain-access-groups entitlement to both targets.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).

@@ -26,6 +26,8 @@ import XCTest
         /// Phones taken out of the group; nothing about them is checked any more.
         var gone: Set<ObjectIdentifier> = []
         var removedNumbers: Set<UInt16> = []
+        /// Who invited each phone that joined during the run.
+        var invitedBy: [ObjectIdentifier: UInt16] = [:]
         var lossRate = 0.0
         var log: [String] = []
     }
@@ -116,6 +118,48 @@ import XCTest
                 p.relay.isConfigured.toggle()
             case 70..<75:
                 w.lossRate = [0, 0, 0.3, 0.8, 1].randomElement(using: &rng)!
+            case 80..<83:
+                // Any coordinator invites someone new.
+                if w.phones.count < 9, let inviter = live.filter({ $0.engine.me?.role == .coordinator }).randomElement(using: &rng),
+                   let g = inviter.engine.group {
+                    let newcomer = Phone(air: w.air, clock: w.clock)
+                    w.phones.append(newcomer)
+                    let invite = Joining.invitation(for: g, coordinator: inviter.identity)
+                    let req = Joining.request(invite, name: "N", call: Bool.random(using: &rng), respond: true, me: newcomer.identity)
+                    var welcome: Joining.Welcome?
+                    inviter.engine.updateGroup { g in welcome = try? Joining.admit(req, to: &g, invite: invite, coordinator: inviter.identity) }
+                    if let welcome, let opened = try? Joining.open(welcome, invite: invite, me: newcomer.identity) {
+                        newcomer.engine.joined(opened, as: welcome.memberNumber)
+                        w.invitedBy[ObjectIdentifier(newcomer)] = inviter.engine.saved!.me
+                        w.log.append("\(step): \(inviter.engine.saved!.me) invites \(welcome.memberNumber)")
+                        await newcomer.engine.boxReady()
+                    }
+                }
+            case 83..<85:
+                // Someone who is not the first coordinator signs a removal or role change: ignored.
+                if let forger = live.filter({ $0.engine.saved?.me != $0.engine.group?.primaryCoordinator }).randomElement(using: &rng),
+                   let g = forger.engine.group, let target = g.members.randomElement(using: &rng) {
+                    let f: HelpFrame = Bool.random(using: &rng) ? .memberRemoved(member: target.number, version: g.membershipVersion + 50)
+                        : .memberRole(member: target.number, role: .caller, block: 0, version: g.membershipVersion + 50)
+                    let signed = HelpFrame.signing(f, as: forger.engine.saved!.me, identity: forger.identity, group: g.secrets.groupID)
+                    for q in live where q !== forger { q.engine.receive(signed, via: .mesh) }
+                }
+            case 85..<87:
+                // The first coordinator hands a key update to someone, who scans it.
+                let c = w.coordinator.engine!
+                if let g = c.group, let m = live.filter({ $0 !== w.coordinator }).randomElement(using: &rng), let mine = m.engine.group,
+                   let member = g.member(m.engine.saved!.me), let u = try? Joining.update(g, for: member, coordinator: w.coordinator.identity),
+                   let updated = try? Joining.openUpdate(u, current: mine, me: m.identity) {
+                    m.engine.applyKeyUpdate(updated)
+                }
+            case 87..<89:
+                // The app is closed and opened again: everything comes back from what was saved.
+                let state = try JSONDecoder().decode(SavedState?.self, from: JSONEncoder().encode(p.engine.saved))
+                let activity = try JSONDecoder().decode(Activity.self, from: JSONEncoder().encode(p.engine.activity))
+                await p.engine.settle()
+                p.engine = HelpEngine(identity: p.identity, mesh: p.mesh, relay: p.relay, alerts: p.alerts, store: NoStore(),
+                                      saved: state, activity: activity, calendar: Calendar(identifier: .gregorian), now: { [unowned w] in w.clock.now })
+                p.engine.bandChanged(p.mesh.radio?.band)
             case 75..<80:
                 switch Int.random(in: 0..<3, using: &rng) {
                 case 0: _ = p.engine.addNote("Back door open")
@@ -136,16 +180,60 @@ import XCTest
         // Heal: everything up, no loss, time passes, boxes reconnect.
         w.lossRate = 0
         for p in w.phones { p.mesh.isReady = true; p.relay.isConfigured = true }
-        for _ in 0..<4 {
-            w.clock.now = w.clock.now.addingTimeInterval(86_400 + 1)
-            for p in w.phones { p.engine.tick(); await p.engine.boxReady() }
-            await w.air.run()
+        func settleDays(_ n: Int) async {
+            for _ in 0..<n {
+                w.clock.now = w.clock.now.addingTimeInterval(86_400 + 1)
+                for p in w.phones { p.engine.tick(); await p.engine.boxReady() }
+                await w.air.run()
+            }
         }
+        await settleDays(3)
+        // Everyone scans the first coordinator's latest key update, as they would be asked to.
+        if let g = w.coordinator.engine.group, g.secrets.generation > 1 {
+            for m in w.phones where m !== w.coordinator && !w.gone.contains(ObjectIdentifier(m)) {
+                guard let mine = m.engine.group, mine.secrets.generation < g.secrets.generation, let member = g.member(m.engine.saved!.me),
+                      let u = try? Joining.update(g, for: member, coordinator: w.coordinator.identity),
+                      let updated = try? Joining.openUpdate(u, current: mine, me: m.identity) else { continue }
+                m.engine.applyKeyUpdate(updated)
+            }
+        }
+        await settleDays(2)
         try check(w, seed: seed, step: steps)
-        let stayed = w.phones.filter { !w.gone.contains(ObjectIdentifier($0)) && $0.engine.me != nil }
+        // Liveness once links have healed: every open call from someone still here is with every
+        // responder still here, still alerting, and still being sent.
+        let here = w.phones.filter { !w.gone.contains(ObjectIdentifier($0)) && $0.engine.me != nil }
+        for caller in here {
+            for r in caller.engine.activity.outgoing where r.unit != 0 && r.colour != .green && r.acknowledgedBy.isEmpty {
+                XCTAssertNotNil(r.nextResend, "seed \(seed): an open call stopped being sent")
+                guard caller.engine.group?.member(unit: r.unit) != nil else { continue }
+                for responder in here where responder !== caller && responder.engine.me?.canRespond == true
+                    && responder.engine.group?.member(unit: r.unit) != nil {
+                    let k = IncomingRequest.Key(unit: r.unit, request: r.number)
+                    guard let heard = responder.engine.activity.inbox.requests[k] else {
+                        XCTFail("seed \(seed): member \(responder.engine.saved!.me) never heard open call \(k)\n" + w.log.suffix(30).joined(separator: "\n")); continue
+                    }
+                    if !heard.isAcknowledged {
+                        XCTAssertTrue(responder.alerts.scheduled[k]?.times.contains { $0 >= w.clock.now } ?? false,
+                                      "seed \(seed): open call \(k) has no future alerts on member \(responder.engine.saved!.me)")
+                    }
+                }
+            }
+        }
+        // Someone invited by a coordinator who was then removed may never have been accepted by the
+        // rest of the group. That is safe (their acks count nowhere else), but they must be invited
+        // again, so they are left out of the agreement check, and must not be in the first
+        // coordinator's group unless it heard of them.
+        let orphan: (Phone) -> Bool = { p in
+            guard let inviter = w.invitedBy[ObjectIdentifier(p)] else { return false }
+            return w.removedNumbers.contains(inviter) && w.coordinator.engine.group?.member(p.engine.saved!.me) == nil
+        }
+        let stayed = w.phones.filter { !w.gone.contains(ObjectIdentifier($0)) && $0.engine.me != nil && !orphan($0) }
         let versions = Set(stayed.map { $0.engine.group!.membershipVersion })
-        let rosters = Set(stayed.map { Set($0.engine.group!.members.map(\.number)) })
+        let orphans = Set(w.phones.filter(orphan).map { $0.engine.saved!.me })
+        let rosters = Set(stayed.map { Set($0.engine.group!.members.map(\.number)).subtracting(orphans) })
         XCTAssertEqual(versions.count, 1, "seed \(seed): phones disagree on the membership version: \(versions)\n" + w.log.suffix(30).joined(separator: "\n"))
+        let channels = Set(stayed.map { $0.engine.group!.secrets.channelSecret })
+        XCTAssertEqual(channels.count, 1, "seed \(seed): phones are on different keys")
         XCTAssertEqual(rosters.count, 1, "seed \(seed): phones disagree on who is in the group: \(rosters)\n" + w.log.suffix(30).joined(separator: "\n"))
     }
 
@@ -168,13 +256,24 @@ import XCTest
                              + "\(p.engine.saved!.me) with unit \(String(describing: p.engine.me?.unit)), removed: \(g.removedMembers.sorted())")
                 }
             }
+            // Acknowledgements count only from people this phone still has in the group.
+            let current = Set(g.members.map(\.number))
+            for r in p.engine.activity.outgoing where !Set(r.acknowledgedBy).isSubset(of: current) {
+                try fail("caller still counts an ack from someone it knows was removed: \(r.acknowledgedBy)")
+            }
+            for r in p.engine.activity.inbox.requests.values where !Set(r.acknowledgedBy).isSubset(of: current) || !Set(r.acks.keys).isSubset(of: current) {
+                try fail("request \(r.key) still counts an ack from someone removed")
+            }
+            // Only the first coordinator's removals ever take effect.
+            if !g.removedMembers.isSubset(of: w.removedNumbers) { try fail("member removed without the first coordinator: \(g.removedMembers)") }
             for r in p.engine.activity.inbox.requests.values {
+                if r.isAcknowledged, p.alerts.scheduled[r.key] != nil { try fail("alerts still scheduled for acknowledged \(r.key)") }
                 for who in r.acknowledgedBy where !w.humanAcks.contains("\(r.key.unit)-\(r.key.request)-\(who)") && (g.member(who) == nil || !w.removedNumbers.contains(who)) {
                     try fail("request \(r.key) marked acknowledged by \(who), who never did")
                 }
                 // An open call keeps alerting on this responder's phone.
                 if !r.isAcknowledged, r.colour != .green, p.engine.me?.canRespond == true,
-                   (p.alerts.scheduled[r.key]?.times.isEmpty ?? true), r.key.unit != p.engine.me?.unit {
+                   !(p.alerts.scheduled[r.key]?.times.contains { $0 >= w.clock.now.addingTimeInterval(-1) } ?? false), r.key.unit != p.engine.me?.unit {
                     try fail("open request \(r.key) has no alerts on member \(p.engine.saved!.me)")
                 }
             }

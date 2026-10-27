@@ -86,10 +86,20 @@ export class GroupRelay {
     for (const m of list.members) {
       if (typeof m.key !== "string" || !["coordinator", "member"].includes(m.role)) throw new RelayError(400, "bad member");
     }
+    if (new Set(list.members.map((m) => m.key)).size !== list.members.length) throw new RelayError(400, "a key listed twice");
     const current = await this.members();
+    // The coordinator who registered the group owns it: only they can take anyone off, and
+    // anyone they took off can never be listed again, whoever sends the list.
+    const owner = (await this.storage.get("owner")) ?? signer;
+    const removed = new Set((await this.storage.get("removed")) ?? []);
+    if (list.members.some((m) => removed.has(m.key))) throw new RelayError(409, "a removed member cannot be listed again");
     if (current) {
       if (!current.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(403, "only a coordinator can change members");
       if (list.generation < current.generation) throw new RelayError(409, "older member list");
+      const dropped = current.members.filter((m) => !list.members.some((n) => n.key === m.key)).map((m) => m.key);
+      if (dropped.length && signer !== owner) throw new RelayError(403, "only the first coordinator can take people off");
+      if (dropped.includes(owner)) throw new RelayError(409, "the first coordinator cannot be taken off");
+      for (const k of dropped) removed.add(k);
       if (list.generation === current.generation) {
         // The same version from two coordinators who each added someone while out of touch: take
         // a list that keeps everyone already listed (the phones' merged list). Anything that drops
@@ -101,6 +111,8 @@ export class GroupRelay {
       }
     }
     if (!list.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(400, "the signer must stay a coordinator");
+    await this.storage.put("owner", owner);
+    await this.storage.put("removed", [...removed]);
     await this.storage.put("members", { generation: list.generation, members: list.members.map(({ key, role }) => ({ key, role })) });
     // Push tokens of anyone no longer listed are deleted, not just ignored.
     const keep = new Set(list.members.map((m) => "p:" + m.key));

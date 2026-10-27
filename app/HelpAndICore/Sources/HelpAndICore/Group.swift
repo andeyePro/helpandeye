@@ -361,7 +361,8 @@ public enum Joining {
     /// have sealed it, and an update can never take the group back to older secrets.
     public static func openUpdate(_ welcome: Welcome, current: GroupState, me: DeviceIdentity) throws -> GroupState {
         guard welcome.groupID == current.secrets.groupID else { throw Failure.wrongGroup }
-        for c in current.members where c.role == .coordinator {
+        // Only the first coordinator changes the keys, so the group can never be split onto two.
+        for c in current.members where c.number == current.primaryCoordinator {
             if let plain = try? unseal(welcome.sealed, from: c.publicKey, me: me, context: current.secrets.groupID),
                let g = try? JSONDecoder().decode(GroupState.self, from: plain) {
                 guard g.secrets.generation > current.secrets.generation else { throw Failure.cannotOpen }

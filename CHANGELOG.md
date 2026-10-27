@@ -4,6 +4,24 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Fixes from the fifth code review, and named pushes** - a fifth independent review found 1
+  blocker and 7 major issues, and the strengthened fuzz test found two more. Fixed: a second
+  coordinator had no way to scan new keys after a removal, so a week later their calls reached
+  nobody; a key update replaced each phone's member list with the first coordinator's, erasing
+  people a second coordinator had added (it now merges membership and takes only the keys); the
+  relay could let a removed member back in through a same-version merge, and let any coordinator
+  take people off (now only the first coordinator can, removed keys can never be listed again,
+  and duplicate keys are refused); saved activity, requests and check-ins missing a newer field
+  were thrown away whole (all now load with defaults); key updates are accepted only from the first
+  coordinator; an old signed check-in schedule, replayed, no longer replaces a newer one; a caller
+  whose acknowledgement is taken back is told plainly; a newcomer answers boxes at most once a
+  minute; the box's Bluetooth code is sent only once safely saved and shown only once the box took
+  it. The fuzz test now also has second coordinators inviting, forged removals and role changes,
+  key updates, the app being closed and reopened, and after links heal checks that every open call
+  is with every responder, still alerting and still being sent, and that all phones are on the same
+  keys. A notification extension now opens the sealed call a push carries and names the caller
+  (needs signing; TODO.md). 132 core tests, 17 relay tests; 300 fuzz seeds pass; manual checks 24
+  to 26.
 - [x] **A fuzz test of the safety rules** - `EngineFuzzTests` runs groups of four to six phones
   through 250 random steps per seed: presses, acknowledgements, retries, availability, promotions
   and removals, links going up and down, lost packets, clock jumps of up to a day, typed messages,

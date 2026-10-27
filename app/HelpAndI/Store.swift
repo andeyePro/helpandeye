@@ -63,8 +63,9 @@ enum Store {
         return d.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
     }
 
-    static func setBoxPin(_ pin: UInt32, for id: UUID) {
-        _ = write("pin-\(id.uuidString)", withUnsafeBytes(of: pin) { Data($0) })
+    @discardableResult
+    static func setBoxPin(_ pin: UInt32, for id: UUID) -> Bool {
+        write("pin-\(id.uuidString)", withUnsafeBytes(of: pin) { Data($0) })
     }
 
     static var boardID: UUID? {
@@ -72,8 +73,14 @@ enum Store {
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: "board") }
     }
 
+    /// Shared with the notification extension once the app is signed with a keychain group (named
+    /// in Info.plist); unsigned builds keep the app's own keychain.
+    private static let accessGroup = (Bundle.main.object(forInfoDictionaryKey: "HelpAndIKeychainGroup") as? String).flatMap { $0.isEmpty ? nil : $0 }
+
     private static func query(_ account: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        if let accessGroup { q[kSecAttrAccessGroup as String] = accessGroup }
+        return q
     }
 
     private static func read(_ account: String) -> Result<Data, OSStatus> {

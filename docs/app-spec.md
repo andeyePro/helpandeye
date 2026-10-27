@@ -22,7 +22,11 @@ lists what is still open. Items marked **Proposed** are not yet agreed.
   coordinator can invite people and handles rota gaps and notices. Only the group's first
   coordinator removes people (which changes the keys) or makes new coordinators, so two
   coordinators out of touch can never split the group onto different keys. Each coordinator hands
-  out member and unit numbers from their own block, so two adding people at once never clash.
+  out member and unit numbers from their own block, so two adding people at once never clash. If
+  the first coordinator's phone is lost, nobody can remove anyone; what should happen then is a
+  decision for Martin (TODO.md).
+- If someone is removed after their acknowledgement reached a caller, the caller is told plainly
+  that nobody has seen their call now, it goes out again, and responders are alerted again.
 - Groups are on a free or a Pro tier. See [Tiers and cost](#tiers-and-cost).
 
 ## Who is alerted
@@ -75,8 +79,9 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
   is needed.
 - Each relay wakes responders' phones through Apple's and Google's push services, which is the
   only reliable way to wake an iPhone app. The push says only that a group has a call, because
-  the relay cannot read who; it goes to every member at once, and each phone then alerts its own
-  person in escalation order.
+  the relay cannot read who, and carries the message still sealed; the phone opens it to name the
+  caller. It goes to every member at once, and each phone then alerts its own person in
+  escalation order.
 - Responders' apps poll the relays when opened, in case a push was lost.
 - The relays see only encrypted messages and unit numbers.
 

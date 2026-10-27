@@ -59,6 +59,9 @@ public struct Alert: Equatable, Sendable {
     func cancel(_ key: IncomingRequest.Key)
     func cancelAll()
     func setCheckInReminders(_ minutesAfterMidnight: [Int])
+    /// Tells this phone's own caller something they must not miss, such as their call no longer
+    /// being seen by anyone.
+    func tellCaller(title: String, body: String)
 }
 
 @MainActor public protocol EngineStore: AnyObject {
@@ -124,6 +127,8 @@ public final class HelpEngine: ObservableObject {
     private var ackAttempt: [IncomingRequest.Key: UUID] = [:]
     private var lastMembershipRepeat: Date?
     private var answeredBoxes: Set<UInt16> = []
+    /// An answer is a broadcast every box hears, so one a minute covers a newcomer hearing many.
+    private var lastBoxAnswer: Date?
     private var tasks: [UUID: Task<Void, Never>] = [:]
 
     public init(identity: DeviceIdentity, mesh: MeshLink, relay: RelayLink, alerts: AlertScheduler, store: EngineStore,
@@ -230,6 +235,11 @@ public final class HelpEngine: ObservableObject {
         if group != nil {
             for i in activity.outgoing.indices where activity.outgoing[i].acknowledgedBy.contains(where: { !current.contains($0) }) {
                 activity.outgoing[i].revoke(keeping: current)
+                // Someone told their call was seen may have put the phone down: say so plainly.
+                if activity.outgoing[i].acknowledgedBy.isEmpty {
+                    alerts.tellCaller(title: "Your call is going out again",
+                                      body: "The person who saw it has left the group, so nobody has seen it now. If you need help now, call 999.")
+                }
             }
             if activity.inbox.requests.values.contains(where: { $0.acknowledgedBy.contains { !current.contains($0) } }) {
                 for k in activity.inbox.revoke(keeping: current) { scheduleAlerts(for: k) }
@@ -549,8 +559,10 @@ public final class HelpEngine: ObservableObject {
                 await self.mesh.addContact(key, name: "Help&I \(member)")
                 // A box this phone has not heard before may not know this phone's box either (it
                 // joined later): answer with ours, once per new box, then tell it our check-ins.
-                if let mine = self.mesh.boxPublicKey, let me = self.saved?.me, !self.answeredBoxes.contains(member) {
+                if let mine = self.mesh.boxPublicKey, let me = self.saved?.me, !self.answeredBoxes.contains(member),
+                   self.now().timeIntervalSince(self.lastBoxAnswer ?? .distantPast) > 60 {
                     self.answeredBoxes.insert(member)
+                    self.lastBoxAnswer = self.now()
                     await self.sendToAll(.signedBoard(member: me, publicKey: mine, identity: self.identity, group: self.groupID))
                 }
                 await self.shareCheckIns(to: member)
@@ -728,6 +740,30 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// Makes a member a coordinator too, so the group does not depend on one person.
+    /// Takes in a key update from the first coordinator. The keys come from the update; who is in
+    /// the group is merged, so a member another coordinator added that the first had not yet heard
+    /// of is kept, unless the update says they were removed.
+    public func applyKeyUpdate(_ update: GroupState) {
+        guard let current = group else { return }
+        var merged = update
+        for m in current.members where merged.member(m.number) == nil && !update.removedMembers.contains(m.number) {
+            merged.members.append(m)
+        }
+        merged.removedMembers.formUnion(current.removedMembers)
+        merged.members.removeAll { merged.removedMembers.contains($0.number) }
+        merged.membershipVersion = max(update.membershipVersion, current.membershipVersion)
+        merged.highestMember = max(update.highestMember, current.highestMember)
+        for (n, v) in current.roleVersions where v > (merged.roleVersions[n] ?? 0) {
+            merged.roleVersions[n] = v
+            if let i = merged.members.firstIndex(where: { $0.number == n }), let mine = current.member(n) {
+                merged.members[i].role = mine.role
+                merged.members[i].block = mine.block
+            }
+        }
+        if merged.relayURL == nil { merged.relayURL = current.relayURL }
+        updateGroup { $0 = merged }
+    }
+
     /// Only the first coordinator makes new coordinators.
     public func promote(_ number: UInt16) {
         guard saved?.me == group?.primaryCoordinator else { return }
@@ -809,5 +845,34 @@ public final class HelpEngine: ObservableObject {
                 scheduleAlerts(for: key)
             }
         }
+    }
+}
+
+extension SavedState {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        group = try c.decode(GroupState.self, forKey: .group)
+        me = try c.decode(UInt16.self, forKey: .me)
+        lastRequest = try c.value(.lastRequest, or: 0)
+        checkIn = try c.decodeIfPresent(CheckInSchedule.self, forKey: .checkIn)
+        checkInSince = try c.decodeIfPresent(Date.self, forKey: .checkInSince)
+        checkInRaised = try c.decodeIfPresent(Date.self, forKey: .checkInRaised)
+        checkInSharedAt = try c.decodeIfPresent(Date.self, forKey: .checkInSharedAt)
+    }
+}
+
+extension Activity {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        outgoing = try c.value(.outgoing, or: [])
+        inbox = try c.value(.inbox, or: ResponderInbox())
+        rota = try c.value(.rota, or: Rota())
+        lastAnswered = try c.value(.lastAnswered, or: [:])
+        greens = try c.value(.greens, or: [])
+        airtime = try c.decodeIfPresent(AirtimeBudget.self, forKey: .airtime)
+        checkInWatch = try c.value(.checkInWatch, or: CheckInWatch())
+        boardKeys = try c.value(.boardKeys, or: [:])
+        notices = try c.value(.notices, or: [:])
+        alertedGreens = try c.value(.alertedGreens, or: [])
     }
 }

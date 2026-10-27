@@ -58,6 +58,8 @@ public struct CheckInWatch: Codable, Equatable, Sendable {
     }
 
     public private(set) var callers: [UInt32: Caller] = [:]
+    /// The newest schedule time heard for each caller, kept even when check-ins are off.
+    var latest: [UInt32: Date] = [:]
     /// How long after a check-in's grace runs out to wait for the caller's own phone to raise it,
     /// before this phone raises it instead.
     public static let wait: TimeInterval = 5 * 60
@@ -72,6 +74,11 @@ public struct CheckInWatch: Codable, Equatable, Sendable {
     public mutating func apply(_ frame: HelpFrame) {
         switch frame {
         case let .checkIns(unit, since, grace, times):
+            // An older schedule, replayed, never replaces a newer one: an old "off" must not stop
+            // watching someone who has since turned check-ins on.
+            let at = Date(timeIntervalSince1970: TimeInterval(since))
+            if let last = latest[unit], at < last { return }
+            latest[unit] = at
             if times.isEmpty { callers[unit] = nil; return }
             let schedule = CheckInSchedule(times: times.map(Int.init), grace: TimeInterval(grace) * 60)
             callers[unit] = Caller(schedule: schedule, since: Date(timeIntervalSince1970: TimeInterval(since)),
@@ -101,5 +108,23 @@ public struct CheckInWatch: Codable, Equatable, Sendable {
             out.append((unit, m))
         }
         return out.sorted { $0.0 < $1.0 }
+    }
+}
+
+extension CheckInWatch {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        callers = try c.value(.callers, or: [:])
+        latest = try c.value(.latest, or: [:])
+    }
+}
+
+extension CheckInWatch.Caller {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schedule = try c.decode(CheckInSchedule.self, forKey: .schedule)
+        since = try c.decode(Date.self, forKey: .since)
+        greens = try c.value(.greens, or: [])
+        handled = try c.value(.handled, or: [])
     }
 }

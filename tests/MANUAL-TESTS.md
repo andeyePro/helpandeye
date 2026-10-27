@@ -200,3 +200,25 @@ Pass: every word on the Help tab can be read without cutting off; Come when conv
 2. On phone C, invite a fourth phone, D, as a responder. Then press Come now on phone A and acknowledge on phone D.
 
 Pass: phone C shows the coordinator's tools (Invite someone, gaps, Internet route) but no Remove or Make coordinator: only the first coordinator removes people or makes coordinators. Phone A shows phone D's person as having seen the call, although phone B never touched phone D. Phone D's member number is above 1000.
+
+## 24. An acknowledgement that stops counting
+
+1. On phone A, press Come now. Acknowledge on phone C (a responder). Phone A shows that C has seen the call.
+2. On phone B (the first coordinator), remove phone C.
+
+Pass: phone A gets a notification "Your call is going out again" saying nobody has seen it now and to call 999 if help is needed now, its status goes back to waiting, and phone B is alerted for the call again.
+
+## 25. A second coordinator takes in new keys
+
+1. Make phone C a coordinator (section 23). Then on phone B remove a fourth phone, D.
+2. On phone C, open Group: under Key update, scan the update code phone B shows for C.
+
+Pass: phone C says "Keys updated." Seven days later (or with the clock moved on), phone C's calls still reach phone A over the local radio.
+
+## 26. A push names the caller
+
+Needs the relay set up with push (TODO.md) and the app signed with the shared keychain group.
+
+1. Lock phone B. On phone A, with the local radio off, press Come now.
+
+Pass: phone B's notification reads "<name>: come now", not the relay's generic "A call for help in your group". It never says help is coming.

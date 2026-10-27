@@ -52,3 +52,9 @@ test("a bad token or a failed request sends nothing and reports 0", async () => 
   assert.equal(await push(e, { token: "nope" }, "call", { fetchImpl: async () => ({ status: 200 }) }), 0);
   assert.equal(await push(e, token, "call", { fetchImpl: async () => { throw new Error("down"); } }), 0);
 });
+
+test("a call push carries the message still sealed, for the phone to name the caller", async () => {
+  assert.equal(payload("call", "AAEC").sealed, "AAEC");
+  assert.equal(payload("quiet", "AAEC").sealed, undefined);
+  assert.equal(payload("call", "A".repeat(600)).sealed, undefined, "nothing oversized");
+});

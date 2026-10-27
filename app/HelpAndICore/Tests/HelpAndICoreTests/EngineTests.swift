@@ -86,6 +86,8 @@ import XCTest
     func cancel(_ key: IncomingRequest.Key) { scheduled[key] = nil; cancelled.insert(key) }
     func cancelAll() { scheduled = [:] }
     func setCheckInReminders(_ minutes: [Int]) {}
+    var toldCaller: [String] = []
+    func tellCaller(title: String, body: String) { toldCaller.append(title) }
 }
 
 @MainActor final class NoStore: EngineStore {
@@ -95,6 +97,7 @@ import XCTest
 
 @MainActor final class Phone {
     let identity = DeviceIdentity()
+    /// Replaced when a test closes and reopens the app.
     let mesh = FakeMesh()
     let relay = FakeRelay()
     let alerts = FakeAlerts()
@@ -488,6 +491,7 @@ import XCTest
         XCTAssertEqual(caller.request?.status, .waitingForResponder, "the removed person's ack no longer counts")
         XCTAssertNotNil(caller.request?.nextResend, "so the call goes out again")
         XCTAssertNotNil(coordinator.alerts.scheduled[key], "and the coordinator is alerted again")
+        XCTAssertEqual(caller.alerts.toldCaller, ["Your call is going out again"], "and the caller is told")
     }
 
     func testAPhoneThatMissedARemovalCatchesUp() async {
@@ -536,10 +540,26 @@ import XCTest
         join(late, call: false, respond: true)
         await air.run()
         air.directSends = []
+        clock.now = clock.now.addingTimeInterval(120)  // joining takes more than a minute
         await late.engine.boxReady()
         await air.run()
         XCTAssertTrue(air.directSends.contains { if case .checkIns? = MeshText.decode($0) { return true }; return false })
         XCTAssertNotNil(late.engine.activity.checkInWatch.callers[caller.engine.me!.unit!])
+    }
+
+    func testANewcomerHearingManyBoxesAnswersOnce() async {
+        var phones: [Phone] = []
+        for _ in 0..<3 { let p = Phone(air: air, clock: clock); join(p, call: false, respond: true); phones.append(p) }
+        await air.run()
+        clock.now = clock.now.addingTimeInterval(120)
+        let late = Phone(air: air, clock: clock)
+        join(late, call: false, respond: true)
+        await air.run()
+        air.groupSends = []
+        await late.engine.boxReady()
+        await air.run()
+        let fromLate = air.groupSends.filter { if case let .board(m, _, _) = $0 { return m == late.engine.saved!.me }; return false }
+        XCTAssertLessThanOrEqual(fromLate.count, 2, "its own announcement and at most one answer, not one per box")
     }
 
     func testOnlyRespondersCanBePromoted() async {

@@ -65,7 +65,7 @@ test("only a coordinator changes the member list, never backwards, and cannot re
   await rejects(relay.setMembers(coord.key, { ...list, generation: 1 }), 409);
   await relay.setMembers(coord.key, { ...list, members: [...list.members].reverse() });
   await rejects(relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }] }), 409);
-  await rejects(relay.setMembers(coord.key, { generation: 3, members: [{ key: member.key, role: "coordinator" }] }), 400);
+  await rejects(relay.setMembers(coord.key, { generation: 3, members: [{ key: member.key, role: "coordinator" }] }), 409);
   await rejects(relay.setMembers(coord.key, { generation: 3, members: [{ key: 1, role: "x" }] }), 400);
 });
 
@@ -161,4 +161,19 @@ test("a merged list at the same version is accepted if it keeps everyone", async
   await relay.setMembers(coord.key, { generation: 3, members: [...base, { key: a.key, role: "member" }, { key: b.key, role: "member" }] });
   assert.equal((await relay.members()).members.length, 3);
   await rejects(relay.setMembers(coord.key, { generation: 3, members: [...base, { key: b.key, role: "member" }] }), 409);
+});
+
+test("only the first coordinator takes people off, and nobody taken off comes back", async () => {
+  const relay = new GroupRelay(new MapStorage());
+  const owner = await phone(), second = await phone(), x = await phone(), y = await phone();
+  const c = (k) => ({ key: k.key, role: "coordinator" }), m = (k) => ({ key: k.key, role: "member" });
+  await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second), m(x)] });
+  await rejects(relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second)] }), 403);
+  await relay.setMembers(owner.key, { generation: 2, members: [c(owner), c(second)] });
+  // The second coordinator, out of touch, adds y to a list that still has x.
+  await rejects(relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second), m(x), m(y)] }), 409);
+  await relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second), m(y)] });
+  await rejects(relay.setMembers(second.key, { generation: 3, members: [c(second), m(y)] }), 403);
+  await rejects(relay.setMembers(owner.key, { generation: 3, members: [c(owner), c(owner)] }), 400);
+  await rejects(relay.since(x.key, 0), 403);
 });

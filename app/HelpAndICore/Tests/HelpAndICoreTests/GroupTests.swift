@@ -159,6 +159,45 @@ final class GroupTests: XCTestCase {
         XCTAssertNil(g.nextMemberNumber(by: 3), "a full block gives no number rather than a duplicate")
     }
 
+    func testActivitySavedByAnEarlierVersionKeepsOpenRequests() throws {
+        var a = Activity()
+        a.inbox.receive(.call(unit: 70001, request: 1, colour: .red, sentAt: 1_793_000_000), via: .mesh, at: Date())
+        a.outgoing.append(OutgoingRequest(unit: 70002, number: 4, colour: .red, createdAt: Date()))
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(a)) as! [String: Any]
+        for k in ["alertedGreens", "notices", "boardKeys", "checkInWatch", "airtime"] { json[k] = nil }
+        var out = (json["outgoing"] as! [[String: Any]])[0]
+        out["resends"] = nil; out["parts"] = nil
+        json["outgoing"] = [out]
+        let back = try JSONDecoder().decode(Activity.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(back.inbox.requests.count, 1, "the open request survives")
+        XCTAssertEqual(back.outgoing.first?.number, 4)
+    }
+
+    func testAKeyUpdateFromASecondCoordinatorIsRefused() throws {
+        let first = DeviceIdentity(), second = DeviceIdentity(), member = DeviceIdentity()
+        var g = newGroup(first)
+        g.members.append(Member(number: 2, name: "S", role: .responder, publicKey: second.publicKey))
+        g.members.append(Member(number: 3, name: "M", role: .responder, publicKey: member.publicKey))
+        _ = g.promote(2)
+        let before = g
+        g.remove(3)
+        var rotated = before
+        rotated.secrets = before.secrets.rotated()
+        let fromSecond = try Joining.update(rotated, for: before.member(3)!, coordinator: second)
+        XCTAssertThrowsError(try Joining.openUpdate(fromSecond, current: before, me: member))
+    }
+
+    func testAnOldCheckInScheduleReplayedNeverReplacesANewerOne() {
+        var w = CheckInWatch()
+        w.apply(.checkIns(unit: 7, since: 200, grace: 30, times: [600]))
+        w.apply(.checkIns(unit: 7, since: 100, grace: 30, times: []))
+        XCTAssertEqual(w.callers[7]?.schedule.times, [600])
+        w.apply(.checkIns(unit: 7, since: 300, grace: 30, times: []))
+        XCTAssertNil(w.callers[7])
+        w.apply(.checkIns(unit: 7, since: 200, grace: 30, times: [600]))
+        XCTAssertNil(w.callers[7], "nor an old 'on' a newer 'off'")
+    }
+
     func testBadCodesAreRejected() {
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "hello"))
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPANDI1:%%%"))

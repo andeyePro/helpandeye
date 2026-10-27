@@ -274,3 +274,44 @@ public struct ResponderInbox: Sendable, Codable {
         }
     }
 }
+
+// Saved requests are read tolerantly: a field added in a later version gets its default, so an
+// update never throws away a request that is still open.
+
+extension KeyedDecodingContainer {
+    func value<T: Decodable>(_ key: Key, or fallback: @autoclosure () -> T) throws -> T {
+        try decodeIfPresent(T.self, forKey: key) ?? fallback()
+    }
+}
+
+extension OutgoingRequest {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        unit = try c.decode(UInt32.self, forKey: .unit)
+        number = try c.decode(UInt16.self, forKey: .number)
+        colour = try c.decode(Colour.self, forKey: .colour)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        routes = try c.value(.routes, or: [:])
+        categories = try c.value(.categories, or: [])
+        notes = try c.value(.notes, or: [])
+        acknowledgedBy = try c.value(.acknowledgedBy, or: [])
+        parts = try c.value(.parts, or: 0)
+        resends = try c.value(.resends, or: 0)
+    }
+}
+
+extension IncomingRequest {
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        key = try c.decode(Key.self, forKey: .key)
+        colour = try c.decodeIfPresent(Colour.self, forKey: .colour)
+        firstHeardAt = try c.decode(Date.self, forKey: .firstHeardAt)
+        sentAt = try c.decodeIfPresent(Date.self, forKey: .sentAt)
+        categories = try c.value(.categories, or: [:])
+        heardOn = try c.value(.heardOn, or: [])
+        acknowledgedBy = try c.value(.acknowledgedBy, or: [])
+        notes = try c.value(.notes, or: [:])
+        acks = try c.value(.acks, or: [:])
+        position = try c.decodeIfPresent(Position.self, forKey: .position)
+    }
+}

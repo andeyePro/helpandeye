@@ -147,9 +147,10 @@ struct GroupView: View {
                 if model.me?.role == .coordinator {
                     RelaySection()
                 }
-                if model.engine.isPrimaryCoordinator, model.group?.previousSecrets != nil {
-                    KeyUpdatesSection()
-                } else if model.me?.role != .coordinator {
+                if model.engine.isPrimaryCoordinator {
+                    if model.group?.previousSecrets != nil { KeyUpdatesSection() }
+                } else {
+                    // Everyone but the first coordinator, other coordinators included, takes in new keys.
                     ReceiveUpdateSection()
                 }
                 Section {
@@ -255,7 +256,7 @@ struct ReceiveUpdateSection: View {
                       let updated = try? Joining.openUpdate(w, current: g, me: model.identity) else {
                     message = "That update code could not be used."; return
                 }
-                model.updateGroup { $0 = updated }
+                model.engine.applyKeyUpdate(updated)
                 message = "Keys updated."
             }
             if let message { Text(message) }

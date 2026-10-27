@@ -20,6 +20,7 @@ targets:
     dependencies:
       - package: HelpAndICore
       - target: HelpAndIWatch
+      - target: HelpAndINotify
     entitlements:
       path: HelpAndI/HelpAndI.entitlements
       properties:
@@ -36,10 +37,31 @@ targets:
         UIBackgroundModes: [bluetooth-central, remote-notification]
         NSBluetoothAlwaysUsageDescription: "Help&I uses Bluetooth to talk to your Help&I box, so a call for help can go over the local radio network."
         NSCameraUsageDescription: "Help&I uses the camera to scan a group's joining code."
+        # Set to "$(AppIdentifierPrefix)org.andeye.helpandi.shared" with a matching keychain-access-groups
+        # entitlement once signed, so the notification extension can name callers.
+        HelpAndIKeychainGroup: ""
         NSLocationWhenInUseUsageDescription: "When you choose to share where you are, Help&I sends it to your responders, encrypted, over the internet."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: org.andeye.helpandi
+        TARGETED_DEVICE_FAMILY: "1"
+  HelpAndINotify:
+    type: app-extension
+    platform: iOS
+    sources: [HelpAndINotify]
+    dependencies:
+      - package: HelpAndICore
+    info:
+      path: HelpAndINotify/Info.plist
+      properties:
+        CFBundleDisplayName: "Help&I"
+        HelpAndIKeychainGroup: ""
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.usernotifications.service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.andeye.helpandi.notify
         TARGETED_DEVICE_FAMILY: "1"
   HelpAndIWatch:
     type: application

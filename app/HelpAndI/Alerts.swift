@@ -30,6 +30,15 @@ import UserNotifications
 
     func cancelAll() { center.removeAllPendingNotificationRequests() }
 
+    func tellCaller(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.interruptionLevel = .timeSensitive
+        center.add(UNNotificationRequest(identifier: "caller-\(UUID().uuidString)", content: content, trigger: nil))
+    }
+
     func setCheckInReminders(_ minutes: [Int]) {
         center.removePendingNotificationRequests(withIdentifiers: (0..<1440).map { "checkin-\($0)" })
         for t in minutes {

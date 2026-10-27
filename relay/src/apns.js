@@ -29,9 +29,11 @@ export async function providerToken(env, nowSeconds) {
 
 /// What a push says. The relay cannot read the message, so it cannot say who called; the app
 /// works out who and when to alert once it is awake. `call` is visible; `quiet` only wakes the app.
-export function payload(kind) {
+export function payload(kind, sealed) {
   if (kind === "call") {
     return {
+      // Still sealed: only a phone in the group can open it, to name the caller.
+      ...(typeof sealed === "string" && sealed.length <= 512 ? { sealed } : {}),
       aps: {
         alert: { title: "Help&I", body: "A call for help in your group. Open Help&I to see who." },
         sound: "default",
@@ -45,7 +47,7 @@ export function payload(kind) {
 }
 
 /// Sends one push. Returns the HTTP status, or 0 if it could not be sent.
-export async function push(env, token, kind, { fetchImpl = fetch, now = Date.now() } = {}) {
+export async function push(env, token, kind, { fetchImpl = fetch, now = Date.now(), sealed } = {}) {
   if (!configured(env) || !/^[0-9a-f]{64,200}$/i.test(token.token)) return 0;
   const host = token.sandbox ? "api.sandbox.push.apple.com" : "api.push.apple.com";
   const quiet = kind !== "call";
@@ -59,7 +61,7 @@ export async function push(env, token, kind, { fetchImpl = fetch, now = Date.now
         "apns-priority": quiet ? "5" : "10",
         "apns-expiration": String(Math.floor(now / 1000) + 3600),
       },
-      body: JSON.stringify(payload(kind)),
+      body: JSON.stringify(payload(kind, sealed)),
     });
     return res.status;
   } catch {
