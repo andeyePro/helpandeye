@@ -16,6 +16,6 @@
 ## Open (work)
 
 - [ ] Push from the relay through APNs once a key exists (see above).
-- [ ] Caller's typed text and position over the mesh as direct messages (decision 12).
+- [ ] Caller's typed text and position over the mesh as direct messages to each responder's board (decision 12). They go over the internet already. Needs each member's board public key in the group, and adding responders' boards as MeshCore contacts.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).
 - [ ] Responders' phones should also notice a missed check-in, so it is raised even if the caller's phone is flat. Needs the schedule shared with the group (relay or key update). Today only the caller's phone raises it, and only while Help&I is running or woken.

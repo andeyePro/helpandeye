@@ -1,3 +1,4 @@
+import CoreLocation
 import HelpAndICore
 import MessageUI
 import SwiftUI
@@ -109,10 +110,30 @@ struct StatusCard: View {
 struct FollowUps: View {
     @EnvironmentObject var model: AppModel
     let request: OutgoingRequest
+    @State private var typed = ""
+    @State private var problem: String?
+    @StateObject private var location = OneShotLocation()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Tell them more (optional)").font(.headline)
+            if model.relay.isConfigured {
+                HStack {
+                    TextField("Type a short message", text: $typed)
+                        .textFieldStyle(.roundedBorder)
+                        .submitLabel(.send)
+                        .onSubmit(sendNote)
+                    Button("Send", action: sendNote).disabled(typed.isEmpty)
+                }
+                Button(location.state == .finding ? "Finding where you are…" : "Share where I am") {
+                    location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) }
+                }
+                .disabled(location.state == .finding)
+                if location.state == .shared { Text("Your location was sent.").font(.footnote) }
+                if location.state == .denied { Text("Help&I is not allowed to use your location.").font(.footnote) }
+                ForEach(request.notes, id: \.self) { Text("You said: \($0)").font(.footnote).foregroundStyle(.secondary) }
+            }
+            if let problem { Text(problem).font(.footnote) }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 8) {
                 ForEach(CallCategory.allCases.filter { $0 != .missedCheckIn }, id: \.self) { c in
                     Button(c.label) { model.add(c) }
@@ -121,6 +142,56 @@ struct FollowUps: View {
                 }
             }
         }
+    }
+}
+
+extension FollowUps {
+    private func sendNote() {
+        guard !typed.isEmpty else { return }
+        problem = model.addNote(typed)
+        typed = ""
+    }
+}
+
+/// One location fix, only when the caller asks for it.
+@MainActor
+final class OneShotLocation: NSObject, ObservableObject, CLLocationManagerDelegate {
+    enum State { case idle, finding, shared, denied }
+    @Published private(set) var state = State.idle
+    private let manager = CLLocationManager()
+    private var done: ((Double, Double, Double) -> Void)?
+
+    func find(_ done: @escaping (Double, Double, Double) -> Void) {
+        self.done = done
+        state = .finding
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+        if manager.authorizationStatus == .notDetermined { manager.requestWhenInUseAuthorization() } else { manager.requestLocation() }
+    }
+
+    nonisolated func locationManagerDidChangeAuthorization(_ m: CLLocationManager) {
+        let status = m.authorizationStatus
+        Task { @MainActor in
+            guard self.state == .finding else { return }
+            switch status {
+            case .authorizedWhenInUse, .authorizedAlways: self.manager.requestLocation()
+            case .denied, .restricted: self.state = .denied
+            default: break
+            }
+        }
+    }
+
+    nonisolated func locationManager(_ m: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let l = locations.last else { return }
+        Task { @MainActor in
+            self.done?(l.coordinate.latitude, l.coordinate.longitude, l.horizontalAccuracy)
+            self.done = nil
+            self.state = .shared
+        }
+    }
+
+    nonisolated func locationManager(_ m: CLLocationManager, didFailWithError error: Error) {
+        Task { @MainActor in self.state = (error as? CLError)?.code == .denied ? .denied : .idle }
     }
 }
 

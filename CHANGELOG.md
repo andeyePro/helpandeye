@@ -4,6 +4,11 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Typed messages and location over the internet** - after a call, the caller can type a short
+  message (up to 120 bytes) and share where they are, once, when they choose. Both are sealed with
+  the group key and go only over the internet route; `HelpFrame.mayGoOnGroupChannel` keeps them off
+  the shared radio channel, and the board refuses them (decision 12). Responders see the message and
+  a Maps link with its accuracy. 66 core tests; manual check 14.
 - [x] **Fixes from the first code review** - a press with no route available now gives the cross at
   once instead of "Sending…" for ever. Acknowledgements are signed with the responder's own key and
   checked against the current member list, so a removed or lost phone, or another member, cannot

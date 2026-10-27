@@ -141,6 +141,23 @@ final class AppModel: ObservableObject {
         Task { _ = await sendOptional(frame) }
     }
 
+    /// Typed text goes only over the internet route, sealed with the group key (decision 12).
+    func addNote(_ text: String) -> String? {
+        guard relay.isConfigured else { return "Typed messages need the internet route, which is not set up." }
+        guard var r = activity.outgoing.popLast() else { return nil }
+        let frame = r.addNote(text)
+        activity.outgoing.append(r)
+        Task { _ = await relay.send(frame) }
+        return nil
+    }
+
+    func sharePosition(latitude: Double, longitude: Double, accuracy: Double) {
+        guard relay.isConfigured, let r = current else { return }
+        let frame = HelpFrame.position(unit: r.unit, request: r.number, latitudeE7: Int32(latitude * 1e7),
+                                       longitudeE7: Int32(longitude * 1e7), accuracy: UInt16(clamping: Int(accuracy)))
+        Task { _ = await relay.send(frame) }
+    }
+
     var availableRoutes: Set<Route> {
         var s: Set<Route> = [.sms]
         if board.state == .ready { s.insert(.mesh) }
@@ -164,6 +181,8 @@ final class AppModel: ObservableObject {
     }
 
     private func sendOnMesh(_ frame: HelpFrame, kind: AirtimeBudget.Kind) async -> String? {
+        // Personal content never goes on the shared group channel (decision 12).
+        guard frame.mayGoOnGroupChannel else { return "Only goes over the internet" }
         guard board.state == .ready, let radio = board.radio else { return meshUnavailableReason }
         guard budget != nil else { return "Box is on a frequency Help&I will not use" }
         let seconds = radio.airtime(bytes: meshPacketBytes(payload: frame.encoded().count))
@@ -190,7 +209,7 @@ final class AppModel: ObservableObject {
             activity.rota.apply(frame); checkGaps(); return
         case let .noticeAck(notice, by, _):
             notices[notice]?.acknowledge(by: by); return
-        case let .call(unit, _, _, _), let .followUp(unit, _, _, _):
+        case let .call(unit, _, _, _), let .followUp(unit, _, _, _), let .note(unit, _, _, _), let .position(unit, _, _, _, _):
             // A phone never alerts for its own calls, however they come back to it.
             if unit == me?.unit { return }
         }

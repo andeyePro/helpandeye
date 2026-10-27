@@ -56,3 +56,48 @@ final class HelpFrameTests: XCTestCase {
         XCTAssertNil(HelpFrame(d))
     }
 }
+
+final class PersonalContentTests: XCTestCase {
+    func testNotesAndPositionsRoundTripButStayOffTheGroupChannel() {
+        let note = HelpFrame.note(unit: 1, request: 2, part: 3, typed: "  Back door is unlocked  ")
+        let pos = HelpFrame.position(unit: 1, request: 2, latitudeE7: 554_000_000, longitudeE7: -45_000_000, accuracy: 15)
+        XCTAssertEqual(note, .note(unit: 1, request: 2, part: 3, text: "Back door is unlocked"))
+        XCTAssertEqual(HelpFrame(note.encoded()), note)
+        XCTAssertEqual(HelpFrame(pos.encoded()), pos)
+        XCTAssertFalse(note.mayGoOnGroupChannel)
+        XCTAssertFalse(pos.mayGoOnGroupChannel)
+        XCTAssertTrue(HelpFrame.call(unit: 1, request: 1, colour: .red, sentAt: 0).mayGoOnGroupChannel)
+    }
+
+    func testLongNotesAreCutAtACharacterBoundary() {
+        let f = HelpFrame.note(unit: 1, request: 1, part: 1, typed: String(repeating: "é", count: 100))
+        guard case let .note(_, _, _, text) = f else { return XCTFail() }
+        XCTAssertEqual(text.utf8.count, 120)
+        XCTAssertEqual(HelpFrame(f.encoded()), f)
+    }
+
+    func testImpossiblePositionsAreRejected() {
+        var d = HelpFrame.position(unit: 1, request: 1, latitudeE7: 0, longitudeE7: 0, accuracy: 1).encoded()
+        d.replaceSubrange(7..<11, with: withUnsafeBytes(of: Int32(950_000_000).littleEndian) { Data($0) })
+        XCTAssertNil(HelpFrame(d))
+    }
+
+    func testResponderSeesNotesAndPosition() {
+        var inbox = ResponderInbox()
+        let t = Date()
+        let key = IncomingRequest.Key(unit: 1, request: 2)
+        inbox.receive(.call(unit: 1, request: 2, colour: .red, sentAt: 0), via: .internet, at: t)
+        XCTAssertEqual(inbox.receive(.note(unit: 1, request: 2, part: 2, text: "second"), via: .internet, at: t), .updated(key))
+        inbox.receive(.note(unit: 1, request: 2, part: 1, text: "first"), via: .internet, at: t)
+        inbox.receive(.position(unit: 1, request: 2, latitudeE7: 554_000_000, longitudeE7: -45_000_000, accuracy: 15), via: .internet, at: t)
+        XCTAssertEqual(inbox.requests[key]?.orderedNotes, ["first", "second"])
+        XCTAssertEqual(inbox.requests[key]?.position?.latitude ?? 0, 55.4, accuracy: 1e-9)
+    }
+
+    func testPartsAreNumberedAcrossCategoriesAndNotes() {
+        var r = OutgoingRequest(unit: 1, number: 1, colour: .red, createdAt: Date())
+        XCTAssertEqual(r.add(.fallen), .followUp(unit: 1, request: 1, part: 1, category: .fallen))
+        XCTAssertEqual(r.addNote("hip"), .note(unit: 1, request: 1, part: 2, text: "hip"))
+        XCTAssertEqual(r.notes, ["hip"])
+    }
+}

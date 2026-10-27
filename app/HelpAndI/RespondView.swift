@@ -33,6 +33,11 @@ struct RequestRow: View {
             }
             Text(request.colour?.label ?? "Call for help (details still arriving)")
             ForEach(request.orderedCategories, id: \.self) { Text("• \($0.label)") }
+            ForEach(request.orderedNotes, id: \.self) { Text("“\($0)”").italic() }
+            if let p = request.position,
+               let url = URL(string: "https://maps.apple.com/?ll=\(p.latitude),\(p.longitude)&q=Help%26I%20caller") {
+                Link("Open their location in Maps (within \(Int(p.accuracy)) m)", destination: url)
+            }
             Text("Heard by " + request.heardOn.map { $0 == .mesh ? "local radio" : ($0 == .internet ? "internet" : "text") }.sorted().joined(separator: " and "))
                 .font(.footnote).foregroundStyle(.secondary)
             if request.isAcknowledged {

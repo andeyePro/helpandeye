@@ -33,6 +33,10 @@ public enum HelpFrame: Equatable, Sendable {
     case ack(unit: UInt32, request: UInt16, responder: UInt16, ackedAt: UInt32, signature: Data)
     /// A responder's availability changed while there was no internet (rota, app spec).
     case availability(responder: UInt16, from: UInt32, until: UInt32, available: Bool)
+    /// Short text the caller typed. Personal content: never on the group channel (decision 12).
+    case note(unit: UInt32, request: UInt16, part: UInt8, text: String)
+    /// Where the caller is, in degrees times 10^7, with accuracy in metres. Personal content too.
+    case position(unit: UInt32, request: UInt16, latitudeE7: Int32, longitudeE7: Int32, accuracy: UInt16)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -44,7 +48,27 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5 }
+    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7 }
+
+    /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
+    public static let maxNoteBytes = 120
+
+    /// Whether this frame may go on the shared group channel. Notes and positions may not: they
+    /// travel only end-to-end encrypted to the group key over the internet, or (later) as direct
+    /// messages under each responder's own key (decision 12).
+    public var mayGoOnGroupChannel: Bool {
+        switch self { case .note, .position: false; default: true }
+    }
+
+    /// Makes a note, cutting the text at a character boundary to fit.
+    public static func note(unit: UInt32, request: UInt16, part: UInt8, typed: String) -> HelpFrame {
+        var text = ""
+        for ch in typed.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if (text + String(ch)).utf8.count > maxNoteBytes { break }
+            text.append(ch)
+        }
+        return .note(unit: unit, request: request, part: part, text: text)
+    }
 
     public func encoded() -> Data {
         var w = ByteWriter()
@@ -60,6 +84,11 @@ public enum HelpFrame: Equatable, Sendable {
             w.u8(Self.header(.availability)); w.u16(responder); w.u32(from); w.u32(until); w.u8(available ? 1 : 0)
         case let .noticeAck(notice, by, at):
             w.u8(Self.header(.noticeAck)); w.u8(notice.rawValue); w.u16(by); w.u32(at)
+        case let .note(unit, request, part, text):
+            let bytes = Data(text.utf8.prefix(Self.maxNoteBytes))
+            w.u8(Self.header(.note)); w.u32(unit); w.u16(request); w.u8(part); w.u8(UInt8(bytes.count)); w.bytes(bytes)
+        case let .position(unit, request, lat, lon, accuracy):
+            w.u8(Self.header(.position)); w.u32(unit); w.u16(request); w.i32(lat); w.i32(lon); w.u16(accuracy)
         }
         return w.data
     }
@@ -85,6 +114,14 @@ public enum HelpFrame: Equatable, Sendable {
         case .noticeAck:
             guard let n = r.u8().flatMap(Notice.init), let by = r.u16(), let at = r.u32() else { return nil }
             self = .noticeAck(notice: n, by: by, at: at)
+        case .note:
+            guard let unit = r.u32(), let req = r.u16(), let part = r.u8(), let len = r.u8(), Int(len) <= Self.maxNoteBytes,
+                  let bytes = r.take(Int(len)), let text = String(bytes: bytes, encoding: .utf8) else { return nil }
+            self = .note(unit: unit, request: req, part: part, text: text)
+        case .position:
+            guard let unit = r.u32(), let req = r.u16(), let lat = r.i32(), let lon = r.i32(), let acc = r.u16(),
+                  abs(lat) <= 900_000_000, abs(lon) <= 1_800_000_000 else { return nil }
+            self = .position(unit: unit, request: req, latitudeE7: lat, longitudeE7: lon, accuracy: acc)
         }
         guard r.isAtEnd else { return nil }
     }

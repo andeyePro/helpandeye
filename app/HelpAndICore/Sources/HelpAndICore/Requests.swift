@@ -30,7 +30,10 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     public let createdAt: Date
     public private(set) var routes: [Route: RouteState] = [:]
     public private(set) var categories: [CallCategory] = []
+    public private(set) var notes: [String] = []
     public private(set) var acknowledgedBy: [UInt16] = []
+    /// Follow-ups, notes and positions share one numbering, so each part is distinct.
+    private var parts: UInt8 = 0
 
     public init(unit: UInt32, number: UInt16, colour: Colour, createdAt: Date) {
         self.unit = unit; self.number = number; self.colour = colour; self.createdAt = createdAt
@@ -41,7 +44,18 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     /// Returns the follow-up frame to send, numbered after any categories already added.
     public mutating func add(_ category: CallCategory) -> HelpFrame {
         categories.append(category)
-        return .followUp(unit: unit, request: number, part: UInt8(min(categories.count, 255)), category: category)
+        return .followUp(unit: unit, request: number, part: nextPart(), category: category)
+    }
+
+    public mutating func addNote(_ typed: String) -> HelpFrame {
+        let frame = HelpFrame.note(unit: unit, request: number, part: nextPart(), typed: typed)
+        if case let .note(_, _, _, text) = frame { notes.append(text) }
+        return frame
+    }
+
+    private mutating func nextPart() -> UInt8 {
+        parts = parts == 255 ? 255 : parts + 1
+        return parts
     }
 
     /// How far a responder's clock may be behind the caller's.
@@ -85,8 +99,17 @@ public struct IncomingRequest: Equatable, Sendable, Identifiable, Codable {
     public internal(set) var categories: [UInt8: CallCategory] = [:]
     public internal(set) var heardOn: Set<Route> = []
     public internal(set) var acknowledgedBy: [UInt16] = []
+    public internal(set) var notes: [UInt8: String] = [:]
+    public internal(set) var position: Position?
+
+    public struct Position: Equatable, Sendable, Codable {
+        public let latitude: Double
+        public let longitude: Double
+        public let accuracy: Double
+    }
 
     public var isAcknowledged: Bool { !acknowledgedBy.isEmpty }
+    public var orderedNotes: [String] { notes.keys.sorted().compactMap { notes[$0] } }
     public var orderedCategories: [CallCategory] { categories.keys.sorted().compactMap { categories[$0] } }
 }
 
@@ -143,6 +166,25 @@ public struct ResponderInbox: Sendable, Codable {
             r.heardOn.insert(route)
             requests[key] = r
             return .updated(key)
+        case let .note(unit, request, part, text):
+            let key = IncomingRequest.Key(unit: unit, request: request)
+            var r = requests[key] ?? IncomingRequest(key: key, colour: nil, firstHeardAt: now)
+            let isNew = requests[key] == nil && !r.isAcknowledged
+            let changed = r.notes[part] != text
+            r.notes[part] = text
+            r.heardOn.insert(route)
+            requests[key] = r
+            return isNew ? .new(key) : (changed ? .updated(key) : .duplicate)
+        case let .position(unit, request, lat, lon, accuracy):
+            let key = IncomingRequest.Key(unit: unit, request: request)
+            var r = requests[key] ?? IncomingRequest(key: key, colour: nil, firstHeardAt: now)
+            let isNew = requests[key] == nil && !r.isAcknowledged
+            let p = IncomingRequest.Position(latitude: Double(lat) / 1e7, longitude: Double(lon) / 1e7, accuracy: Double(accuracy))
+            let changed = r.position != p
+            r.position = p
+            r.heardOn.insert(route)
+            requests[key] = r
+            return isNew ? .new(key) : (changed ? .updated(key) : .duplicate)
         case .availability, .noticeAck:
             return .ignored
         }
