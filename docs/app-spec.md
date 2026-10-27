@@ -124,8 +124,8 @@ Decided for now, following common practice for end-to-end encrypted apps (Martin
 
 - The coordinator, or the member from a new phone, removes the lost phone. The relays refuse it at
   once.
-- The coordinator's app then makes new group secrets and sends them to every remaining member,
-  encrypted to each phone's key. Each app writes the new channel secret into its board the next
+- The coordinator's app then makes new group secrets and hands them to every remaining member as
+  an update code, shown as a QR code or sent as a message, encrypted to that phone's key. Each app writes the new channel secret into its board the next
   time it connects. For seven days, phones listen and send on both the old and the new
   channel and keys, so members who have not scanned their update still hear calls and
   acknowledgements. The relay refuses the removed phone at once, so nothing personal reaches it.
