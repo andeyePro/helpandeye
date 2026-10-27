@@ -4,6 +4,10 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Check-in schedule logic** - `CheckIn.swift` works out when an opt-in check-in was missed:
+  agreed times with a grace window, a green press only counting inside its window, nothing missed
+  before the schedule started, and times kept on the wall clock across the October and March clock
+  changes (a test caught 09:00 turning into 08:00 on 25 October). Wiring it into the app follows.
 - [x] **Internet route through a relay** - `relay/` is a Cloudflare Worker (free tier, one SQLite
   Durable Object per group) that stores and forwards messages sealed on the phones with the group
   key, so it holds ciphertext and public keys only. Every request is signed with the phone's

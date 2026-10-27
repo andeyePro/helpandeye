@@ -8,7 +8,7 @@ public enum Colour: UInt8, Sendable, CaseIterable, Codable {
 /// Follow-up categories a caller can add after the first press. Codes, not text, so they fit on
 /// the group channel without carrying personal detail (decision 12).
 public enum CallCategory: UInt8, Sendable, CaseIterable, Codable {
-    case fallen = 1, unwell = 2, lockedOut = 3, powerCut = 4, needCompany = 5, other = 99
+    case fallen = 1, unwell = 2, lockedOut = 3, powerCut = 4, needCompany = 5, missedCheckIn = 6, other = 99
 }
 
 /// Things a coordinator is told about and must acknowledge.
