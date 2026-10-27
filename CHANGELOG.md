@@ -4,6 +4,22 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-27
 
+- [x] **Fixes from the seventh code review, on the radio path** - a seventh independent review, of the
+  path a press takes to the radio, found 1 blocker and 6 major issues. Fixed: looking for boxes
+  while one was connected stopped calls going out and incoming ones being fetched until the app
+  restarted (looking is now separate from the link, and stops after twenty seconds); a box that
+  ran out of channel slots during a changeover never recovered, and joining a group during the
+  handshake left the box unusable (setup now re-runs whenever the keys change with the link up, one
+  run at a time, and readiness is worked out afresh each time; the slot logic is `ChannelPlan` in
+  HelpAndICore, tested, including a full box recovering); after a drop the app now reconnects at
+  once, which iOS honours while suspended, with a pause only after failures; the link is rebuilt
+  after the system relaunches the app and dropped when Bluetooth is switched off; the box's code is
+  shown before pairing, from the keychain; a send's channels are taken before anything is awaited,
+  so the airtime counted is what went on air; a box already connected when you join a group is
+  announced at once; a wrong pairing code now drops the link so it tries again; a failed write is
+  reported at once as never written; and a slot is listened on as soon as it is set up. Answers to
+  new boxes held back by the one-a-minute limit now go when the minute is up, rather than being
+  lost. 152 core tests; manual checks 28 to 32.
 - [x] **The Bluetooth command queue is tested** - the queue that puts a call on the radio lived in
   the app, where no machine test ran it. It is now `CommandQueue` in HelpAndICore, with six tests:
   nothing is written before the link is up, one command at a time, a call for help goes ahead of

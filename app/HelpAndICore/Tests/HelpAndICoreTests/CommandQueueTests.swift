@@ -90,6 +90,22 @@ private func channelInfo(_ r: MeshCore.Response) -> Bool {
         XCTAssertEqual(down, .notWritten)
     }
 
+    func testAFailedWriteIsNotWrittenAtOnceAndTheNextCommandGoes() async {
+        let q = queue(timeout: 5)
+        q.linkUp()
+        let first = Task { @MainActor in await q.send(self.call, expect: okOrError) }
+        await settle()
+        let second = Task { @MainActor in await q.send(.syncNextMessage, expect: { if case .noMoreMessages = $0 { return true }; return false }) }
+        await settle()
+        q.writeFailed()
+        let f = await first.value
+        XCTAssertEqual(f, .notWritten)
+        XCTAssertEqual(written, [0x3E, 0x0A], "the next command went without waiting out the timeout")
+        q.receive(.noMoreMessages)
+        let r2 = await second.value
+        XCTAssertEqual(r2, .reply(.noMoreMessages))
+    }
+
     func testALinkDropAnswersEverythingWithNothingOnce() async {
         let q = queue()
         q.linkUp()

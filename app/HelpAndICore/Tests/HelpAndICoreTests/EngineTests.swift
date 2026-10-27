@@ -737,9 +737,7 @@ final class RelayModel {
         join(late, call: false, respond: true)
         await air.run()
         air.directSends = []
-        clock.now = clock.now.addingTimeInterval(120)  // joining takes more than a minute
-        await late.engine.boxReady()
-        await air.run()
+        await advance(120)  // a held-back answer goes once the minute is up
         XCTAssertTrue(air.directSends.contains { if case .checkIns? = MeshText.decode($0) { return true }; return false })
         XCTAssertNotNil(late.engine.activity.checkInWatch.callers[caller.engine.me!.unit!])
     }
@@ -757,6 +755,15 @@ final class RelayModel {
         await air.run()
         let fromLate = air.groupSends.filter { if case let .board(m, _, _) = $0 { return m == late.engine.saved!.me }; return false }
         XCTAssertLessThanOrEqual(fromLate.count, 2, "its own announcement and at most one answer, not one per box")
+    }
+
+    func testABoxAlreadyConnectedIsAnnouncedOnJoining() async {
+        let late = Phone(air: air, clock: clock)
+        air.groupSends = []
+        join(late, call: false, respond: true)
+        await air.run()
+        XCTAssertTrue(air.groupSends.contains { if case let .board(m, _, _) = $0 { return m == late.engine.saved!.me }; return false })
+        XCTAssertNotNil(caller.engine.activity.boardKeys[late.engine.saved!.me])
     }
 
     func testOnlyRespondersCanBePromoted() async {

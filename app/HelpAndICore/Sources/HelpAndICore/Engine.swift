@@ -140,6 +140,7 @@ public final class HelpEngine: ObservableObject {
     private var ackAttempt: [IncomingRequest.Key: UUID] = [:]
     private var lastMembershipRepeat: Date?
     private var answeredBoxes: Set<UInt16> = []
+    private var boxesToAnswer: Set<UInt16> = []
     /// Number blocks of coordinators just removed, to re-list the people they added.
     private var previousBlocks: [UInt16: UInt16] = [:]
     /// The member list the relay last took from this phone, and when; and the last attempt.
@@ -285,6 +286,11 @@ public final class HelpEngine: ObservableObject {
         let listening = group?.listening(at: now()).map(\.channelSecret) ?? []
         if mesh.secrets != listening { mesh.secrets = listening }
         if activity.airtime == nil { bandChanged(mesh.radio?.band) }
+        // A box already connected when the phone joins a group is announced now, not at the next
+        // reconnect, so direct messages work both ways.
+        if mesh.isReady, let me = saved?.me, let key = mesh.boxPublicKey, activity.boardKeys[me] != key {
+            spawn { await self.boxReady() }
+        }
         relay.configure(group: group, identity: identity)
         publishMembersIfDue()
         checkGaps()
@@ -447,6 +453,17 @@ public final class HelpEngine: ObservableObject {
 
     // MARK: The box
 
+    private func answerNewBoxesIfDue() async {
+        guard !boxesToAnswer.isEmpty, now().timeIntervalSince(lastBoxAnswer ?? .distantPast) > 60,
+              let mine = mesh.boxPublicKey, let me = saved?.me else { return }
+        let members = boxesToAnswer
+        boxesToAnswer = []
+        answeredBoxes.formUnion(members)
+        lastBoxAnswer = now()
+        await sendToAll(.signedBoard(member: me, publicKey: mine, identity: identity, group: groupID))
+        for m in members.sorted() { await shareCheckIns(to: m) }
+    }
+
     /// Tells the group which box is this phone's, and adds the other members' boxes as contacts.
     public func boxReady() async {
         guard let myNumber = saved?.me, let key = mesh.boxPublicKey else { return }
@@ -468,6 +485,7 @@ public final class HelpEngine: ObservableObject {
         if me?.role == .coordinator { spawn { await self.repeatMembershipIfDue() } }
         pruneInbox()
         publishMembersIfDue()
+        if !boxesToAnswer.isEmpty { spawn { await self.answerNewBoxesIfDue() } }
         checkResends()
         // Repeat this caller's check-ins once a day, for responders who missed them.
         if var s = saved, s.checkInSince != nil, now().timeIntervalSince(s.checkInSharedAt ?? .distantPast) > 86_400 {
@@ -648,14 +666,10 @@ public final class HelpEngine: ObservableObject {
             spawn {
                 await self.mesh.addContact(key, name: "Help&I \(member)")
                 // A box this phone has not heard before may not know this phone's box either (it
-                // joined later): answer with ours, once per new box, then tell it our check-ins.
-                if let mine = self.mesh.boxPublicKey, let me = self.saved?.me, !self.answeredBoxes.contains(member),
-                   self.now().timeIntervalSince(self.lastBoxAnswer ?? .distantPast) > 60 {
-                    self.answeredBoxes.insert(member)
-                    self.lastBoxAnswer = self.now()
-                    await self.sendToAll(.signedBoard(member: me, publicKey: mine, identity: self.identity, group: self.groupID))
-                }
-                await self.shareCheckIns(to: member)
+                // joined later): answer with ours, then tell it our check-ins. One answer a minute
+                // covers every new box, so an answer due inside the minute waits for it, not lost.
+                if !self.answeredBoxes.contains(member) { self.boxesToAnswer.insert(member) }
+                await self.answerNewBoxesIfDue()
             }
             return
         case .checkIns:

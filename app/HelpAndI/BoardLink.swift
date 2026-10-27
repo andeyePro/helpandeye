@@ -1,23 +1,25 @@
 import CoreBluetooth
 import Foundation
 import HelpAndICore
+import UIKit
 
 /// The Bluetooth link to a Heltec board running MeshCore's standard companion firmware.
 ///
-/// Commands go one at a time and wait for their reply, as the companion protocol requires.
-/// Incoming Help&I datagrams on the group's channel are handed to `onFrame`.
+/// Commands go one at a time and wait for their reply, as the companion protocol requires
+/// (`CommandQueue` in HelpAndICore). Incoming Help&I datagrams on the group's channel are handed
+/// to `onFrame`.
 @MainActor
 final class BoardLink: NSObject, ObservableObject {
-    enum State: Equatable { case off, unauthorised, searching, connecting, ready, failed(String) }
+    enum State: Equatable { case off, unauthorised, connecting, ready, failed(String) }
 
     @Published private(set) var state: State = .off
+    /// Looking for boxes nearby. Separate from `state`, so looking never takes a connected box off
+    /// the air.
+    @Published private(set) var searching = false
     @Published private(set) var found: [CBPeripheral] = []
     @Published private(set) var selfInfo: MeshCore.SelfInfo?
     @Published private(set) var batteryMillivolts: Int?
     @Published private(set) var helpChannel: UInt8?
-    /// The Bluetooth code this app set on the connected box, kept in the keychain and shown in the
-    /// Box tab, so it is never lost even if the app closes before anyone sees it.
-    @Published private(set) var boxPin: UInt32?
     /// The previous channel during a changeover after a removal. Sends go on both, so members who
     /// have not scanned their update yet still hear calls and acknowledgements.
     private var previousChannel: UInt8?
@@ -26,23 +28,31 @@ final class BoardLink: NSObject, ObservableObject {
     /// A direct text message: the sender's key prefix (6 bytes) and the text.
     var onText: ((Data, String) -> Void)?
     /// The channel secrets to listen on: the current one first, then the previous one while boards
-    /// move to new secrets.
-    var secrets: [Data] = [] { didSet { if state == .ready, secrets != oldValue { Task { await setUpChannels() } } } }
+    /// move to new secrets. Whenever they change with the link up, the box is set up again.
+    var secrets: [Data] = [] { didSet { if secrets != oldValue, commands.isUp { Task { await setUpChannels() } } } }
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
     private var rx: CBCharacteristic?
     private var listenChannels: Set<UInt8> = []
-    /// One command at a time, calls for help first (HelpAndICore, tested there).
+    /// One command at a time, calls for help first.
     private var commands: CommandQueue!
     private var syncing = false
     private var needsDrain = false
+    private var settingUp = false
+    private var setUpAgain = false
+    /// Grows only after failed connection attempts; a dropped link reconnects at once.
     private var backoff: TimeInterval = 1
 
     override init() {
         super.init()
         commands = CommandQueue { [weak self] data in
-            guard let self, let p = self.peripheral, let rx = self.rx else { return }
+            guard let self else { return }
+            guard let p = self.peripheral, let rx = self.rx else {
+                // Never reached the box: say so at once, rather than waiting out the timeout.
+                Task { @MainActor in self.commands.writeFailed() }
+                return
+            }
             p.writeValue(data, for: rx, type: .withResponse)
         }
         // After a timeout the queue has stopped; reconnecting starts the conversation afresh.
@@ -56,57 +66,79 @@ final class BoardLink: NSObject, ObservableObject {
 
     var radio: RadioSettings? { selfInfo?.radio }
 
+    /// The Bluetooth code this app set on a box, from the keychain, so it can be shown before
+    /// pairing, which is when it is needed.
+    func pin(for id: UUID?) -> UInt32? { id.flatMap(Store.boxPin) }
+    var boxPin: UInt32? { pin(for: Store.boardID ?? peripheral?.identifier) }
+
     func startSearch() {
         guard central.state == .poweredOn else { return }
         found = []
-        state = .searching
+        searching = true
         central.scanForPeripherals(withServices: [CBUUID(string: MeshCore.serviceUUID)])
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(20))
+            self?.stopSearch()
+        }
+    }
+
+    func stopSearch() {
+        guard searching else { return }
+        central.stopScan()
+        searching = false
     }
 
     func connect(_ p: CBPeripheral) {
-        central.stopScan()
-        if let old = peripheral, old !== p { peripheral = nil; commands.linkDown(); central.cancelPeripheralConnection(old) }
+        stopSearch()
+        if let old = peripheral, old !== p { peripheral = nil; tearDown(); central.cancelPeripheralConnection(old) }
         Store.boardID = p.identifier
         peripheral = p
         p.delegate = self
+        backoff = 1
         state = .connecting
-        central.connect(p)
+        if p.state == .connected { p.discoverServices([CBUUID(string: MeshCore.serviceUUID)]) } else { central.connect(p) }
     }
 
     func forget() {
         let p = peripheral
         Store.boardID = nil
-        peripheral = nil; rx = nil; selfInfo = nil; helpChannel = nil
-        commands.linkDown()
+        peripheral = nil
+        tearDown()
+        selfInfo = nil
         if let p { central.cancelPeripheralConnection(p) }
         state = .off
+    }
+
+    /// The link is gone: nothing in flight will be answered, and nothing is listened to.
+    private func tearDown() {
+        rx = nil; helpChannel = nil; previousChannel = nil; listenChannels = []
+        commands.linkDown()
     }
 
     /// Adds another member's box as a contact, so direct messages can go to it.
     func addContact(_ key: Data, name: String) async {
         guard state == .ready, key.count == 32, key != selfInfo?.publicKey else { return }
-        _ = await run(.addContact(publicKey: key, name: name), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false })
+        _ = await run(.addContact(publicKey: key, name: name), expect: okOrError)
     }
 
     /// Sends a direct message, which MeshCore encrypts to the receiving box's own key.
     func sendText(_ text: String, to key: Data) async -> MeshSendResult {
         guard state == .ready, key.count == 32 else { return .refused("Box not connected") }
         let cmd = MeshCore.Command.sendText(publicKeyPrefix: key.prefix(6), text: text, sentAt: UInt32(Date().timeIntervalSince1970), attempt: 0)
-        switch await commands.send(cmd, expect: { if case .sent = $0 { return true }; if case .error = $0 { return true }; return false }) {
-        case .reply(.sent): return .sent
-        case let .reply(.error(code)): return .refused("Box refused it (error \(code))")
-        case .reply, .timedOut: return .unknown("Box did not answer")
-        case .notWritten: return .refused("Box not connected")
-        }
+        let isSent: (MeshCore.Response) -> Bool = { if case .sent = $0 { return true }; return false }
+        return outcome(await commands.send(cmd, expect: { isSent($0) || self.okOrError($0) }), isSent: isSent)
     }
 
-    /// Sends a Help&I frame as a datagram on the group's channel.
+    /// Sends a Help&I frame as a datagram on the group's channel, and on the previous one during a
+    /// changeover. The channels are taken once, before anything is awaited, so the packets sent
+    /// are exactly the ones the engine counted (`channelsPerSend`).
     func send(_ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
         guard state == .ready, let ch = helpChannel else { return .refused("Box not connected") }
+        let old = previousChannel.flatMap { $0 == ch ? nil : $0 }
         let result = await sendOn(ch, frame, urgent: urgent)
-        guard let old = previousChannel, old != ch else { return result }
-        // Sent if either channel took it, so airtime is never given back for a packet on air.
+        guard let old else { return result }
         let second = await sendOn(old, frame, urgent: urgent)
+        // Sent if either channel took it, so airtime is never given back for a packet on air.
         return result == .sent || second == .sent ? .sent : result
     }
 
@@ -115,16 +147,24 @@ final class BoardLink: NSObject, ObservableObject {
 
     private func sendOn(_ ch: UInt8, _ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
         let cmd = MeshCore.Command.sendChannelData(index: ch, dataType: HelpFrame.meshDataType, payload: frame.encoded())
-        // Only a command never written certainly did not go on air; a timeout may have.
-        switch await commands.send(cmd, urgent: urgent, expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
-        case .reply(.ok): return .sent
+        return outcome(await commands.send(cmd, urgent: urgent, expect: okOrError), isSent: { $0 == .ok })
+    }
+
+    /// Only a command never written certainly did not go on air; a timeout may have.
+    private func outcome(_ o: CommandQueue.Outcome, isSent: (MeshCore.Response) -> Bool) -> MeshSendResult {
+        switch o {
+        case let .reply(r) where isSent(r): return .sent
         case let .reply(.error(code)): return .refused("Box refused it (error \(code))")
         case .reply, .timedOut: return .unknown("Box did not answer")
         case .notWritten: return .refused("Box not connected")
         }
     }
 
-    // MARK: Command queue
+    private func okOrError(_ r: MeshCore.Response) -> Bool {
+        if case .ok = r { return true }
+        if case .error = r { return true }
+        return false
+    }
 
     private func run(_ cmd: MeshCore.Command, urgent: Bool = false, expect: @escaping (MeshCore.Response) -> Bool) async -> MeshCore.Response? {
         await commands.run(cmd, urgent: urgent, expect: expect)
@@ -137,70 +177,70 @@ final class BoardLink: NSObject, ObservableObject {
             state = .failed("Box did not answer"); return
         }
         selfInfo = info
-        _ = await run(.setDeviceTime(UInt32(Date().timeIntervalSince1970)), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false })
+        _ = await run(.setDeviceTime(UInt32(Date().timeIntervalSince1970)), expect: okOrError)
         await setUpChannels()
         await refreshBattery()
-        // Ready only if the group's channel is on the board and the link is still up; otherwise
-        // the failure from setUpChannels stays on screen.
-        guard rx != nil, helpChannel != nil || secrets.isEmpty else {
-            if case .failed = state {} else { state = .failed("Box is not set up for this group") }
-            return
-        }
-        state = .ready
-        backoff = 1
-        await drainMessages()
+        if state == .ready { backoff = 1; await drainMessages() }
     }
 
-    /// Finds the group's channel on the board, or writes it into the first free slot.
+    /// Sets the box up for the group: the Bluetooth code, then the channels. One run at a time; a
+    /// change of secrets during a run starts another when it ends. Afterwards the box is ready only
+    /// if the group's channel is on it.
     private func setUpChannels() async {
+        if settingUp { setUpAgain = true; return }
+        settingUp = true
+        defer { settingUp = false }
+        repeat {
+            setUpAgain = false
+            await setUpOnce()
+        } while setUpAgain
+        guard commands.isUp else { return }
+        if helpChannel != nil || secrets.isEmpty {
+            if state != .ready { state = .ready; await drainMessages() }
+        } else {
+            state = .failed("No free channel on the box")
+        }
+    }
+
+    private func setUpOnce() async {
         guard case .deviceInfo(let dev)? = await run(.deviceQuery, expect: { if case .deviceInfo = $0 { return true }; return false }) else { return }
         // A box without a screen uses MeshCore's fixed code, 123456, the same on every box, so a
         // stranger's phone could pair. Replace it with a random one. (A box with a screen shows a
-        // fresh random code at each start, and reports 0; that is left alone.) The code is saved
-        // before it is sent, so a dropped link cannot leave a code nobody knows.
-        if let id = peripheral?.identifier {
-            var sent: UInt32?
-            if dev.blePin == 123_456 {
-                let pin = Store.boxPin(id) ?? UInt32.random(in: 100_000...999_999)
-                // Only send a code that is safely kept; show it only once the box has taken it.
-                if Store.setBoxPin(pin, for: id),
-                   case .ok? = await run(.setPin(pin), expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
-                    sent = pin
-                }
+        // fresh random code at each start, and reports 0; that is left alone.) Only a code safely
+        // kept is sent.
+        if dev.blePin == 123_456, let id = peripheral?.identifier {
+            let pin = Store.boxPin(id) ?? UInt32.random(in: 100_000...999_999)
+            if Store.setBoxPin(pin, for: id) {
+                _ = await run(.setPin(pin), expect: okOrError)
+                objectWillChange.send()
             }
-            boxPin = sent ?? Store.boxPin(id).flatMap { $0 == dev.blePin ? $0 : nil }
         }
-        var slots: [UInt8: Data] = [:]
-        var free: [UInt8] = []
+        var slots: [ChannelPlan.Slot] = []
         for i in 0..<UInt8(clamping: dev.maxChannels) {
             if case let .channelInfo(index, name, secret)? = await run(.getChannel(index: i), expect: {
                 if case let .channelInfo(index, _, _) = $0 { return index == i }; if case .error = $0 { return true }; return false
             }), index == i {
-                slots[i] = secret
-                let empty = name.isEmpty && !secret.contains(where: { $0 != 0 })
-                // Slots this app wrote for keys the group no longer uses are free again.
-                let stale = name.hasPrefix("Help&I") && !secrets.contains(secret)
-                if empty || stale { free.append(i) }
+                slots.append(.init(index: i, name: name, secret: secret))
             }
         }
-        var listen: Set<UInt8> = []
-        var current: UInt8?
-        var previous: UInt8?
-        for (n, secret) in secrets.enumerated() {
-            var slot = slots.first { $0.value == secret }?.key
-            if slot == nil, !free.isEmpty {
-                let i = free.removeFirst()
-                if case .ok? = await run(.setChannel(index: i, name: n == 0 ? "Help&I" : "Help&I old", secret: secret),
-                                         expect: { if case .ok = $0 { return true }; if case .error = $0 { return true }; return false }) {
-                    slot = i
-                }
+        let want = secrets
+        let plan = ChannelPlan.plan(slots: slots, secrets: want)
+        // Listen on what is already there straight away, and on each slot as soon as it is written,
+        // so a drain running meanwhile never throws away a frame on a channel just set up.
+        let existing = Set(slots.filter { want.contains($0.secret) }.map(\.index))
+        listenChannels.formUnion(existing)
+        var written: Set<UInt8> = []
+        for w in plan.writes {
+            if case .ok? = await run(.setChannel(index: w.index, name: w.name, secret: w.secret), expect: okOrError) {
+                written.insert(w.index)
+                listenChannels.insert(w.index)
             }
-            if let slot { listen.insert(slot); if n == 0 { current = slot } else { previous = slot } }
         }
-        listenChannels = listen
-        helpChannel = current
-        previousChannel = previous
-        if current == nil, !secrets.isEmpty { state = .failed("No free channel on the box") }
+        let ok = { (i: UInt8?) in i.map { existing.contains($0) || written.contains($0) } ?? false }
+        helpChannel = ok(plan.current) ? plan.current : nil
+        previousChannel = ok(plan.previous) ? plan.previous : nil
+        // Stop listening on slots that no longer hold the group's channels, last.
+        listenChannels = Set([helpChannel, previousChannel].compactMap { $0 })
     }
 
     func refreshBattery() async {
@@ -239,8 +279,8 @@ final class BoardLink: NSObject, ObservableObject {
 
     private func handle(_ data: Data) {
         guard let r = MeshCore.Response(data) else { return }
-        // Before the handshake has found the group's channel, the handshake's own drain will fetch
-        // these; draining now would take them off the board and throw them away.
+        // Before the box is set up for the group, the setup's own drain will fetch these; draining
+        // now would take them off the board and throw them away.
         if case .messagesWaiting = r { if state == .ready { Task { await drainMessages() } }; return }
         if commands.receive(r) { return }
         if case let .channelData(ch, type, payload, _) = r, listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload) {
@@ -254,13 +294,17 @@ extension BoardLink: @preconcurrency CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ c: CBCentralManager) {
         switch c.state {
         case .poweredOn:
-            if let id = Store.boardID, let p = c.retrievePeripherals(withIdentifiers: [id]).first { connect(p) } else { state = .off }
-        case .unauthorized: state = .unauthorised
-        default: state = .off
+            if let p = peripheral ?? Store.boardID.flatMap({ c.retrievePeripherals(withIdentifiers: [$0]).first }) { connect(p) } else { state = .off }
+        case .unauthorized:
+            tearDown(); state = .unauthorised
+        default:
+            // Bluetooth off or reset: no callback may come for the link, so drop it here.
+            tearDown(); searching = false; state = .off
         }
     }
 
     func centralManager(_ c: CBCentralManager, willRestoreState dict: [String: Any]) {
+        // Relaunched in the background: the link is rebuilt when Bluetooth reports it is on.
         if let p = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first { peripheral = p; p.delegate = self }
     }
 
@@ -280,30 +324,32 @@ extension BoardLink: @preconcurrency CBCentralManagerDelegate {
             return
         }
         state = .failed("Could not connect to the box")
-        reconnectLater(p)
+        reconnect(p, afterFailure: true)
     }
 
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
         guard p === peripheral else { return }
-        rx = nil; helpChannel = nil
-        commands.linkDown()
+        tearDown()
         // Keep a failure on screen, so a box that connects but never answers is not shown as
         // "Connecting…" for ever.
         if case .failed = state {} else { state = .connecting }
-        reconnectLater(p)
+        reconnect(p, afterFailure: state != .connecting)
     }
 
-    /// Bluetooth links drop (decision 9). A pending connection stays open until the box is back in
-    /// range, even with the app in the background; failures that come back at once are retried
-    /// with a growing pause so they cannot drain the battery.
-    private func reconnectLater(_ p: CBPeripheral) {
+    /// Bluetooth links drop (decision 9). After a drop the app asks to reconnect at once: iOS keeps
+    /// the request open until the box is back in range, even with the app suspended, at no cost.
+    /// Only after a failure is there a pause, growing to a minute, kept alive in the background
+    /// for up to twenty seconds, so a box that fails at once cannot drain the battery.
+    private func reconnect(_ p: CBPeripheral, afterFailure: Bool) {
         guard Store.boardID == p.identifier else { return }
-        let wait = backoff
+        guard afterFailure else { central.connect(p); return }
+        let wait = min(backoff, 20)
         backoff = min(backoff * 2, 60)
+        let task = UIApplication.shared.beginBackgroundTask(withName: "Reconnect to the box")
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(wait))
-            guard let self, self.peripheral === p, Store.boardID == p.identifier else { return }
-            self.central.connect(p)
+            if let self, self.peripheral === p, Store.boardID == p.identifier { self.central.connect(p) }
+            UIApplication.shared.endBackgroundTask(task)
         }
     }
 }
@@ -322,9 +368,18 @@ extension BoardLink: @preconcurrency CBPeripheralDelegate {
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor ch: CBCharacteristic, error: Error?) {
-        guard error == nil, ch.isNotifying, rx != nil else { state = .failed("Box would not talk"); return }
+        guard error == nil, ch.isNotifying, rx != nil else {
+            // Often a wrong pairing code: drop the link, so the reconnect path tries again.
+            state = .failed("Box would not talk. If it asked for a code, check the code and try again.")
+            central.cancelPeripheralConnection(p)
+            return
+        }
         commands.linkUp()
         Task { await handshake() }
+    }
+
+    func peripheral(_ p: CBPeripheral, didWriteValueFor ch: CBCharacteristic, error: Error?) {
+        if error != nil { commands.writeFailed() }
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateValueFor ch: CBCharacteristic, error: Error?) {

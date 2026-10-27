@@ -90,3 +90,29 @@ final class MeshCoreTests: XCTestCase {
         XCTAssertNil(MeshCore.Response(Data()))
     }
 }
+
+final class ChannelPlanTests: XCTestCase {
+    let old = Data(repeating: 1, count: 16), new = Data(repeating: 2, count: 16), other = Data(repeating: 9, count: 16)
+    func slot(_ i: UInt8, _ name: String, _ secret: Data) -> ChannelPlan.Slot { .init(index: i, name: name, secret: secret) }
+
+    func testFindsOrWritesTheChannels() {
+        let p = ChannelPlan.plan(slots: [slot(0, "Public", other), slot(1, "", Data(count: 16)), slot(2, "Help&I", old)], secrets: [new, old])
+        XCTAssertEqual(p.writes, [.init(index: 1, name: "Help&I", secret: new)])
+        XCTAssertEqual(p.current, 1); XCTAssertEqual(p.previous, 2)
+    }
+
+    func testAFullBoxRecoversWhenTheChangeoverEnds() {
+        let full = [slot(0, "Public", other), slot(1, "Help&I", old)]
+        let during = ChannelPlan.plan(slots: full, secrets: [new, old])
+        XCTAssertNil(during.current, "no room for the new channel while the old one is still needed")
+        let after = ChannelPlan.plan(slots: full, secrets: [new])
+        XCTAssertEqual(after.writes, [.init(index: 1, name: "Help&I", secret: new)], "the old slot is reused")
+        XCTAssertEqual(after.current, 1)
+    }
+
+    func testOtherChannelsAreNeverOverwritten() {
+        let p = ChannelPlan.plan(slots: [slot(0, "Public", other), slot(1, "Family", Data(repeating: 5, count: 16))], secrets: [new])
+        XCTAssertTrue(p.writes.isEmpty)
+        XCTAssertNil(p.current)
+    }
+}

@@ -229,3 +229,41 @@ Pass: phone B's notification reads "<name>: come now", not the relay's generic "
 2. On phone B, still out of range of C and D, remove phone C. Bring phone B back only near phone A.
 
 Pass: within two days (move the clock on to check sooner), phone D shows a notice that the coordinator who invited it has left and the others may not know it is in the group, asking it to check with another coordinator. With phone B in range of phone D instead, phone D is confirmed within a day and shows no notice.
+
+## 28. Looking for boxes leaves the connected box alone
+
+1. With phone B connected to its box and its internet off, open Box and tap Look for boxes. Choose nothing and leave the Box tab.
+2. On phone A, press Come now.
+
+Pass: phone B's Box tab still says "Connected", and phone B alerts for the call. Looking stops by itself after about twenty seconds.
+
+## 29. The box reconnects with the phone locked
+
+1. Lock phone B, with Help&I running and its internet off.
+2. Switch phone B's box off and on three times in quick succession, then off for two minutes, then on.
+3. On phone A, press Come now.
+
+Pass: without touching phone B, it alerts for the call over the local radio.
+
+## 30. After the app is ended by the system, and after Bluetooth is switched off
+
+1. With phone B connected, stop Help&I from Xcode (not by swiping it away), then press Come now on phone A.
+2. On phone B, switch Bluetooth off and on in Control Centre, then press Come now on phone A again.
+
+Pass: phone B relaunches, reaches "Connected" and alerts the first time; after Bluetooth comes back it reconnects and alerts the second time.
+
+## 31. The Bluetooth code before pairing, and a wrong code
+
+With a box without a screen:
+
+1. After Help&I has set the box's code (section 2), forget the box in iPhone Settings, Bluetooth. Open Help&I's Box tab before pairing again.
+2. Pair, entering a wrong code once, then the right one.
+
+Pass: the Box tab shows the box's code before the pairing prompt appears (and next to the box under Boxes nearby). After the wrong code the Box tab says the box would not talk and to check the code; with the right code it connects without restarting the app.
+
+## 32. A full box during a changeover
+
+1. Fill every channel slot on phone B's box with MeshCore's own app, leaving one slot holding the group's channel.
+2. On the first coordinator's phone, remove a phone. Then move the clock on past the seven-day changeover.
+
+Pass: during the changeover phone B's Box tab says there is no free channel; afterwards, without restarting, it reuses the old slot and says "Connected", and calls reach it.

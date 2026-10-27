@@ -83,6 +83,15 @@ public final class CommandQueue {
 
     public var isIdle: Bool { pending == nil && waiting.isEmpty }
 
+    /// The write for the command in flight failed, so it never reached the box: it gets
+    /// `notWritten` at once, rather than waiting out the timeout, and the next command goes.
+    public func writeFailed() {
+        guard let p = pending else { return }
+        pending = nil
+        p.done.resume(returning: .notWritten)
+        pump()
+    }
+
     private func pump() {
         guard isUp, pending == nil, !waiting.isEmpty else { return }
         let job = waiting.removeFirst()

@@ -31,9 +31,17 @@ struct BoxView: View {
                     }
                 }
                 Section("Boxes nearby") {
-                    Button("Look for boxes") { model.board.startSearch() }
+                    Button(model.board.searching ? "Looking…" : "Look for boxes") { model.board.startSearch() }
+                        .disabled(model.board.searching)
                     ForEach(model.board.found, id: \.identifier) { p in
-                        Button(p.name ?? "MeshCore box") { model.board.connect(p) }
+                        Button {
+                            model.board.connect(p)
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(p.name ?? "MeshCore box")
+                                if let pin = model.board.pin(for: p.identifier) { Text("Bluetooth code \(String(pin))").font(.footnote) }
+                            }
+                        }
                     }
                 }
                 if Store.boardID != nil {
@@ -48,7 +56,6 @@ struct BoxView: View {
         switch model.board.state {
         case .off: "No box connected. Calls can still go over the internet when it is set up."
         case .unauthorised: "Help&I is not allowed to use Bluetooth. Turn it on in Settings."
-        case .searching: "Looking for boxes…"
         case .connecting: "Connecting to your box…"
         case .ready: "Connected. Calls can go over the local radio."
         case let .failed(why): "Problem with the box: \(why)"
