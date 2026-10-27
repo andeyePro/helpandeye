@@ -28,6 +28,17 @@ final class MeshCoreTests: XCTestCase {
         XCTAssertThrowsError(try MeshCore.Command.setChannel(index: 2, name: "x", secret: Data(count: 32)).encoded())
     }
 
+    func testAddContactLayout() throws {
+        let key = Data((0..<32).map { UInt8($0) })
+        let d = try MeshCore.Command.addContact(publicKey: key, name: "Box 2").encoded()
+        XCTAssertEqual(d.count, 144)
+        XCTAssertEqual(d.first, 0x09)
+        XCTAssertEqual(d.subdata(in: 1..<33), key)
+        XCTAssertEqual(d[33], 1, "chat contact"); XCTAssertEqual(d[35], 0xFF, "no path known yet")
+        XCTAssertEqual(d.subdata(in: 100..<105), Data("Box 2".utf8))
+        XCTAssertThrowsError(try MeshCore.Command.addContact(publicKey: Data(count: 6), name: "x").encoded())
+    }
+
     func testDatagramLimit() {
         XCTAssertNoThrow(try MeshCore.Command.sendChannelData(index: 1, dataType: 1, payload: Data(count: 165)).encoded())
         XCTAssertThrowsError(try MeshCore.Command.sendChannelData(index: 1, dataType: 1, payload: Data(count: 166)).encoded())

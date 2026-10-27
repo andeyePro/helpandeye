@@ -22,6 +22,9 @@ public enum MeshCore {
         case sendText(publicKeyPrefix: Data, text: String, sentAt: UInt32, attempt: UInt8)
         case syncNextMessage
         case getBattery
+        /// Adds another member's board as a chat contact, so direct messages can be sent to it.
+        /// With no known path, the board floods the first message and learns the path from the reply.
+        case addContact(publicKey: Data, name: String)
 
         public func encoded() throws -> Data {
             var w = ByteWriter()
@@ -49,6 +52,11 @@ public enum MeshCore {
                 w.u8(0x0A)
             case .getBattery:
                 w.u8(0x14)
+            case let .addContact(key, name):
+                guard key.count == 32 else { throw MeshCoreError.badContact }
+                var n = Data(name.utf8.prefix(31)); n.append(Data(count: 32 - n.count))
+                w.u8(0x09); w.bytes(key); w.u8(1); w.u8(0); w.u8(0xFF); w.bytes(Data(count: 64)); w.bytes(n)
+                w.u32(0); w.i32(0); w.i32(0)
             }
             return w.data
         }
