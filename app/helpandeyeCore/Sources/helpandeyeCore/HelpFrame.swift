@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// The colour of a call. Red is "come now", amber "come when convenient", green "I'm OK now".
+/// The colour of a call. Red asks for help now, amber for a hand when someone can, green says "I'm OK".
 public enum Colour: UInt8, Sendable, CaseIterable, Codable {
     case red = 1, amber = 2, green = 3
 }

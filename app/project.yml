@@ -78,6 +78,8 @@ targets:
       - helpandeye/Store.swift
       - helpandeye/Alerts.swift
       - helpandeye/Colours.swift
+      - helpandeye/CallerVoice.swift
+      - helpandeye/Sounds
     dependencies:
       - package: helpandeyeCore
     info:
@@ -106,6 +108,17 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.uitests
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
+  helpandeyeWatchUITests:
+    type: bundle.ui-testing
+    platform: watchOS
+    sources: [helpandeyeWatchUITests]
+    dependencies:
+      - target: helpandeyeWatch
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.watchuitests
+        TARGETED_DEVICE_FAMILY: "4"
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   helpandeye:
     build:
@@ -114,3 +127,10 @@ schemes:
     test:
       targets:
         - helpandeyeUITests
+  helpandeyeWatch:
+    build:
+      targets:
+        helpandeyeWatch: all
+    test:
+      targets:
+        - helpandeyeWatchUITests

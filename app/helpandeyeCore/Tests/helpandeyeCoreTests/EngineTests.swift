@@ -458,7 +458,7 @@ final class RelayModel {
         coordinator.engine.updateGroup { ButtonWords.set("", for: ButtonWords.key(.red), in: &$0.policy) }
         await air.run()
         caller.engine.receive(old, via: .internet)
-        XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.group), "Come now")
+        XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.group), "Help")
     }
 
     func testOnlyACoordinatorCanChangeTheGroupsSettings() {
@@ -467,10 +467,10 @@ final class RelayModel {
         ButtonWords.set("Ignore me", for: ButtonWords.key(.red), in: &g.policy)
         let fromCaller = g.settingsFrame(as: caller.engine.saved!.me, identity: caller.identity)!
         responder.engine.receive(fromCaller, via: .internet)
-        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group), "Come now")
+        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group), "Help")
         let forged = g.settingsFrame(as: coordinator.engine.saved!.me, identity: caller.identity)!
         responder.engine.receive(forged, via: .internet)
-        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group), "Come now", "a coordinator's number without their signature")
+        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group), "Help", "a coordinator's number without their signature")
         XCTAssertEqual(HelpFrame(fromCaller.encoded()), fromCaller)
     }
 

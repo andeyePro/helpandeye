@@ -100,13 +100,13 @@ final class GroupTests: XCTestCase {
 
     func testButtonWordsDefaultAndCanBeChangedOrCleared() {
         var g = newGroup(DeviceIdentity())
-        XCTAssertEqual(ButtonWords.words(.red, in: g), "Come now")
+        XCTAssertEqual(ButtonWords.words(.red, in: g), "Help")
         ButtonWords.set("  Please come  ", for: ButtonWords.key(.red), in: &g.policy)
         ButtonWords.set(String(repeating: "x", count: 99), for: ButtonWords.key(.fallen), in: &g.policy)
         XCTAssertEqual(ButtonWords.words(.red, in: g), "Please come")
         XCTAssertEqual(ButtonWords.words(.fallen, in: g).count, ButtonWords.longest)
         ButtonWords.set("", for: ButtonWords.key(.red), in: &g.policy)
-        XCTAssertEqual(ButtonWords.words(.red, in: g), "Come now")
+        XCTAssertEqual(ButtonWords.words(.red, in: g), "Help")
         let old = try! JSONDecoder().decode(GroupState.StoredPolicy.self, from: Data(#"{"useDistance":false,"redInterval":120,"amberInterval":900}"#.utf8))
         XCTAssertNil(old.buttonWords, "a group saved before button words still loads")
     }

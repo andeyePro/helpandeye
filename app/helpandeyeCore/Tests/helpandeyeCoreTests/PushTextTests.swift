@@ -11,7 +11,7 @@ final class PushTextTests: XCTestCase {
         let g = group()
         let sealed = try RelayProtocol.seal(.call(unit: 70001, request: 1, colour: .red, sentAt: 0), with: g.secrets)
         let t = PushText.describe(sealed: sealed, group: g, at: Date())
-        XCTAssertEqual(t, .init(title: "Alex: come now", body: "Open Help&I to acknowledge."))
+        XCTAssertEqual(t, .init(title: "Alex: Help", body: "Open Help&I to acknowledge."))
         XCTAssertFalse((t!.title + t!.body).lowercased().contains("on the way"))
         XCTAssertFalse((t!.title + t!.body).lowercased().contains("coming"))
     }

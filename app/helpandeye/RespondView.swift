@@ -66,7 +66,7 @@ struct RequestRow: View {
             }
             if !request.acknowledgedBy.contains(engine.saved?.me ?? 0) {
                 Button { _ = engine.acknowledge(request.key) } label: {
-                    Text("Acknowledge: I'm dealing with it").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
+                    Text("Acknowledge: \(CallerFeedback.acknowledgeWords)").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(.action)
             }

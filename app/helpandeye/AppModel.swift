@@ -19,6 +19,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var others: [Other] = []
     private var bag: Set<AnyCancellable> = []
     private var ticker: Timer?
+    private var voiceTracker = CallerFeedback.Tracker(nil)
 
     struct Other: Identifiable {
         let tag: String
@@ -51,6 +52,8 @@ final class AppModel: ObservableObject {
                           relay.objectWillChange.eraseToAnyPublisher()] {
             publisher.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         }
+        voiceTracker = .init(engine.current)
+        engine.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.tellCaller() }.store(in: &bag)
         for tag in Store.otherGroups { start(tag) }
         ticker = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -63,6 +66,15 @@ final class AppModel: ObservableObject {
             }
         }
         Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+    }
+
+    /// Says out loud what happened to this phone's own calls. The watch says it for the calls it
+    /// made itself (numbered 32768 and up), so they are not heard twice.
+    private func tellCaller() {
+        if let r = engine.current, r.number >= 0x8000 { return }
+        let words = engine.current.map { ButtonWords.words($0.colour, in: group) } ?? ""
+        let note = engine.current?.colour == .amber ? ButtonWords.amberNote(in: group) : nil
+        if let f = voiceTracker.update(engine.current, words: words, note: note, name: name(ofMember:)) { CallerVoice.shared.tell(f) }
     }
 
     var identity: DeviceIdentity { engine.identity }

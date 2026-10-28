@@ -35,6 +35,7 @@ struct CallView: View {
 
     /// Red and amber also send where the caller is, if they chose that.
     private func press(_ colour: Colour) {
+        CallerVoice.shared.pressed()
         model.press(colour)
         if shareEveryCall, colour != .green, model.canSendPersonal {
             location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) }
@@ -115,12 +116,13 @@ struct StatusCard: View {
                 Text(headline).font(.title3.bold())
             }
             Text("\(request.colour.label), \(request.createdAt.formatted(date: .omitted, time: .shortened))")
+            if request.colour == .amber, request.status != .notSent { Text(ButtonWords.amberNote(in: model.group)) }
             ForEach(Route.allCases.filter { request.routes[$0] != nil }, id: \.self) { route in
                 Text(line(route))
             }
             if request.status == .notSent {
                 HStack {
-                    Button("Try again") { model.press(request.colour) }.buttonStyle(.action)
+                    Button("Try again") { CallerVoice.shared.pressed(); model.press(request.colour) }.buttonStyle(.action)
                     if RoutePlan.offerManualSMS(for: request, smsAvailable: MFMessageComposeViewController.canSendText(), smsIsAutomatic: false,
                                                 recipients: RoutePlan.smsRecipients(in: model.group, me: model.saved?.me)) {
                         Button("Send as a text") { composingSMS = true }.buttonStyle(.secondaryAction)
@@ -134,8 +136,6 @@ struct StatusCard: View {
         // Solid, not see-through: words over a blurred background lose contrast.
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
         .accessibilityElement(children: .combine)
-        // Someone who cannot see the screen hears each change, such as a responder seeing the call.
-        .onChange(of: headline) { _, new in UIAccessibility.post(notification: .announcement, argument: new) }
     }
 
     private var words: StatusWords.Words { StatusWords.phone(request.status, name: model.name(ofMember:)) }

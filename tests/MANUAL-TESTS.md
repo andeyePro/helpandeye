@@ -43,7 +43,7 @@ Pass: with a box that has a screen, pairing uses the code on the screen and the 
 
 ## 3. A red call over the mesh, acknowledged by hand
 
-1. On phone A, press Come now.
+1. On phone A, press Help.
 2. Watch phone A's status card.
 3. On phone B, wait for the alert, open Respond, and do nothing for at least five minutes.
 4. On phone B, tap Acknowledge.
@@ -53,13 +53,13 @@ Pass: phone A shows "Sending…", then "Sent. Waiting for a responder to see it.
 ## 4. The cross when nothing gets through
 
 1. Switch off phone A's board (or forget it in Box).
-2. On phone A, press Come when convenient.
+2. On phone A, press Need a hand.
 
 Pass: phone A shows a cross and "Not sent. Nobody has been told.", lists why each route failed, offers Try again, and says "If you need help now, call 999." With a SIM in phone A and a mobile number saved by at least one responder (Group, Your mobile number), it also offers Send as a text, which opens a ready-written message naming no one, addressed to every responder with a number. With no responder number saved, Send as a text is not offered at all.
 
 ## 5. Follow-ups arrive with their call
 
-1. With both boards on, press Come now on phone A, then tap I've fallen and I feel unwell.
+1. With both boards on, press Help on phone A, then tap I've fallen and I feel unwell.
 
 Pass: phone B shows one request, not three, with both details listed in the order they were tapped.
 
@@ -67,22 +67,22 @@ Pass: phone B shows one request, not three, with both details listed in the orde
 
 Needs a third phone, C, joined as a responder.
 
-1. On phone A, press Come now. Do not touch phones B or C.
+1. On phone A, press Help. Do not touch phones B or C.
 
 Pass: one of B or C alerts at once and the other about two minutes later. Neither alert stops until someone taps Acknowledge on either phone. After one acknowledges, the other phone shows who acknowledged.
 
 ## 7. The watch
 
-1. On phone A's paired watch, open Help&I and press Come now.
+1. On phone A's paired watch, open Help&I and press Help.
 
 Pass: phone B alerts as in section 3, and the watch shows "Sent. Waiting for a responder."
 
 Then, with the internet route set up (section 5) and the watch on Wi-Fi or its own mobile service:
 
 2. Open Help&I on phone A once with the watch nearby, so the phone hands the watch the group. Then put phone A out of the watch's range (or switch phone A off).
-3. On phone A's watch, press Come now. On phone B, acknowledge.
-4. Bring phone A back in reach of its watch and press Come now on the watch again.
-5. Now test a responder's watch: give phone B a paired watch, open Help&I on phone B once with it nearby, then switch phone B off. Press Come now on phone A and acknowledge on phone B's watch.
+3. On phone A's watch, press Help. On phone B, acknowledge.
+4. Bring phone A back in reach of its watch and press Help on the watch again.
+5. Now test a responder's watch: give phone B a paired watch, open Help&I on phone B once with it nearby, then switch phone B off. Press Help on phone A and acknowledge on phone B's watch.
 6. On phone A, leave the group.
 
 Pass: in step 3 the watch says calls go over its own internet, phone B alerts, and the watch shows the acknowledgement only after phone B's person pressed it. In step 4 phone B shows one call, not two. In step 5 phone B's watch buzzes for the call (it does not buzz while phone B is on and alerting), and phone A shows the acknowledgement as phone B's. After step 6 phone A's watch no longer calls or alerts for the group. With no internet on the watch and its phone out of reach, the watch shows a cross and tells the wearer to use their phone or call 999.
@@ -93,7 +93,7 @@ Needs phone C from section 6.
 
 1. On phone B (the coordinator), open Group, swipe left on phone C's person, and tap Remove.
 2. On phone B, under New keys to hand out, show phone A its update code, and scan it on phone A under Key update.
-3. On phone A, press Come now.
+3. On phone A, press Help.
 
 Pass: phone B alerts, phone C does not. Phone A's person still has the same unit number.
 
@@ -105,7 +105,7 @@ Pass: with phone B as the only responder, phone B's Group tab lists a gap coveri
 
 ## 10. A request survives closing the app
 
-1. On phone A, press Come now. On phone B, wait for the alert but do not acknowledge.
+1. On phone A, press Help. On phone B, wait for the alert but do not acknowledge.
 2. On phone B, swipe the app away in the app switcher, then open it again.
 
 Pass: the request is still at the top of phone B's Respond list, unacknowledged, and can be acknowledged. Phone A's status card still shows the call after phone A's app is closed and reopened.
@@ -120,7 +120,7 @@ Pass: after step 1, phone A shows "Connecting to your box…" while it is off an
 ## 12. A call with no route at all
 
 1. Forget the box on phone A, and leave the internet route unset.
-2. Press Come now.
+2. Press Help.
 
 Pass: the cross and "Not sent. Nobody has been told." appear at once, not "Sending…".
 
@@ -129,20 +129,20 @@ Pass: the cross and "Not sent. Nobody has been told." appear at once, not "Sendi
 1. On phone A, open Group, turn on Check in at set times, set the first check-in to two minutes from now with no second one, and tap Save.
 2. Wait for the reminder notification and do nothing for 32 minutes.
 
-Pass: the reminder arrives at the set time. About 30 minutes later (within a minute of that, with Help&I open) phone B gets a come-when-convenient call showing "Missed a check-in". Repeat, pressing I'm OK now when the reminder comes: phone B gets the green call and no missed check-in.
+Pass: the reminder arrives at the set time. About 30 minutes later (within a minute of that, with Help&I open) phone B gets a Need a hand call showing "Missed a check-in". Repeat, pressing I'm OK now when the reminder comes: phone B gets the green call and no missed check-in.
 
 ## 14. Typed messages and location
 
 Needs the relay set up (Group, Internet route) on both phones, with internet on.
 
-1. On phone A, press Come now, type "Back door is open" and tap Send, then tap Share where I am and allow location.
+1. On phone A, press Help, type "Back door is open" and tap Send, then tap Share where I am and allow location.
 2. Turn phone A's internet off and try to send another message.
 
 Pass: phone B shows the message in quotes and an Open their location in Maps link that opens near phone A. In step 2, with both boxes connected, the second message reaches phone B as a direct message between the boxes, cut to 96 bytes if longer. A third board on the same group channel, logging what it hears, never shows the text: it is encrypted to phone B's box alone.
 
 ## 15. Calls keep going until someone acknowledges
 
-1. Switch phone B's board off. On phone A, press Come now.
+1. Switch phone B's board off. On phone A, press Help.
 2. After two minutes, switch phone B's board on. Do not touch phone A.
 3. On phone B, acknowledge, then switch phone B's board off again for one minute, then on.
 
@@ -150,7 +150,7 @@ Pass: within ten minutes of step 2, phone B alerts for the call, although its bo
 
 ## 16. A responder's alert repeats
 
-1. On phone A, press Come now. On phone B, dismiss the notification without opening Help&I.
+1. On phone A, press Help. On phone B, dismiss the notification without opening Help&I.
 
 Pass: phone B alerts again about a minute later: once a minute for the first ten minutes, then every ten minutes, for red; every five minutes, then every half hour, for amber. It keeps going with phone B locked and Help&I closed for at least three hours (red). After an acknowledgement, no more alerts arrive, and the ones already showing are cleared. An "I'm OK now" alerts once, quietly, and does not repeat.
 
@@ -163,30 +163,30 @@ Needs the relay set up and internet on.
 1. On phone A, turn on a check-in two minutes from now and tap Save. Wait a minute, then switch phone A off.
 2. Wait 40 minutes.
 
-Pass: about 35 minutes after the check-in time, phone B alerts "<name> missed a check-in" as a come-when-convenient call, which stays until someone acknowledges it. With phone A left on and pressing nothing, phone B gets phone A's own missed-check-in call and does not raise a second one.
+Pass: about 35 minutes after the check-in time, phone B alerts "<name> missed a check-in" as a Need a hand call, which stays until someone acknowledges it. With phone A left on and pressing nothing, phone B gets phone A's own missed-check-in call and does not raise a second one.
 
 ## 18. Joining a second group
 
 1. On phone B, leave the group, then join a different group that uses the same relay.
-2. On a phone in the new group, press Come now.
+2. On a phone in the new group, press Help.
 
 Pass: phone B alerts. (A shared read position used to make it miss the new group's calls.)
 
 ## 19. A new responder's acknowledgement counts everywhere
 
 1. With phones A (caller) and B (coordinator) in a group, add phone C as a responder (section 1, steps 2 to 5, on phones B and C). Do not show phone A anything.
-2. On phone A, press Come now. Acknowledge on phone C.
+2. On phone A, press Help. Acknowledge on phone C.
 
-Pass: phone A shows "Member <n> has seen your call." within a minute. Then remove phone C on phone B, press Come now again on phone A, and acknowledge on phone C: phone A must not show it as seen.
+Pass: phone A shows "Member <n> has seen your call." within a minute. Then remove phone C on phone B, press Help again on phone A, and acknowledge on phone C: phone A must not show it as seen.
 
 ## 20. Acknowledging from a responder's watch
 
 Needs phone B paired with an Apple Watch with Help&I on it.
 
-1. On phone A, press Come now.
+1. On phone A, press Help.
 2. On phone B's watch, open Help&I.
 
-Pass: the watch lists the caller's name and "Come now" with an Acknowledge button. Tapping it acknowledges exactly as on the phone: phone A shows "<name> has seen your call", and the entry leaves the watch. With phone B out of the watch's range, tapping it shows "Not acknowledged" and nothing is sent.
+Pass: the watch lists the caller's name and "Help" with an Acknowledge button. Tapping it acknowledges exactly as on the phone: phone A shows "<name> has seen your call", and the entry leaves the watch. With phone B out of the watch's range, tapping it shows "Not acknowledged" and nothing is sent.
 
 ## 21. A missed check-in noticed with no internet at all
 
@@ -200,20 +200,20 @@ Pass: phone B raises "<name> missed a check-in" about 35 minutes after the check
 ## 22. Large text and VoiceOver
 
 1. On phone A, set Settings, Accessibility, Display & Text Size, Larger Text to the largest size, and open Help&I.
-2. Turn on VoiceOver and move through the Help tab, then press Come now.
+2. Turn on VoiceOver and move through the Help tab, then press Help.
 
-Pass: every word on the Help tab can be read without cutting off; Come when convenient and I'm OK now sit one above the other rather than squeezed side by side. VoiceOver reads each button's name and what it does. After the press it says the status aloud ("Sending…", then "Sent. Waiting for a responder to see it."), and again when a responder acknowledges. Nothing on any screen depends on colour alone: every coloured button and dot also has words.
+Pass: every word on the Help tab can be read without cutting off; Need a hand and I'm OK sit side by side, or one above the other at large text sizes, never cut off. VoiceOver reads each button's name and what it does. After the press it says the status aloud ("Sending…", then "Sent. Waiting for a responder to see it."), and again when a responder acknowledges. Nothing on any screen depends on colour alone: every coloured button and dot also has words.
 
 ## 23. A second coordinator
 
 1. On phone B (coordinator), open Group, swipe left on phone C's person, and tap Make coordinator.
-2. On phone C, invite a fourth phone, D, as a responder. Then press Come now on phone A and acknowledge on phone D.
+2. On phone C, invite a fourth phone, D, as a responder. Then press Help on phone A and acknowledge on phone D.
 
 Pass: phone C shows the coordinator's tools (Invite someone, gaps, Internet route) but no Remove or Make coordinator: only the first coordinator removes people or makes coordinators. Phone A shows phone D's person as having seen the call, although phone B never touched phone D. Phone D's member number is above 1000.
 
 ## 24. An acknowledgement that stops counting
 
-1. On phone A, press Come now. Acknowledge on phone C (a responder). Phone A shows that C has seen the call.
+1. On phone A, press Help. Acknowledge on phone C (a responder). Phone A shows that C has seen the call.
 2. On phone B (the first coordinator), remove phone C.
 
 Pass: phone A gets a notification "Your call is going out again" saying nobody has seen it now and to call 999 if help is needed now, its status goes back to waiting, and phone B is alerted for the call again.
@@ -229,7 +229,7 @@ Pass: phone C says "Keys updated." Seven days later (or with the clock moved on)
 
 Needs the relay set up with push (TODO.md) and the app signed with the shared keychain group.
 
-1. Lock phone B. On phone A, with the local radio off, press Come now.
+1. Lock phone B. On phone A, with the local radio off, press Help.
 
 Pass: phone B's notification reads "<name>: come now", not the relay's generic "A call for help in your group". It never says help is coming.
 
@@ -243,7 +243,7 @@ Pass: within two days (move the clock on to check sooner), phone D shows a notic
 ## 28. Looking for boxes leaves the connected box alone
 
 1. With phone B connected to its box and its internet off, open Box and tap Look for boxes. Choose nothing and leave the Box tab.
-2. On phone A, press Come now.
+2. On phone A, press Help.
 
 Pass: phone B's Box tab still says "Connected", and phone B alerts for the call. Looking stops by itself after about twenty seconds.
 
@@ -251,14 +251,14 @@ Pass: phone B's Box tab still says "Connected", and phone B alerts for the call.
 
 1. Lock phone B, with Help&I running and its internet off.
 2. Switch phone B's box off and on three times in quick succession, then off for two minutes, then on.
-3. On phone A, press Come now.
+3. On phone A, press Help.
 
 Pass: without touching phone B, it alerts for the call over the local radio.
 
 ## 30. After the app is ended by the system, and after Bluetooth is switched off
 
-1. With phone B connected, stop Help&I from Xcode (not by swiping it away), then press Come now on phone A.
-2. On phone B, switch Bluetooth off and on in Control Centre, then press Come now on phone A again.
+1. With phone B connected, stop Help&I from Xcode (not by swiping it away), then press Help on phone A.
+2. On phone B, switch Bluetooth off and on in Control Centre, then press Help on phone A again.
 
 Pass: phone B relaunches, reaches "Connected" and alerts the first time; after Bluetooth comes back it reconnects and alerts the second time.
 
@@ -282,7 +282,7 @@ Pass: during the changeover phone B's Box tab says there is no free channel; aft
 
 1. On any screen with a text box, including the mobile number box (which has no return key), type something, then tap Done above the keyboard. Type again, then tap an empty part of the Help screen, and on other screens scroll.
 2. Under Group, Text size, choose Larger, then Largest. Look at every tab in light and dark mode.
-3. Press Come when convenient, tap I'm locked out, then tap it again. On phone B, watch the request.
+3. Press Need a hand, tap I'm locked out, then tap it again. On phone B, watch the request.
 4. Tap Something else.
 5. Turn on VoiceOver and go through the Help tab.
 
@@ -293,9 +293,22 @@ Pass: the keyboard always goes away and never hides the tabs for good. Text gets
 Needs two coordinators' phones (A and C) with their own groups, and phone B with one box.
 
 1. Phone B joins phone A's group (section 1). Then, under Group, Other groups you respond in, phone B taps Join another group as a responder and joins phone C's group, invited by phone C to respond.
-2. Press Come now on a caller in phone A's group, then on a caller in phone C's group.
+2. Press Help on a caller in phone A's group, then on a caller in phone C's group.
 3. On phone B, acknowledge each.
 4. Try joining a third group invited to call for help.
-5. Switch phone B off, then press Come now in each group again, and acknowledge both on phone B's watch.
+5. Switch phone B off, then press Help in each group again, and acknowledge both on phone B's watch.
 
 Pass: phone B's box holds both groups' channels (the Box tab stays Connected) and phone B alerts for both calls, listed under each group's name. Each acknowledgement shows only on its own group's caller. A call in one group never appears on the other group's phones. In step 4 phone B says it can only respond in a further group. In step 5 phone B's watch alerts for both calls and each acknowledgement shows only on its own group's caller.
+
+## 35. Sounds, spoken words and touch for a caller
+
+Needs phone A (a caller) and phone B (a responder), with phone A's watch, and the ringer on phone A switched to silent.
+
+1. On phone A, with the internet off and no box, press Help.
+2. Turn the internet back on and press Help again. Leave it a few seconds, then acknowledge on phone B.
+3. Press Need a hand on phone A.
+4. Under Group, Sounds, turn Sounds and spoken words off, and repeat step 2.
+5. Turn VoiceOver on and repeat step 2.
+6. Repeat steps 1 to 3 on phone A's watch, with its phone switched off.
+
+Pass: every press is felt as a short tap. In step 1 phone A plays the wrong-answer buzz, then says "Your Help message has not been sent. Try again, or call 999." In step 2 it says "Your Help message has been sent." with no sound, and then, only once phone B has acknowledged, plays the chime and says "<name> has seen your Help message, and says: I'm dealing with it." In step 3 phone A shows and says "You have requested non-urgent assistance. If you need help sooner, please press Help." (or the group's own words from Advanced settings). All of this is heard with the ringer on silent. In step 4 nothing is heard, but the taps and the words on the screen remain. In step 5 VoiceOver reads each message once, and it is not spoken a second time. In step 6 the watch does the same, with its own vibrations. A watch not yet set up shows how to set it up instead of the buttons.

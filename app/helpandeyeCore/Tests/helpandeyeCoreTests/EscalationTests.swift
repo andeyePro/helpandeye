@@ -148,7 +148,7 @@ final class RoutePlanTests: XCTestCase {
         XCTAssertFalse(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: true, recipients: to))
         XCTAssertFalse(RoutePlan.offerManualSMS(for: r, smsAvailable: true, smsIsAutomatic: false, recipients: []),
                        "a text with nobody to send it to is not offered")
-        XCTAssertEqual(RoutePlan.smsBody(for: r), "Help&I Come now. Unit 70001, request 3. Reply in the Help&I app.")
+        XCTAssertEqual(RoutePlan.smsBody(for: r), "Help&I Help. Unit 70001, request 3. Reply in the Help&I app.")
     }
 
     func testTheTextGoesToEveryOtherResponderWithANumber() {

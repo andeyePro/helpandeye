@@ -236,6 +236,9 @@ struct GroupView: View {
                     ReceiveUpdateSection()
                 }
                 DisplaySection()
+                if model.me?.canCall == true {
+                    Section(header: Header("Sounds")) { CallerVoiceToggle() }
+                }
                 Section {
                     // The first group goes last: the others' calls are answered from its screens.
                     Button("Leave this group", role: .destructive) {
@@ -455,6 +458,7 @@ struct ButtonWordsSection: View {
     private var buttons: [(key: String, standard: String)] {
         Colour.allCases.map { (ButtonWords.key($0), ButtonWords.standard($0)) }
             + CallCategory.choices.map { (ButtonWords.key($0), ButtonWords.standard($0)) }
+            + [(ButtonWords.amberNoteKey, "After \(ButtonWords.standard(.amber)): " + ButtonWords.amberNote(in: nil))]
     }
 
     var body: some View {
@@ -468,7 +472,7 @@ struct ButtonWordsSection: View {
             }
             .buttonStyle(.action)
             Text(saved ? "Saved. The new words go to every member now."
-                       : "Leave a box empty to keep the words shown above it. At most \(ButtonWords.longest) letters each.")
+                       : "Leave a box empty to keep the words shown above it. At most \(ButtonWords.longest) letters each, or \(ButtonWords.longestNote) for what is said after \(ButtonWords.standard(.amber)).")
         }
         .onAppear { words = model.group?.policy.buttonWords ?? [:] }
     }
@@ -489,7 +493,7 @@ struct CheckInSection: View {
                 DatePicker("First check-in", selection: $morning, displayedComponents: .hourAndMinute)
                 Toggle("A second check-in", isOn: $twice)
                 if twice { DatePicker("Second check-in", selection: $evening, displayedComponents: .hourAndMinute) }
-                Text("Press I'm OK now within half an hour of each time. If you do not, your responders get a come-when-convenient call.")
+                Text("Press I'm OK within half an hour of each time. If you do not, your responders get a Need a hand call.")
             }
             Button("Save") { model.setCheckIn(on ? CheckInSchedule(times: [minutes(morning)] + (twice ? [minutes(evening)] : [])) : nil) }
         }

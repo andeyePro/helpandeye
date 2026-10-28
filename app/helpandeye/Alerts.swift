@@ -67,7 +67,7 @@ import UserNotifications
         for t in minutes {
             let content = UNMutableNotificationContent()
             content.title = "Time to check in"
-            content.body = "Open Help&I and press I'm OK now."
+            content.body = "Open Help&I and press I'm OK."
             content.sound = .default
             content.interruptionLevel = .timeSensitive
             let trigger = UNCalendarNotificationTrigger(dateMatching: DateComponents(hour: t / 60, minute: t % 60), repeats: true)

@@ -22,7 +22,7 @@ extension OutgoingRequest {
     /// resend time has come. Only an acknowledgement ends resending.
     public func resendDue(at now: Date) -> Bool {
         if case .seen = status { return false }
-        // "I'm OK now" is repeated a few times against lost packets, then left: it asks for no one.
+        // "I'm OK" is repeated a few times against lost packets, then left: it asks for no one.
         if colour == .green && resends >= Resend.gaps.count { return false }
         return now >= Resend.due(resends + 1, after: createdAt)
     }

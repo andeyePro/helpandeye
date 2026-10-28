@@ -5,7 +5,7 @@ decision silently.
 
 | # | Decision | Reason |
 |---|---|---|
-| <a id="d1"></a>1 | Three physical buttons: large red (come now), small amber (come when convenient), small green (I'm OK now) | Core function must work without a phone, app or charger |
+| <a id="d1"></a>1 | Three physical buttons: large red (help), small amber (need a hand), small green (I'm OK) | Core function must work without a phone, app or charger |
 | <a id="d2"></a>2 | Mains-powered unit with battery backup; optional pendant with charging cradle | A fall away from the unit is the main gap a fixed unit cannot cover |
 | <a id="d3"></a>3 | Automatic power-cut detection; optional (opt-in) message to responders when mains is lost | Power cut plus a fall is double jeopardy; responders need early warning |
 | <a id="d4"></a>4 | Battery alerts at an estimated 24, 12, 6, 3, 2 and 1 h remaining; a responder's acknowledgement silences all but the final warning | Avoids alert floods once responders know the power is down |

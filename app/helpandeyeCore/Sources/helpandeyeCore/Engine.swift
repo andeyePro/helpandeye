@@ -61,7 +61,7 @@ public struct Alert: Equatable, Sendable {
     public let key: IncomingRequest.Key
     public let title: String
     public let body: String
-    /// "I'm OK now": an ordinary notification, not a time-sensitive one with an urgent sound.
+    /// "I'm OK": an ordinary notification, not a time-sensitive one with an urgent sound.
     public let calm: Bool
     public let times: [Date]
 
@@ -124,7 +124,7 @@ public struct Activity: Codable, Sendable {
     public var boardKeys: [UInt16: Data] = [:]
     /// Notices a coordinator must acknowledge. Saved, so a relaunch does not restart their widening.
     public var notices: [Notice: CoordinatorAlert] = [:]
-    /// "I'm OK now" calls already alerted once; they are never alerted again.
+    /// "I'm OK" calls already alerted once; they are never alerted again.
     public var alertedGreens: Set<IncomingRequest.Key> = []
 
     public init() {}
@@ -431,7 +431,7 @@ public final class HelpEngine: ObservableObject {
         }
     }
 
-    /// Keeps the list short by dropping "I'm OK now" calls and acknowledged ones, oldest first.
+    /// Keeps the list short by dropping "I'm OK" calls and acknowledged ones, oldest first.
     /// A call nobody has acknowledged is never dropped: it keeps being sent.
     private func trimOutgoing() {
         while activity.outgoing.count > 50, let i = activity.outgoing.indices.dropLast().first(where: { i in
@@ -654,7 +654,7 @@ public final class HelpEngine: ObservableObject {
         }
     }
 
-    /// Drops "I'm OK now" calls and acknowledged requests after a week. A request nobody has
+    /// Drops "I'm OK" calls and acknowledged requests after a week. A request nobody has
     /// acknowledged stays, however old.
     private func pruneInbox() {
         let cutoff = now().addingTimeInterval(-7 * 86_400)
@@ -877,7 +877,7 @@ public final class HelpEngine: ObservableObject {
         guard let r = activity.inbox.requests[key], !r.isAcknowledged, let e = escalation(for: r), let me = saved?.me else { return }
         let turn = TimeInterval(e.order.firstIndex(of: me) ?? e.order.count) * e.interval
         let turnAt = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn)
-        // "I'm OK now" asks for no one: tell them once, calmly, and never again.
+        // "I'm OK" asks for no one: tell them once, calmly, and never again.
         if r.colour == .green {
             guard !activity.alertedGreens.contains(key) else { return }
             activity.alertedGreens.insert(key)
@@ -894,12 +894,7 @@ public final class HelpEngine: ObservableObject {
         default: times = alertTimes(turnAt: turnAt, every: 60, quick: 10, later: 600, from: t, count: count)
         }
         let who = name(ofUnit: key.unit)
-        var title: String
-        switch r.colour {
-        case .amber?: title = "\(who): come when convenient"
-        case .green?: title = "\(who): I'm OK now"
-        default: title = "\(who): come now"
-        }
+        var title = "\(who): \(ButtonWords.words(r.colour ?? .red, in: group))"
         if key.request == 0 { title = "\(who) missed a check-in" }
         alerts.schedule(Alert(key: key, title: title, body: "Open Help&I to acknowledge.", calm: r.colour == .green, times: times))
     }

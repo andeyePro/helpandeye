@@ -53,9 +53,9 @@ buttons work with no phone, no app and no charger.
 
 | Button | Size | Meaning |
 |---|---|---|
-| Red | Large | Come now |
-| Amber | Small | Come when convenient |
-| Green | Small | I'm OK now |
+| Red | Large | Help |
+| Amber | Small | Need a hand |
+| Green | Small | I'm OK |
 
 The labels can be changed per deployment (for a works team, green might be "Checked in"). The
 shape, size and colour stay the same so that nobody has to learn a new layout.

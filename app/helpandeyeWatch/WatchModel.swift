@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import helpandeyeCore
+import UserNotifications
 import WatchConnectivity
 
 /// The watch's two ways of working. With the phone in reach, the buttons send through it and it
@@ -30,6 +31,11 @@ final class WatchModel: NSObject, ObservableObject {
     @Published private var problem: String?
     /// Set when the last call went out from the watch itself, so its own status is shown.
     @Published private var sentByWatch = false
+    /// The button last pressed here, for what is said after Need a hand.
+    @Published private var pressed: Colour?
+    /// Notifications for Help&I are turned off on this watch, so it cannot alert its owner.
+    @Published private(set) var alertsOff = false
+    private var voiceTracker = CallerFeedback.Tracker(nil)
 
     private(set) var engine: HelpEngine?
     private let relay = Relay()
@@ -58,6 +64,13 @@ final class WatchModel: NSObject, ObservableObject {
             // The other groups come back too: a handover may not come again after a relaunch.
             for tag in Store.otherGroups { makeOther(tag, identity: id) }
         }
+        #if DEBUG && targetEnvironment(simulator)
+        if Self.isScreensTest {
+            phoneInReach = true
+            phoneOpen = [Open(unit: 70001, request: 1, colour: .red, who: "Sam")]
+            return
+        }
+        #endif
         if WCSession.isSupported() {
             WCSession.default.delegate = self
             WCSession.default.activate()
@@ -81,7 +94,23 @@ final class WatchModel: NSObject, ObservableObject {
                                 saved: Store.loadState(), activity: Store.loadActivity(), companion: true)
         relay.onFrame = { [weak engine] in engine?.receive($0, via: .internet) }
         engine.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        // Every call this engine makes is the watch's own (numbered 32768 and up): it says what happened.
+        voiceTracker = .init(engine.current)
+        engine.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.tellCaller() }.store(in: &bag)
         self.engine = engine
+    }
+
+    private func tellCaller() {
+        guard let engine else { return }
+        let r = engine.current
+        let words = r.map { ButtonWords.words($0.colour, in: engine.group) } ?? ""
+        let note = r?.colour == .amber ? ButtonWords.amberNote(in: engine.group) : nil
+        if let f = voiceTracker.update(r, words: words, note: note, name: engine.name(ofMember:)) { CallerVoice.shared.tell(f) }
+    }
+
+    /// Whether the owner has turned Help&I's notifications off on this watch.
+    func checkAlerts() async {
+        alertsOff = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
     }
 
     /// Takes in what the phone handed over: the first time, or with new keys, as a fresh start that
@@ -197,6 +226,14 @@ final class WatchModel: NSObject, ObservableObject {
 
     func words(_ colour: Colour) -> String { ButtonWords.words(colour, in: engine?.group) }
 
+    /// Not set up and no phone to send through: the buttons could not reach anyone.
+    var needsSetUp: Bool { engine?.me == nil && !phoneInReach }
+
+    /// What is said after Need a hand, while that call has not failed.
+    var amberNote: String? {
+        pressed == .amber && status?.cross == false ? ButtonWords.amberNote(in: engine?.group) : nil
+    }
+
     var status: (text: String, cross: Bool)? {
         if let problem { return (problem, true) }
         if let ack = lastAck, let s = engine(forGroup: ack.group)?.ackSendStatus(ack.key) {
@@ -237,6 +274,8 @@ final class WatchModel: NSObject, ObservableObject {
     /// and gives the same call to the phone to send on the phone's routes: one call, however many
     /// ways it goes, so a lost reply can never send it twice. Without one, the phone makes it.
     func press(_ colour: Colour) {
+        CallerVoice.shared.pressed()
+        pressed = colour
         problem = nil
         lastAck = nil
         if let engine, engine.me?.canCall == true {
@@ -249,17 +288,30 @@ final class WatchModel: NSObject, ObservableObject {
         }
         sentByWatch = false
         guard phoneInReach, WCSession.default.activationState == .activated else {
-            problem = "Not sent: your phone is out of reach. Use your phone, or call 999."
+            failed("Not sent: your phone is out of reach. Use your phone, or call 999.")
             return
         }
         phoneStatus = "Sending…"; phoneFailed = false
         WCSession.default.sendMessage(["press": Int(colour.rawValue)], replyHandler: { reply in
             let ok = reply["ok"] as? Bool == true
-            Task { @MainActor in if !ok { self.problem = "Not sent: set up Help&I on your phone first." } }
+            Task { @MainActor in if !ok { self.failed("Not sent: set up Help&I on your phone first. Until then, use your phone, or call 999.") } }
         }, errorHandler: { _ in
-            Task { @MainActor in self.problem = "Not sent: your phone did not answer. Use your phone, or call 999." }
+            Task { @MainActor in self.failed("Not sent: your phone did not answer. Use your phone, or call 999.") }
         })
     }
+
+    /// A call that could not even be handed on: shown, and heard as not sent.
+    private func failed(_ why: String) {
+        problem = why
+        CallerVoice.shared.tell(.init(sound: .notSent, spoken: why))
+    }
+
+    #if DEBUG && targetEnvironment(simulator)
+    /// The screenshot test's made-up phone in reach, with one call to acknowledge. Locked three
+    /// ways: a debug build, on a simulator, and only with the test's own launch argument. A real
+    /// watch can never show it.
+    private static var isScreensTest: Bool { ProcessInfo.processInfo.arguments.contains("-HelpAScreensTest") }
+    #endif
 
     /// Acknowledges from the watch itself (signed as its owner) and through the phone when it is in
     /// reach. Two copies of one person's acknowledgement are one acknowledgement.

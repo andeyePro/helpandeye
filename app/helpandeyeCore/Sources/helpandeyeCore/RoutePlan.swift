@@ -23,7 +23,6 @@ public enum RoutePlan {
     /// The text of a ready-written SMS. It names no one: the responder's app maps the unit number
     /// to the person.
     public static func smsBody(for request: OutgoingRequest) -> String {
-        let word = switch request.colour { case .red: "Come now"; case .amber: "Come when convenient"; case .green: "I'm OK now" }
-        return "Help&I \(word). Unit \(request.unit), request \(request.number). Reply in the Help&I app."
+        return "Help&I \(ButtonWords.standard(request.colour)). Unit \(request.unit), request \(request.number). Reply in the Help&I app."
     }
 }

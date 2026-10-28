@@ -4,6 +4,9 @@ import Foundation
 /// labels are set per deployment); any left blank keep the app's.
 public enum ButtonWords {
     public static let longest = 40
+    /// What a caller is told, shown and spoken, after asking for a hand: longer than a button's words.
+    public static let amberNoteKey = "amber.note"
+    public static let longestNote = 160
 
     public static func key(_ colour: Colour) -> String {
         switch colour { case .red: "red"; case .amber: "amber"; case .green: "green" }
@@ -12,7 +15,7 @@ public enum ButtonWords {
     public static func key(_ category: CallCategory) -> String { "category.\(category.rawValue)" }
 
     public static func standard(_ colour: Colour) -> String {
-        switch colour { case .red: "Come now"; case .amber: "Come when convenient"; case .green: "I'm OK now" }
+        switch colour { case .red: "Help"; case .amber: "Need a hand"; case .green: "I'm OK" }
     }
 
     public static func standard(_ category: CallCategory) -> String {
@@ -27,13 +30,18 @@ public enum ButtonWords {
         chosen(key(colour), in: group) ?? standard(colour)
     }
 
+    public static func amberNote(in group: GroupState?) -> String {
+        chosen(amberNoteKey, in: group)
+            ?? "You have requested non-urgent assistance. If you need help sooner, please press \(words(.red, in: group))."
+    }
+
     public static func words(_ category: CallCategory, in group: GroupState?) -> String {
         chosen(key(category), in: group) ?? standard(category)
     }
 
     /// Sets or, with blank words, clears one button's words. Words are trimmed and cut to fit.
     public static func set(_ words: String, for key: String, in policy: inout GroupState.StoredPolicy) {
-        let trimmed = String(words.trimmingCharacters(in: .whitespacesAndNewlines).prefix(longest))
+        let trimmed = String(words.trimmingCharacters(in: .whitespacesAndNewlines).prefix(key == amberNoteKey ? longestNote : longest))
         var all = policy.buttonWords ?? [:]
         all[key] = trimmed.isEmpty ? nil : trimmed
         policy.buttonWords = all.isEmpty ? nil : all

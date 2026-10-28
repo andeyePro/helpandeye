@@ -36,23 +36,74 @@ final class WatchDelegate: NSObject, WKApplicationDelegate {
 /// emergency calling, nor 999.
 struct WatchCallView: View {
     @EnvironmentObject var model: WatchModel
+    @State private var page = Page.buttons
+
+    private enum Page { case buttons, details }
+
+    @Environment(\.scenePhase) private var phase
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                // On the wrist the most urgent button comes first, where it is seen without scrolling.
-                callButton(.red, minHeight: 70)
-                HStack {
-                    callButton(.amber, minHeight: 50)
-                    callButton(.green, minHeight: 50)
+        Group {
+            if model.needsSetUp {
+                setUp
+            } else {
+                // The buttons fill the first page; what happened to a call, and others' calls, are on the next.
+                TabView(selection: $page) {
+                    buttons.tag(Page.buttons)
+                    details.tag(Page.details)
                 }
+                .tabViewStyle(.verticalPage)
+                // Whatever the watch has to say about a call is shown at once.
+                .onChange(of: model.status?.text) { _, new in if new != nil { page = .details } }
+                .onChange(of: model.open.count) { old, new in if new > old { page = .details } }
+            }
+        }
+        .task(id: phase) { await model.checkAlerts() }
+    }
+
+    /// Buttons that could reach nobody are not shown: the wearer is told what to do instead.
+    private var setUp: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Help&I is not set up on this watch yet.").font(.headline)
+                Text("To set it up, open Help&I on your iPhone with this watch nearby.")
+                Text("Until then, use your phone, or call 999.")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// Three clear buttons: the most urgent takes the bottom half, as on the phone.
+    private var buttons: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                callButton(.amber, shape: RoundedRectangle(cornerRadius: 12))
+                callButton(.green, shape: RoundedRectangle(cornerRadius: 12))
+            }
+            callButton(.red, shape: screenCorners)
+        }
+        .ignoresSafeArea(edges: .bottom)
+    }
+
+    /// Lower corners that follow the screen's own, where the watch can draw them.
+    private var screenCorners: AnyShape {
+        if #available(watchOS 26, *) {
+            AnyShape(ConcentricRectangle(corners: .concentric(minimum: 12), isUniform: false))
+        } else {
+            AnyShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private var details: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
                 if let status = model.status {
                     HStack(alignment: .firstTextBaseline) {
                         if status.cross { Image(systemName: "xmark").foregroundStyle(Colour.red.color).accessibilityLabel("Not sent") }
                         Text(status.text)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                if let note = model.amberNote { Text(note) }
                 ForEach(model.open) { r in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(r.who).font(.headline)
@@ -68,18 +119,25 @@ struct WatchCallView: View {
                     Text(model.engine?.me == nil ? "Your phone is out of reach. Open Help&I on your phone once, with this watch nearby, so it can call without the phone."
                                                  : "Your phone is out of reach: calls go over this watch's own internet.")
                 }
+                if model.alertsOff {
+                    Text("Alerts for Help&I are off on this watch, so it cannot tell you when someone calls. To turn them on, open the Watch app on your iPhone, then Notifications, then Help&I.")
+                        .foregroundStyle(Colour.amber.color)
+                }
                 Text("Not a replacement for 999.")
+                CallerVoiceToggle()
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private func callButton(_ colour: Colour, minHeight: CGFloat) -> some View {
+    private func callButton(_ colour: Colour, shape: some Shape) -> some View {
         Button { model.press(colour) } label: {
             Text(model.words(colour)).font(.headline).multilineTextAlignment(.center)
                 .foregroundStyle(colour.onColor)
-                .frame(maxWidth: .infinity, minHeight: minHeight)
+                .padding(4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(colour.color, in: shape)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(colour.color)
+        .buttonStyle(.plain)
     }
 }

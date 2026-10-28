@@ -31,7 +31,7 @@ final class ScreensTests: XCTestCase {
         allowSystemAlerts()
 
         look("help")
-        reveal(app.buttons["Come when convenient"]).tap()
+        reveal(app.buttons["Need a hand"]).tap()
         allowSystemAlerts()
         look("help-not-sent")
 
