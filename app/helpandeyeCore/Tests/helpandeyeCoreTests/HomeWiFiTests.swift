@@ -49,20 +49,63 @@ import XCTest
         XCTAssertNil(t.responder.engine.activity.inbox.requests[t.key])
     }
 
-    func testMessagesOnTheWire() throws {
+    /// Two ends of one connection, handing each other what they send, a few bytes at a time.
+    private func connect(_ a: inout LocalWire.Session, _ b: inout LocalWire.Session) -> (a: [LocalWire.Session.Event], b: [LocalWire.Session.Event]) {
+        var toA = b.opening, toB = a.opening, seenA: [LocalWire.Session.Event] = [], seenB: [LocalWire.Session.Event] = []
+        while !toA.isEmpty || !toB.isEmpty {
+            let inA = toA, inB = toB
+            toA = Data(); toB = Data()
+            for i in stride(from: 0, to: inA.count, by: 5) {
+                let r = a.take(inA.subdata(in: i..<min(i + 5, inA.count)), at: t.clock.now); seenA += r.events; toB += r.reply
+            }
+            for i in stride(from: 0, to: inB.count, by: 5) {
+                let r = b.take(inB.subdata(in: i..<min(i + 5, inB.count)), at: t.clock.now); seenB += r.events; toA += r.reply
+            }
+        }
+        return (seenA, seenB)
+    }
+
+    func testTwoMembersProveWhoTheyAreAndConfirmWhatTheyRead() throws {
         let g = t.caller.engine.group!
+        var caller = LocalWire.Session(group: g, me: t.caller.engine.saved!.me, identity: t.caller.identity)
+        var responder = LocalWire.Session(group: g, me: t.responder.engine.saved!.me, identity: t.responder.identity)
+        let seen = connect(&caller, &responder)
+        XCTAssertEqual(seen.a, [.peer(t.responder.engine.saved!.me)])
+        XCTAssertEqual(seen.b, [.peer(t.caller.engine.saved!.me)])
         let call = HelpFrame.call(unit: 70001, request: 1, colour: .red, sentAt: 1_793_000_000)
-        let a = try XCTUnwrap(LocalWire.message(call, in: g)), b = try XCTUnwrap(LocalWire.message(.followUp(unit: 70001, request: 1, part: 1, category: .fallen), in: g))
-        var reader = LocalWire.Reader()
-        let stream = a + b
-        var sealed: [String] = []
-        for i in stride(from: 0, to: stream.count, by: 7) { sealed += reader.take(stream.subdata(in: i..<min(i + 7, stream.count))) }
-        XCTAssertEqual(sealed.count, 2)
-        XCTAssertEqual(LocalWire.open(sealed[0], in: g, at: t.clock.now), call)
-        let other = GroupState(name: "Elsewhere", secrets: .random(), members: [])
-        XCTAssertNil(LocalWire.open(sealed[0], in: other, at: t.clock.now), "another group on the same Wi-Fi cannot read it")
-        var junk = LocalWire.Reader()
-        XCTAssertEqual(junk.take(Data([0xFF, 0xFF, 1, 2])), [])
+        let got = responder.take(try XCTUnwrap(caller.message(call, id: 7)), at: t.clock.now).events
+        XCTAssertEqual(got, [.frame(call, id: 7)])
+        XCTAssertEqual(caller.take(responder.receipt(for: 7), at: t.clock.now).events, [.receipt(7)])
+    }
+
+    func testThisPhonesOwnOtherHalfNeverCountsAsAnotherPhone() {
+        let g = t.caller.engine.group!, me = t.caller.engine.saved!.me
+        var app = LocalWire.Session(group: g, me: me, identity: t.caller.identity)
+        var itsExtension = LocalWire.Session(group: g, me: me, identity: t.caller.identity)
+        let seen = connect(&app, &itsExtension)
+        XCTAssertEqual(seen.a, [])
+        XCTAssertTrue(app.broken && itsExtension.broken)
+    }
+
+    func testNobodyOutsideTheGroupCountsOrGetsAnything() throws {
+        let g = t.caller.engine.group!
+        var caller = LocalWire.Session(group: g, me: t.caller.engine.saved!.me, identity: t.caller.identity)
+        // Someone who knows the group key but signs with another key, claiming a member's number.
+        var stranger = LocalWire.Session(group: g, me: t.responder.engine.saved!.me, identity: DeviceIdentity())
+        _ = connect(&caller, &stranger)
+        XCTAssertNil(caller.peer)
+        XCTAssertNil(caller.message(.call(unit: 70001, request: 1, colour: .red, sentAt: 0), id: 1), "nothing goes to an unproven end")
+        // Another group on the same Wi-Fi.
+        var mine = LocalWire.Session(group: g, me: t.caller.engine.saved!.me, identity: t.caller.identity)
+        var other = LocalWire.Session(group: GroupState(name: "Elsewhere", secrets: .random(), members: []), me: 1, identity: DeviceIdentity())
+        _ = connect(&mine, &other)
+        XCTAssertNil(mine.peer)
+        // A receipt or frame before any proof, or junk, ends it.
+        var fresh = LocalWire.Session(group: g, me: t.caller.engine.saved!.me, identity: t.caller.identity)
+        XCTAssertEqual(fresh.take(LocalWire.Session(group: g, me: 9, identity: DeviceIdentity()).receipt(for: 1), at: t.clock.now).events, [])
+        XCTAssertTrue(fresh.broken)
+        var junk = LocalWire.Session(group: g, me: 1, identity: DeviceIdentity())
+        _ = junk.take(Data([0xFF, 0xFF, 1, 2]), at: t.clock.now)
         XCTAssertTrue(junk.broken)
     }
 

@@ -173,7 +173,7 @@ final class RelayModel {
     private var groupID: Data?
     var isEnabled: Bool { network != nil }
     var unavailableReason: String { network == nil ? "Not on Wi-Fi" : "No other phones of the group on this Wi-Fi" }
-    func configure(group: GroupState?) { groupID = group?.secrets.groupID }
+    func configure(group: GroupState?, me: UInt16?, identity: DeviceIdentity) { groupID = group?.secrets.groupID }
     var peers: [Phone] {
         guard let air, let network, let me = phone else { return [] }
         return air.phones.filter { $0 !== me && $0.wifi.network == network && $0.wifi.groupID == groupID && groupID != nil }

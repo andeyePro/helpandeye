@@ -383,8 +383,9 @@ Needs phone A (a caller) and phone B (a responder) on the same home Wi-Fi networ
 3. On phone A press Need a hand, type a note, and share where you are.
 4. Lock phone B, wait a minute, and press Help on phone A.
 5. Join phone C, of another group, to the same Wi-Fi, and press Help on phone A.
+6. Switch phone B off, then press Help on phone A. Switch phone B on, open Help&I, and wait a minute.
 
-Pass: in step 1 each phone shows one other phone of the group on this Wi-Fi. In step 2 phone A shows Home Wi-Fi: sent, then the acknowledgement, and phone B alerts. In step 3 phone B shows the note and the position. In step 4, without section 42's set-up, phone A shows the cross for Home Wi-Fi, never a false "sent". In step 5 phone C shows nothing.
+Pass: in step 1 each phone shows one other phone of the group on this Wi-Fi. In step 2 phone A shows Home Wi-Fi: sent, then the acknowledgement, and phone B alerts. In step 3 phone B shows the note and the position. In step 4, without section 42's set-up, phone A shows the cross for Home Wi-Fi, never a false "sent". In step 5 phone C shows nothing, and phone A still counts only phone B. In step 6 phone A shows the cross for Home Wi-Fi within about 30 seconds of phone B going off, and Group, Home Wi-Fi counts phone B again soon after it is back, without restarting either app. If Local Network is turned off for Help&I in Settings, the Group screen says so.
 
 ## 42. Home Wi-Fi with the phone locked
 
@@ -394,5 +395,7 @@ Needs a signed build (shared keychain group and the Network Extensions capabilit
 2. Close Help&I on phone B (swipe it away) and lock it. Press Help on phone A.
 3. Tap phone B's alert and acknowledge.
 4. Take phone B off the Wi-Fi (another network or mobile data only) and press Help on phone A again.
+5. On phone A, also set up Keep listening on this Wi-Fi, close every other phone's Help&I, and press Help on phone A.
+6. With phone B listening locked, press Help on phone A, then I'm OK; then press Help again and acknowledge it on phone C.
 
-Pass: in step 2 phone B alerts within a few seconds, naming the caller, even with the app closed and the phone locked. In step 3 phone A shows the acknowledgement. In step 4 phone B does not alert over Wi-Fi, and phone A shows the cross for Home Wi-Fi (other routes as set up).
+Pass: in step 2 phone B alerts within a few seconds, naming the caller, even with the app closed and the phone locked. In step 3 phone A shows the acknowledgement. In step 4 phone B does not alert over Wi-Fi, and phone A shows the cross for Home Wi-Fi (other routes as set up). In step 5 phone A shows the cross for Home Wi-Fi: its own listener never counts as another phone. In step 6 phone B alerts once for the call, never again for its resends; after I'm OK its alert becomes a calm "says they're OK now", and after phone C's acknowledgement phone B's alert goes.

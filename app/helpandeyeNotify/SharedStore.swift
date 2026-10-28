@@ -9,13 +9,17 @@ import Security
 enum SharedStore {
     static func group() -> GroupState? { saved()?.group }
 
-    static func saved() -> SavedState? {
+    /// This phone's keys, so the local push extension can prove it is this member on the Wi-Fi.
+    static func identity() -> DeviceIdentity? { read("identity").flatMap { try? DeviceIdentity(rawRepresentation: $0) } }
+
+    static func saved() -> SavedState? { read("state").flatMap { try? JSONDecoder().decode(SavedState.self, from: $0) } }
+
+    private static func read(_ account: String) -> Data? {
         guard let accessGroup = Bundle.main.object(forInfoDictionaryKey: "HelpAKeychainGroup") as? String, !accessGroup.isEmpty else { return nil }
         let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "com.andeye.help",
-                                kSecAttrAccount as String: "state", kSecAttrAccessGroup as String: accessGroup, kSecReturnData as String: true]
+                                kSecAttrAccount as String: account, kSecAttrAccessGroup as String: accessGroup, kSecReturnData as String: true]
         var out: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess, let data = out as? Data,
-              let saved = try? JSONDecoder().decode(SavedState.self, from: data) else { return nil }
-        return saved
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess else { return nil }
+        return out as? Data
     }
 }

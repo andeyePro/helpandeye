@@ -364,7 +364,7 @@ public final class HelpEngine: ObservableObject {
             spawn { await self.boxReady() }
         }
         relay.configure(group: group, identity: identity)
-        homeWiFi.configure(group: group)
+        homeWiFi.configure(group: group, me: saved?.me, identity: identity)
         publishMembersIfDue()
         checkGaps()
     }
@@ -521,14 +521,14 @@ public final class HelpEngine: ObservableObject {
         settleCall(r.unit, r.number, Settled(state: .closedByCaller, by: n, at: now()))
     }
 
-    /// A reason for closing goes over the internet only, so needs it.
+    /// A reason for closing goes over the internet or home Wi-Fi only, never the radio, so needs one.
     public var canSendReason: Bool { canSendOffAir }
 
     /// A coordinator closes someone's call, recording the caller's consent or a reason.
     @discardableResult
     public func close(_ key: IncomingRequest.Key, consent: Bool, reason: String = "") -> Bool {
         let reason = MeshText.fit(reason.trimmingCharacters(in: .whitespacesAndNewlines), bytes: HelpFrame.maxReasonBytes)
-        // A reason goes over the internet only; without it, it would reach nobody else.
+        // A reason never goes on the radio; without the internet or home Wi-Fi it would reach nobody.
         guard me?.role == .coordinator, let n = saved?.me, activity.inbox.requests[key] != nil,
               consent || (!reason.isEmpty && canSendOffAir) else { return false }
         settleCall(key.unit, key.request, Settled(state: consent ? .closedWithConsent : .closedWithReason, by: n, at: now(), reason: consent ? "" : reason))
@@ -542,8 +542,8 @@ public final class HelpEngine: ObservableObject {
                         as: n, identity: identity, group: groupID)
     }
 
-    /// Settles a call here and tells everyone, signed. A reason goes over the internet only; the
-    /// radio carries the close without it.
+    /// Settles a call here and tells everyone, signed. A reason goes over the internet and home
+    /// Wi-Fi only; the radio carries the close without it.
     private func settleCall(_ unit: UInt32, _ request: UInt16, _ s: Settled) {
         let key = IncomingRequest.Key(unit: unit, request: request)
         settleCall(key, s, via: nil)
@@ -576,7 +576,7 @@ public final class HelpEngine: ObservableObject {
         case .callerOK: log("\(who) said they are OK after \(call)")
         case .closedByCaller: log("\(who) closed \(call)")
         case .closedWithConsent: log("\(who) closed \(call), with the caller's agreement")
-        case .closedWithReason: log("\(who) closed \(call)" + (a.reason.isEmpty ? ", with a reason heard over the internet only" : ": \(a.reason)"))
+        case .closedWithReason: log("\(who) closed \(call)" + (a.reason.isEmpty ? ", with a reason not sent on the radio" : ": \(a.reason)"))
         }
     }
 
@@ -609,7 +609,7 @@ public final class HelpEngine: ObservableObject {
     public var canSendPersonal: Bool { relay.isConfigured || mesh.isReady || homeWiFi.hasPeers }
 
     public func addNote(_ text: String) -> String? {
-        guard canSendPersonal else { return "Typed messages need the internet or your box." }
+        guard canSendPersonal else { return "Typed messages need the internet, home Wi-Fi or your box." }
         guard var r = activity.outgoing.popLast() else { return nil }
         // Sealed and signed for responders, long text goes as several notes that each fit the radio.
         let frames = group?.secrets.responderPublicKey == nil ? [r.addNote(text)] : r.addNotes(text, pieceBytes: ForResponders.maxNoteBytes)
@@ -682,11 +682,13 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// What is too personal for the radio goes over the internet and home Wi-Fi: on the Wi-Fi it
-    /// never leaves the house. Nil once either took it.
+    /// never leaves the house.
     private func sendOffAir(_ frame: HelpFrame) async -> String? {
         let viaWiFi = homeWiFi.hasPeers ? await homeWiFi.send(frame) : homeWiFi.unavailableReason
-        let viaRelay = relay.isConfigured ? await relay.send(frame, wake: nil) : (relay.lastProblem ?? "Internet route not set up")
-        return viaWiFi == nil ? nil : viaRelay
+        guard relay.isConfigured else { return viaWiFi }
+        // With the internet route set up, its answer counts: the one it was meant for, such as a
+        // coordinator, may not be on this Wi-Fi.
+        return await relay.send(frame, wake: nil)
     }
 
     private var canSendOffAir: Bool { relay.isConfigured || homeWiFi.hasPeers }
@@ -1081,7 +1083,9 @@ public final class HelpEngine: ObservableObject {
         // coordinator chose, until a responder has checked.
         case _ where r.callerIsOK:
             let p = group?.profile(ofUnit: key.unit) ?? .standard
-            let start = max(turnAt, r.settled?.at ?? t)
+            // From when they said so, but never before this phone heard the call or after now,
+            // whatever the caller's clock says.
+            let start = max(turnAt, min(max(r.settled?.at ?? t, r.firstHeardAt), t))
             if let limit = p.calmReminders {
                 // Counted from when they said so, so topping up never adds more.
                 times = Array(alertTimes(turnAt: start, every: p.calmEvery, from: start, count: max(limit, 1))
@@ -1220,7 +1224,7 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// Asks the group's coordinators to change one of this person's settings. Over the internet
-    /// only, as what they write is personal. Returns why it could not go, if it could not.
+    /// and home Wi-Fi only, as what they write is personal. Returns why it could not go, if it could not.
     public func askCoordinator(about setting: Profile.Setting?, _ text: String) async -> String? {
         guard let n = saved?.me else { return "Not in a group" }
         guard canSendOffAir else { return "Needs the internet route, or another of the group's phones on this Wi-Fi" }

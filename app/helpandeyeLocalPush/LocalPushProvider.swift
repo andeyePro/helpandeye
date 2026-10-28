@@ -13,33 +13,63 @@ final class LocalPushProvider: NEAppPushProvider {
 
     override func start() {
         Task { @MainActor in
-            guard let saved = SharedStore.saved() else { return }
+            guard let saved = SharedStore.saved(), let identity = SharedStore.identity() else { return }
             let home = HomeWiFi()
-            home.onFrame = { frame in Self.alert(for: frame, saved: saved) }
-            home.configure(group: saved.group)
+            home.onFrame = { [weak self] frame in self?.alert(for: frame, saved: saved) }
+            home.configure(group: saved.group, me: saved.me, identity: identity)
             self.home = home
         }
     }
 
     override func stop(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         Task { @MainActor in
-            self.home?.configure(group: nil)
+            if let identity = SharedStore.identity() { self.home?.configure(group: nil, me: nil, identity: identity) }
             self.home = nil
             completionHandler()
         }
     }
 
-    /// One alert per call, named as the app would name it, for a responder only. Never says help is
-    /// coming: it asks them to open Help&I.
-    private static func alert(for frame: HelpFrame, saved: SavedState) {
-        guard case let .call(unit, request, colour, _) = frame, colour != .green, unit != saved.group.member(saved.me)?.unit,
-              saved.group.member(saved.me)?.canRespond == true else { return }
+    /// Each call is alerted once, named as the app would name it, for a responder only, and its
+    /// alert goes when someone acknowledges or closes it. A caller who says they are OK after it gets
+    /// one calm alert instead; the app, once opened, follows the coordinator's reminders. Never says
+    /// help is coming: it asks them to open Help&I.
+    private var alerted: Set<IncomingRequest.Key> = []
+    private var calmed: Set<IncomingRequest.Key> = []
+
+    @MainActor private func alert(for frame: HelpFrame, saved: SavedState) {
+        guard let me = saved.group.member(saved.me), me.canRespond else { return }
+        let center = UNUserNotificationCenter.current()
+        switch frame {
+        case let .call(unit, request, colour, _) where colour != .green && unit != me.unit:
+            let key = IncomingRequest.Key(unit: unit, request: request)
+            guard alerted.insert(key).inserted else { return }
+            let who = saved.group.member(unit: unit)?.name ?? "Unit \(unit)"
+            post("\(who): \(ButtonWords.words(colour, in: saved.group.profile(ofUnit: unit)))", "Open Help&I to acknowledge.", key: key, urgent: true)
+        case let .ack(unit, request, _, _, _) where saved.group.acceptsAck(frame):
+            center.removeDeliveredNotifications(withIdentifiers: [Self.id(IncomingRequest.Key(unit: unit, request: request))])
+        case let .signed(signer, _, _):
+            guard let sender = saved.group.member(signer),
+                  case let .callState(unit, request, state, _, _)? = frame.verifiedInner(signedBy: sender.signingKey, group: saved.group.secrets.groupID),
+                  state == .callerOK || state == .closedByCaller ? sender.unit == unit : sender.role == .coordinator else { return }
+            let key = IncomingRequest.Key(unit: unit, request: request)
+            if state.closes {
+                center.removeDeliveredNotifications(withIdentifiers: [Self.id(key)])
+            } else if alerted.contains(key), calmed.insert(key).inserted {
+                let who = saved.group.member(unit: unit)?.name ?? "Unit \(unit)"
+                post("\(who) says they're OK now", "Please check on them, then acknowledge in Help&I.", key: key, urgent: false)
+            }
+        default: break
+        }
+    }
+
+    private static func id(_ key: IncomingRequest.Key) -> String { "wifi-\(key.unit)-\(key.request)" }
+
+    private func post(_ title: String, _ body: String, key: IncomingRequest.Key, urgent: Bool) {
         let content = UNMutableNotificationContent()
-        let who = saved.group.member(unit: unit)?.name ?? "Unit \(unit)"
-        content.title = "\(who): \(ButtonWords.words(colour, in: saved.group.profile(ofUnit: unit)))"
-        content.body = "Open Help&I to acknowledge."
+        content.title = title
+        content.body = body
         content.sound = .default
-        content.interruptionLevel = .timeSensitive
-        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "wifi-\(unit)-\(request)", content: content, trigger: nil))
+        content.interruptionLevel = urgent ? .timeSensitive : .active
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: Self.id(key), content: content, trigger: nil))
     }
 }

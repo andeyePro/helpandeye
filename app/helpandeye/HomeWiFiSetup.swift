@@ -7,8 +7,13 @@ import SwiftUI
     @Published private(set) var network: String?
     @Published private(set) var problem: String?
 
+    /// The listener can read the group only from a keychain shared with it, which needs a signed
+    /// copy of Help&I. Without one it would run and hear nothing, so it is not offered.
+    let canListenLocked = !((Bundle.main.object(forInfoDictionaryKey: "HelpAKeychainGroup") as? String) ?? "").isEmpty
+
     func load() async {
-        network = (try? await NEAppPushManager.loadAllFromPreferences())?.first?.matchSSIDs.first
+        let manager = (try? await NEAppPushManager.loadAllFromPreferences())?.first
+        network = manager?.isEnabled == true ? manager?.matchSSIDs.first : nil
     }
 
     func listen(on ssid: String) async {
@@ -29,9 +34,13 @@ import SwiftUI
     }
 
     func stop() async {
-        guard let manager = (try? await NEAppPushManager.loadAllFromPreferences())?.first else { return }
-        try? await manager.removeFromPreferences()
-        network = nil
+        guard let manager = (try? await NEAppPushManager.loadAllFromPreferences())?.first else { network = nil; return }
+        do {
+            try await manager.removeFromPreferences()
+            network = nil
+        } catch {
+            problem = "Could not stop it: \(error.localizedDescription)."
+        }
     }
 }
 
@@ -44,9 +53,12 @@ struct HomeWiFiSection: View {
     var body: some View {
         Section(header: Header("Home Wi-Fi")) {
             let n = model.home.peerCount
+            if let problem = model.home.problem { Text(problem).foregroundStyle(Color.warning) }
             Text(n == 0 ? "No other phones of the group on this Wi-Fi now."
                  : "\(n) other phone\(n == 1 ? "" : "s") of the group on this Wi-Fi: calls reach them directly, with no internet.")
-            if let network = setup.network {
+            if !setup.canListenLocked {
+                Text("Only while Help&I is open. Listening with this phone locked needs a signed copy of Help&I, which this is not.")
+            } else if let network = setup.network {
                 Text("Listening on \(network), even with this phone locked.")
                 Button("Stop listening when locked") { Task { await setup.stop() } }
             } else {
