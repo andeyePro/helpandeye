@@ -81,7 +81,11 @@ final class AppModel: ObservableObject {
 
     func createGroup(name: String, myName: String, call: Bool, phone: String?) { engine.createGroup(name: name, myName: myName, call: call, phone: phone) }
     func setMyPhone(_ phone: String) { engine.setMyPhone(phone) }
-    func joined(_ group: GroupState, as number: UInt16, invitedBy: UInt16?) { engine.joined(group, as: number, invitedBy: invitedBy) }
+    func joined(_ group: GroupState, as number: UInt16, invitedBy: UInt16?) {
+        // A group already joined as a further one is never joined twice.
+        guard !others.contains(where: { $0.engine.group?.secrets.groupID == group.secrets.groupID }) else { return }
+        engine.joined(group, as: number, invitedBy: invitedBy)
+    }
     func updateGroup(_ change: (inout GroupState) -> Void) { engine.updateGroup(change) }
     func leave() { engine.leave() }
     func setRelay(_ url: String) { engine.setRelay(url) }
@@ -119,6 +123,8 @@ final class AppModel: ObservableObject {
         link.onFrame = { [weak e] in e?.receive($0, via: .mesh) }
         link.onText = { [weak e] in e?.receiveText(from: $0, $1) }
         relay.onFrame = { [weak e] in e?.receive($0, via: .internet) }
+        relay.onAllowanceLow = { [weak e] in e?.raise(.allowanceLow) }
+        relay.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         relay.pushToken = self.relay.pushToken
         e.bandChanged(board.selfInfo?.radio.band)
         e.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
@@ -131,10 +137,11 @@ final class AppModel: ObservableObject {
     func joinedAnother(_ group: GroupState, as number: UInt16, invitedBy: UInt16?) -> Bool {
         guard group.member(number)?.role == .responder,
               !engines.contains(where: { $0.group?.secrets.groupID == group.secrets.groupID }) else { return false }
-        let tag = "g" + group.secrets.groupID.prefix(4).map { String(format: "%02x", $0) }.joined()
-        Store.otherGroups.append(tag)
+        let tag = "g" + group.secrets.groupID.map { String(format: "%02x", $0) }.joined()
         start(tag)
         others.last?.engine.joined(group, as: number, invitedBy: invitedBy)
+        // Remembered only once joined, so an interrupted join never comes back as an empty group.
+        Store.otherGroups.append(tag)
         return true
     }
 

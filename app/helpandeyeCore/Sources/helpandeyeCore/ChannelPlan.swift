@@ -17,42 +17,13 @@ public enum ChannelPlan {
         public let secret: Data
     }
 
-    public struct Result: Equatable, Sendable {
-        /// Slots to write, in order.
-        public let writes: [Write]
-        /// Where the current and previous channels will be once the writes are done.
-        public let current: UInt8?
-        public let previous: UInt8?
-    }
-
-    /// `secrets` is the current channel secret first, then the previous one during a changeover.
-    /// A slot is free if it is empty, or was written by Help&I for a key the group no longer uses.
-    public static func plan(slots: [Slot], secrets: [Data]) -> Result {
-        var free = slots.filter { s in
-            let empty = s.name.isEmpty && !s.secret.contains(where: { $0 != 0 })
-            let stale = s.name.hasPrefix("Help&I") && !secrets.contains(s.secret)
-            return empty || stale
-        }.map(\.index).sorted()
-        var writes: [Write] = []
-        var placed: [UInt8?] = []
-        for (n, secret) in secrets.prefix(2).enumerated() {
-            if let found = slots.first(where: { $0.secret == secret })?.index {
-                placed.append(found)
-            } else if !free.isEmpty {
-                let i = free.removeFirst()
-                writes.append(Write(index: i, name: n == 0 ? "Help&I" : "Help&I old", secret: secret))
-                placed.append(i)
-            } else {
-                placed.append(nil)
-            }
-        }
-        return Result(writes: writes, current: placed.first ?? nil, previous: placed.count > 1 ? placed[1] : nil)
-    }
-
-    /// For one box serving several groups (MeshHub): `groups` is each group's current secret, then
-    /// its previous one during a changeover, in order of group. Current channels are placed before
-    /// any previous one, so a full box keeps every group able to call. Returns the slots to write
-    /// and where each secret will be.
+    /// Where each group's channels go on a box (several groups can share one, MeshHub): `groups`
+    /// is each group's current secret, then its previous one during a changeover, in order of
+    /// group. A slot is free if it is empty, or was written by Help&I for a key no group uses.
+    /// Current channels come first: if there is no free slot for one, it takes a slot holding a
+    /// previous channel, so a group in a changeover never keeps another group off the box. Only
+    /// when every slot holds someone else's channel or a current one does a group go without.
+    /// Returns the slots to write and where each secret will be.
     public static func plan(slots: [Slot], groups: [[Data]]) -> (writes: [Write], channels: [Data: UInt8]) {
         let wanted = Set(groups.flatMap { $0.prefix(2) })
         var free = slots.filter { s in
@@ -65,14 +36,24 @@ public enum ChannelPlan {
         // Every group's current channel first, then the old ones.
         let order = groups.enumerated().compactMap { g in g.element.first.map { (g.offset, 0, $0) } }
             + groups.enumerated().compactMap { g in g.element.count > 1 ? (g.offset, 1, g.element[1]) : nil }
+        let previous = Set(groups.compactMap { $0.count > 1 ? $0[1] : nil })
+        let current = Set(groups.compactMap(\.first))
+        var given: Set<Data> = []
         for (group, n, secret) in order where channels[secret] == nil {
-            if let found = slots.first(where: { $0.secret == secret })?.index {
+            let base = group == 0 ? "Help&I" : "Help&I \(group + 1)"
+            let used = Set(channels.values)
+            if !given.contains(secret), let found = slots.first(where: { $0.secret == secret })?.index {
                 channels[secret] = found
             } else if !free.isEmpty {
                 let i = free.removeFirst()
-                let base = group == 0 ? "Help&I" : "Help&I \(group + 1)"
                 writes.append(Write(index: i, name: n == 0 ? base : base + " old", secret: secret))
                 channels[secret] = i
+            } else if n == 0, let taken = slots.first(where: { previous.contains($0.secret) && !current.contains($0.secret) && !used.contains($0.index) }) {
+                // A previous channel gives way to a current one.
+                given.insert(taken.secret)
+                channels[taken.secret] = nil
+                writes.append(Write(index: taken.index, name: base, secret: secret))
+                channels[secret] = taken.index
             }
         }
         return (writes, channels)

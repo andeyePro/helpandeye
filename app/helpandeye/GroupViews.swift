@@ -175,6 +175,7 @@ extension Result {
 struct GroupView: View {
     @EnvironmentObject var model: AppModel
     @State private var inviting = false
+    @State private var leaveFirstLast = false
 
     var body: some View {
         NavigationStack {
@@ -236,7 +237,12 @@ struct GroupView: View {
                 }
                 DisplaySection()
                 Section {
-                    Button("Leave this group", role: .destructive) { model.leave() }.foregroundStyle(Color.warning)
+                    // The first group goes last: the others' calls are answered from its screens.
+                    Button("Leave this group", role: .destructive) {
+                        if model.others.isEmpty { model.leave() } else { leaveFirstLast = true }
+                    }
+                    .foregroundStyle(Color.warning)
+                    if leaveFirstLast { Text("Leave your other groups first, under Other groups you respond in.").foregroundStyle(Color.warning) }
                 }
             }
             .navigationTitle(model.group?.name ?? "Group")

@@ -96,18 +96,25 @@ final class ChannelPlanTests: XCTestCase {
     func slot(_ i: UInt8, _ name: String, _ secret: Data) -> ChannelPlan.Slot { .init(index: i, name: name, secret: secret) }
 
     func testFindsOrWritesTheChannels() {
-        let p = ChannelPlan.plan(slots: [slot(0, "Public", other), slot(1, "", Data(count: 16)), slot(2, "Help&I", old)], secrets: [new, old])
+        let p = ChannelPlan.plan(slots: [slot(0, "Public", other), slot(1, "", Data(count: 16)), slot(2, "Help&I", old)], groups: [[new, old]])
         XCTAssertEqual(p.writes, [.init(index: 1, name: "Help&I", secret: new)])
-        XCTAssertEqual(p.current, 1); XCTAssertEqual(p.previous, 2)
+        XCTAssertEqual(p.channels, [new: 1, old: 2])
     }
 
-    func testAFullBoxRecoversWhenTheChangeoverEnds() {
+    func testOnAFullBoxTheCurrentChannelTakesTheOldOnesSlot() {
         let full = [slot(0, "Public", other), slot(1, "Help&I", old)]
-        let during = ChannelPlan.plan(slots: full, secrets: [new, old])
-        XCTAssertNil(during.current, "no room for the new channel while the old one is still needed")
-        let after = ChannelPlan.plan(slots: full, secrets: [new])
-        XCTAssertEqual(after.writes, [.init(index: 1, name: "Help&I", secret: new)], "the old slot is reused")
-        XCTAssertEqual(after.current, 1)
+        let during = ChannelPlan.plan(slots: full, groups: [[new, old]])
+        XCTAssertEqual(during.writes, [.init(index: 1, name: "Help&I", secret: new)], "calls on the new key matter more")
+        XCTAssertEqual(during.channels, [new: 1])
+        let after = ChannelPlan.plan(slots: full, groups: [[new]])
+        XCTAssertEqual(after.channels, [new: 1], "and the old slot is reused once the changeover ends")
+    }
+
+    func testAGroupInAChangeoverNeverKeepsAnotherOffTheBox() {
+        let b = Data(repeating: 3, count: 16)
+        let p = ChannelPlan.plan(slots: [slot(0, "Help&I", new), slot(1, "Help&I old", old)], groups: [[new, old], [b]])
+        XCTAssertEqual(p.channels, [new: 0, b: 1])
+        XCTAssertEqual(p.writes, [.init(index: 1, name: "Help&I 2", secret: b)])
     }
 
     func testSeveralGroupsShareTheBoxsChannelsCurrentOnesFirst() {
@@ -124,8 +131,8 @@ final class ChannelPlanTests: XCTestCase {
     }
 
     func testOtherChannelsAreNeverOverwritten() {
-        let p = ChannelPlan.plan(slots: [slot(0, "Public", other), slot(1, "Family", Data(repeating: 5, count: 16))], secrets: [new])
+        let p = ChannelPlan.plan(slots: [slot(0, "Public", other), slot(1, "Family", Data(repeating: 5, count: 16))], groups: [[new]])
         XCTAssertTrue(p.writes.isEmpty)
-        XCTAssertNil(p.current)
+        XCTAssertNil(p.channels[new])
     }
 }

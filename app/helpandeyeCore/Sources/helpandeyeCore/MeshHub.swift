@@ -10,6 +10,8 @@ import Foundation
     var unavailableReason: String { get }
     /// The channel secrets to listen on, each group's current first, in order of group.
     var channelGroups: [[Data]] { get set }
+    /// Whether the box holds the channel with this secret, so the group can use the radio at all.
+    func hasChannel(_ secret: Data) -> Bool
     /// Sends on the channels of these secrets only.
     func send(_ frame: HelpFrame, urgent: Bool, on secrets: [Data]) async -> MeshSendResult
     func sendText(_ text: String, to key: Data) async -> MeshSendResult
@@ -73,10 +75,14 @@ import Foundation
 
     fileprivate init(hub: MeshHub) { self.hub = hub }
 
-    public var isReady: Bool { hub.box.isReady }
+    /// Ready only if the box holds this group's current channel: a group squeezed off a full box
+    /// says so, with the cross, rather than seeming covered.
+    public var isReady: Bool { hub.box.isReady && secrets.first.map(hub.box.hasChannel) == true }
     public var radio: RadioSettings? { hub.box.radio }
     public var boxPublicKey: Data? { hub.box.boxPublicKey }
-    public var unavailableReason: String { hub.box.unavailableReason }
+    public var unavailableReason: String {
+        hub.box.isReady ? "The box has no free channel for this group" : hub.box.unavailableReason
+    }
     public var channelsPerSend: Int { max(secrets.count, 1) }
     public var secrets: [Data] = [] { didSet { if secrets != oldValue { hub.updateChannels() } } }
     public var sharedAirtime: AirtimeLedger? { hub.airtime }

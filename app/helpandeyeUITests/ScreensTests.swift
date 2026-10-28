@@ -110,8 +110,9 @@ final class ScreensTests: XCTestCase {
             let frame = issue.element?.frame ?? .zero
             let detail = "\(name): \(issue.compactDescription) – \(issue.element?.label ?? "") \(frame)"
             let screen = self.app.windows.firstMatch.frame
-            if issue.auditType == .contrast, bars.contains(where: { $0.intersects(frame) }) || !screen.contains(frame) {
-                // Read through a bar's blur, or partly scrolled off the screen or out of a sheet.
+            if issue.auditType == .contrast, issue.element == nil || bars.contains(where: { $0.intersects(frame) }) || !screen.contains(frame) {
+                // Read through a bar's blur, partly scrolled off the screen or out of a sheet, or no
+                // element of the app's at all (what the system draws, such as the glass tab bar).
                 print("ADVICE under a bar or off the screen: " + detail)
             } else if issue.auditType == .textClipped || issue.compactDescription.contains("partially unsupported") {
                 print("ADVICE " + detail)

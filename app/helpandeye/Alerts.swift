@@ -42,6 +42,8 @@ import UserNotifications
         center.removeDeliveredNotifications(withIdentifiers: ids(key))
     }
 
+    /// Removes this group's pending alerts. It finds them first, so an alert scheduled in the
+    /// moment between could go too; it is only used on leaving the group.
     func cancelAll() {
         center.getPendingNotificationRequests { [isMine = self.isMine] pending in
             let mine = pending.map(\.identifier).filter(isMine)

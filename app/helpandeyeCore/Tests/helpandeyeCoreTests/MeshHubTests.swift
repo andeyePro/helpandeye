@@ -7,6 +7,9 @@ import XCTest
     var boxPublicKey: Data? = Data(repeating: 7, count: 32)
     var unavailableReason = "No box"
     var channelGroups: [[Data]] = []
+    /// Channels the box could not fit.
+    var full: Set<Data> = []
+    func hasChannel(_ secret: Data) -> Bool { channelGroups.contains { $0.contains(secret) } && !full.contains(secret) }
     var sent: [(HelpFrame, [Data])] = []
     func send(_ frame: HelpFrame, urgent: Bool, on secrets: [Data]) async -> MeshSendResult { sent.append((frame, secrets)); return .sent }
     func sendText(_ text: String, to key: Data) async -> MeshSendResult { .sent }
@@ -61,6 +64,16 @@ import XCTest
         XCTAssertNil(a.activity.inbox.requests[.init(unit: 99_999, request: 1)])
         hub.remove(gb.secrets.groupID)
         XCTAssertEqual(box.channelGroups, [[ga.secrets.channelSecret]], "leaving a group frees its channel")
+    }
+
+    func testAGroupWithNoChannelOnTheBoxIsNotReadyAndSaysWhy() async {
+        let (a, link, ga) = engine("Mill Lane")
+        box.full = [ga.secrets.channelSecret]
+        XCTAssertFalse(link.isReady)
+        XCTAssertEqual(link.unavailableReason, "The box has no free channel for this group")
+        a.press(.red)
+        await a.settle()
+        XCTAssertEqual(a.current?.routes[.mesh], .failed("The box has no free channel for this group"), "the cross, not a false calm")
     }
 
     func testTheGroupsShareOneBoxsRadioAllowance() async {

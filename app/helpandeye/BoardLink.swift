@@ -198,7 +198,8 @@ final class BoardLink: NSObject, ObservableObject {
             await setUpOnce()
         } while setUpAgain
         guard commands.isUp else { return }
-        if helpChannel != nil || channelGroups.isEmpty {
+        // Ready if any group can use the radio; each group's own view says if it cannot.
+        if !channels.isEmpty || channelGroups.isEmpty {
             if state != .ready { state = .ready; await drainMessages() }
         } else {
             state = .failed("No free channel on the box")
@@ -232,10 +233,15 @@ final class BoardLink: NSObject, ObservableObject {
         // so a drain running meanwhile never throws away a frame on a channel just set up.
         let existing = Set(slots.filter { want.contains($0.secret) }.map(\.index))
         listenChannels.formUnion(existing)
+        // Each slot is known by its secret as soon as it is listened to, so a frame heard meanwhile
+        // can be handed to its group, not dropped.
+        for s in slots where want.contains(s.secret) && plan.channels[s.secret] == s.index { channels[s.secret] = s.index }
         var written: Set<UInt8> = []
         for w in plan.writes {
             if case .ok? = await run(.setChannel(index: w.index, name: w.name, secret: w.secret), expect: okOrError) {
                 written.insert(w.index)
+                channels = channels.filter { $0.value != w.index }
+                channels[w.secret] = w.index
                 listenChannels.insert(w.index)
             }
         }
@@ -391,6 +397,8 @@ extension BoardLink: @preconcurrency CBPeripheralDelegate {
 
 extension BoardLink: SharedBox {
     var isReady: Bool { state == .ready }
+
+    func hasChannel(_ secret: Data) -> Bool { channels[secret] != nil }
 
     /// Which group's channel a slot holds.
     fileprivate func secret(of channel: UInt8) -> Data? { channels.first { $0.value == channel }?.key }
