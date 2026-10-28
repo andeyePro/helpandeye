@@ -149,7 +149,7 @@ public final class HelpEngine: ObservableObject {
     @Published public private(set) var saved: SavedState?
     @Published public private(set) var activity: Activity { didSet { store.save(activity) } }
     /// Notices a coordinator must acknowledge. Each phone widens its own copy until it hears an
-    /// acknowledgement (app spec, "Tiers and cost" and "Rota gaps").
+    /// acknowledgement (app spec, "The relay's daily allowance" and "Rota gaps").
     public var notices: [Notice: CoordinatorAlert] { activity.notices }
     /// Whether this responder's own acknowledgements went out.
     @Published public private(set) var ackSends: [IncomingRequest.Key: [Route: RouteState]] = [:]

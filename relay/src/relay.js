@@ -250,7 +250,7 @@ export class GroupRelay {
 }
 
 /// Counts requests across all groups for the day, so coordinators hear before the free allowance
-/// runs out (app spec, "Tiers and cost").
+/// runs out (app spec, "The relay's daily allowance").
 export class Meter {
   constructor(storage, now = () => Date.now()) {
     this.storage = storage;
