@@ -19,7 +19,9 @@
 
 ## Open (work)
 
-- [ ] **Responders' own key, one message for all of them** - proposed 2026-10-28, wording of decision 12 awaiting Martin: personal content sealed once with a key only responders hold and sent as one binary channel message, instead of one text-encoded direct message per responder. Positions as a change from the last position each responder is known to have received.
+- [ ] **Responders' own key, one message for all of them** - decision 12 as agreed 2026-10-28: personal content sealed once with a key only responders hold, sent as one binary channel message instead of one text-encoded direct message per responder; positions as the change from the last one each responder confirmed receiving, or in full when that is smaller or unknown. Not built yet.
+- [ ] **Smaller welcome codes** - a welcome is about 1,600 characters for a two-person group and grows with every member, because the whole group state goes as JSON whose keys are base64, then base64 again. A compact binary form, sent compressed, would be a fraction of that.
+- [ ] **One box for a household** - MeshCore's companion firmware takes one Bluetooth connection at a time, so each phone needs its own box. Sharing one box needs Help&I's own firmware (see Buttons on a plain Heltec) or a shared hub.
 - [ ] **Responders in more than one group** - Martin, 2026-10-28: "It would be useful if responders at least could be members of multiple groups."
 - [ ] **Group settings reach members at once** - button words and the relay address now reach members only when they next join or scan a key update; every one of the 15 frame kinds is in use, so this needs an extended frame kind.
 - [ ] **A default relay** - once a relay is deployed, new groups could use it without the coordinator entering an address.
