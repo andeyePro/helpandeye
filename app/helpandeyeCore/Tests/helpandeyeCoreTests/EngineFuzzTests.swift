@@ -121,6 +121,10 @@ import XCTest
                 w.log.append("\(step): \(p.engine.saved!.me) mesh \(p.mesh.isReady)")
             case 63..<70:
                 p.relay.isConfigured.toggle()
+            case 89..<93:
+                // Joins or leaves the home Wi-Fi, which some of the others share.
+                p.wifi.network = p.wifi.network == nil ? "home" : nil
+                w.log.append("\(step): \(p.engine.saved!.me) wifi \(p.wifi.network ?? "off")")
             case 70..<75:
                 w.lossRate = [0, 0, 0.3, 0.8, 1].randomElement(using: &rng)!
             case 80..<83:
@@ -163,7 +167,8 @@ import XCTest
                 let activity = try JSONDecoder().decode(Activity.self, from: JSONEncoder().encode(p.engine.activity))
                 await p.engine.settle()
                 p.engine = HelpEngine(identity: p.identity, mesh: p.mesh, relay: p.relay, alerts: p.alerts, store: NoStore(),
-                                      saved: state, activity: activity, calendar: Calendar(identifier: .gregorian), now: { [unowned w] in w.clock.now })
+                                      saved: state, activity: activity, calendar: Calendar(identifier: .gregorian), now: { [unowned w] in w.clock.now },
+                                      homeWiFi: p.wifi)
                 p.engine.bandChanged(p.mesh.radio?.band)
             case 75..<80:
                 switch Int.random(in: 0..<3, using: &rng) {

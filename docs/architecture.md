@@ -8,7 +8,8 @@ For contributors. What each part does and where its code is. The rules it follow
 | Part | Where | What it does |
 |---|---|---|
 | Core logic | `app/helpandeyeCore` | Swift package with no UI: message frames, request state, escalation, rota, check-ins, airtime, group keys, the MeshCore and relay protocols, and `HelpEngine`, which applies the rules. All tests are here (`swift test`), including end-to-end tests that run several engines over a fake radio and relay. |
-| Phone app | `app/helpandeye` | SwiftUI screens, and the real box (`BoardLink`), relay (`Relay`), notifications and storage plugged into the engine. |
+| Phone app | `app/helpandeye` | SwiftUI screens, and the real box (`BoardLink`), relay (`Relay`), home Wi-Fi link (`HomeWiFi`), notifications and storage plugged into the engine. |
+| Home Wi-Fi listener | `app/helpandeyeLocalPush` | A local push extension iOS runs on the named home Wi-Fi with the phone locked: it joins the group's phones as the app does and alerts for a call (decision 19). Needs a signed build. |
 | Watch app | `app/helpandeyeWatch` | Three buttons. Sends through the paired phone. |
 | Box | any Heltec LoRa board | MeshCore's standard companion firmware, unchanged. The app writes the group's private channel into it. |
 | Relay | `relay/` | Cloudflare Worker. Stores and forwards sealed messages for the internet route. |
@@ -16,8 +17,11 @@ For contributors. What each part does and where its code is. The rules it follow
 ## A red press
 
 1. The caller's app makes a request with the next request number and sends a 12-byte call frame at
-   once on every route that works without the caller's help: the box (a MeshCore channel datagram,
-   data type `0xFF48`, on the group's private channel) and the relay (sealed with the group key).
+   once on every route that works without the caller's help: the group's other phones on the same
+   Wi-Fi (`LocalWire`: a Bonjour connection on which each end has proved which member it is, and
+   each frame sealed with the group key and confirmed once read), the box (a MeshCore channel
+   datagram, data type `0xFF48`, on the group's private channel) and the relay (sealed with the
+   group key).
    An unavailable route shows as "not sent" with its reason; if none was available, the cross shows
    at once.
 2. The call goes out again after 30 seconds, 1, 2 and 4 minutes, then every 10 minutes, until a

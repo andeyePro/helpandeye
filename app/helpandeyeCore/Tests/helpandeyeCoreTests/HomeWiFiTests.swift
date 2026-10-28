@@ -28,6 +28,26 @@ import XCTest
         XCTAssertEqual(t.caller.request?.status, .seen(responder: t.responder.engine.saved!.me))
     }
 
+    func testWithWiFiAndTheRelayBothWorkingEachCallIsHeardOnce() async {
+        for p in t.air.phones { p.relay.isConfigured = true }
+        await t.relaySetUp()
+        t.caller.engine.press(.red)
+        await t.air.run()
+        XCTAssertNil(t.caller.engine.addNote("Back door is open"))
+        await t.air.run()
+        let heard = t.responder.engine.activity.inbox.requests[t.key]
+        XCTAssertEqual(heard?.heardOn, [.wifi, .internet])
+        XCTAssertEqual(heard?.orderedNotes, ["Back door is open"], "once, though it came both ways")
+        XCTAssertEqual(t.responder.engine.activity.inbox.requests.count, 1)
+        XCTAssertEqual(t.caller.request?.routes[.wifi], .sent)
+        XCTAssertEqual(t.caller.request?.routes[.internet], .sent)
+        // Off the Wi-Fi, the relay alone still carries a follow-up.
+        t.responder.wifi.network = nil
+        t.caller.engine.add(.fallen)
+        await t.air.run()
+        XCTAssertEqual(t.responder.engine.activity.inbox.requests[t.key]?.orderedCategories, [.fallen])
+    }
+
     func testPersonalDetailAndAReasonCanGoOverHomeWiFi() async {
         t.caller.engine.press(.red)
         await t.air.run()
@@ -37,6 +57,18 @@ import XCTest
         XCTAssertTrue(t.coordinator.engine.close(t.key, consent: false, reason: "Came round, all well"))
         await t.air.run()
         XCTAssertEqual(t.responder.engine.activity.inbox.requests[t.key]?.settled?.reason, "Came round, all well")
+    }
+
+    func testWithTheInternetRouteSetUpACoordinatorsMessageCountsOnlyIfTheRelayTookIt() async {
+        t.coordinator.wifi.network = "elsewhere"
+        for p in t.air.phones { p.relay.isConfigured = true }
+        let refused = await t.caller.engine.askCoordinator(about: .sounds, "Too loud")
+        XCTAssertNotNil(refused, "only the responder at home heard it; the relay did not take it")
+        await t.relaySetUp()
+        let sent = await t.caller.engine.askCoordinator(about: .sounds, "Too loud")
+        XCTAssertNil(sent)
+        await t.air.run()
+        XCTAssertEqual(t.coordinator.engine.activity.changeRequests.count, 1)
     }
 
     func testAPhoneOffTheNetworkIsNotReachedAndTheCallSaysSo() async {
