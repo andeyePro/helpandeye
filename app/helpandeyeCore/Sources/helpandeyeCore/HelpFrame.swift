@@ -297,7 +297,7 @@ public enum HelpFrame: Equatable, Sendable {
         // The caller of this checks that the signer is the member or a coordinator.
         case .memberPhone: return frame
         // The caller of this checks that the signer owns the unit.
-        case .checkIns: return frame
+        case .checkIns, .note, .position: return frame
         default: return nil
         }
     }

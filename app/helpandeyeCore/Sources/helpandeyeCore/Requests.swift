@@ -74,6 +74,30 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
         return .followUp(unit: unit, request: number, part: part, category: .withdrawn)
     }
 
+    /// Typed text in pieces of at most `pieceBytes`, broken between words where it can be, each
+    /// its own note. The caller's own record keeps it whole.
+    public mutating func addNotes(_ typed: String, pieceBytes: Int) -> [HelpFrame] {
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return [] }
+        var pieces: [String] = [], piece = ""
+        for word in text.split(separator: " ", omittingEmptySubsequences: true).map(String.init) {
+            let joined = piece.isEmpty ? word : piece + " " + word
+            if joined.utf8.count <= pieceBytes { piece = joined; continue }
+            if !piece.isEmpty { pieces.append(piece) }
+            // A word too long for one piece is cut at a character boundary.
+            var rest = word
+            while rest.utf8.count > pieceBytes {
+                let head = MeshText.fit(rest, bytes: pieceBytes)
+                pieces.append(head)
+                rest = String(rest.dropFirst(head.count))
+            }
+            piece = rest
+        }
+        if !piece.isEmpty { pieces.append(piece) }
+        notes.append(text)
+        return pieces.map { .note(unit: unit, request: number, part: nextPart(), text: $0) }
+    }
+
     public mutating func addNote(_ typed: String) -> HelpFrame {
         let frame = HelpFrame.note(unit: unit, request: number, part: nextPart(), typed: typed)
         if case let .note(_, _, _, text) = frame { notes.append(text) }

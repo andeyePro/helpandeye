@@ -400,23 +400,63 @@ final class RelayModel {
         XCTAssertNotNil(responder.engine.activity.inbox.requests[key]?.position)
         XCTAssertEqual(coordinator.engine.activity.inbox.requests[key]?.orderedNotes, ["Back door is open"], "every responder reads it")
         XCTAssertNil(caller.engine.group?.secrets.responderPrivateKey, "a caller holds no responders' key")
-        for f in sealed { XCTAssertNil(ForResponders.open(f, in: caller.engine.group!), "so another caller cannot read it") }
+        for f in sealed { XCTAssertNil(ForResponders.open(f, in: caller.engine.group!, at: clock.now), "so another caller cannot read it") }
     }
 
-    func testSealedForRespondersIsSmallAndTamperProof() throws {
-        let note = HelpFrame.note(unit: caller.engine.me!.unit!, request: 1, part: 1, typed: "Back door")
-        let sealed = try XCTUnwrap(ForResponders.seal(note, from: caller.identity, in: caller.engine.group!))
-        XCTAssertEqual(sealed.encoded().count, note.encoded().count + 1 + 4 + 2 + 1 + 5 + 16, "only the clear header, salt and tag are added")
-        XCTAssertEqual(ForResponders.open(sealed, in: responder.engine.group!), note)
+    func testSealedForRespondersIsSmallSignedAndTamperProof() throws {
+        let g = caller.engine.group!, me = caller.engine.saved!.me, unit = caller.engine.me!.unit!
+        let note = HelpFrame.note(unit: unit, request: 1, part: 1, typed: "Back door")
+        let sealed = try XCTUnwrap(ForResponders.seal(note, from: caller.identity, as: me, in: g, at: clock.now).first)
+        XCTAssertEqual(sealed.encoded().count, note.encoded().count + (1 + 4 + 2 + 1) + 5 + 16 + (1 + 2 + 1 + 64),
+                       "the clear header, salt, tag and the caller's signature: nothing else")
+        XCTAssertEqual(ForResponders.open(sealed, in: responder.engine.group!, at: clock.now), note)
         guard case let .forResponders(u, r, p, box) = sealed else { return XCTFail() }
         var bad = box; bad[bad.startIndex + 8] ^= 1
-        XCTAssertNil(ForResponders.open(.forResponders(unit: u, request: r, part: p, sealed: bad), in: responder.engine.group!))
-        XCTAssertNil(ForResponders.open(.forResponders(unit: u, request: r &+ 1, part: p, sealed: box), in: responder.engine.group!),
-                     "its outside cannot be changed to another call")
+        XCTAssertNil(ForResponders.open(.forResponders(unit: u, request: r, part: p, sealed: bad), in: responder.engine.group!, at: clock.now))
+        XCTAssertNil(ForResponders.open(.forResponders(unit: u, request: r &+ 1, part: p, sealed: box), in: responder.engine.group!, at: clock.now),
+                     "its outside cannot be moved to another call")
         XCTAssertEqual(HelpFrame(sealed.encoded()), sealed)
-        let longest = HelpFrame.note(unit: 1, request: 1, part: 1, typed: String(repeating: "x", count: 500))
-        let big = try XCTUnwrap(ForResponders.seal(longest, from: caller.identity, in: caller.engine.group!))
-        XCTAssertLessThanOrEqual(big.encoded().count, 165, "the longest note still fits one MeshCore channel datagram")
+        let longest = HelpFrame.note(unit: unit, request: 1, part: 1, text: String(repeating: "x", count: ForResponders.maxNoteBytes))
+        let big = try XCTUnwrap(ForResponders.seal(longest, from: caller.identity, as: me, in: g, at: clock.now).first)
+        XCTAssertLessThanOrEqual(big.encoded().count, 165, "the longest piece still fits one MeshCore channel datagram")
+    }
+
+    func testAResponderCannotWriteAsACaller() throws {
+        // A responder can work out the sealing key, but cannot sign as the caller.
+        let g = responder.engine.group!, unit = caller.engine.me!.unit!
+        let fake = HelpFrame.position(unit: unit, request: 1, latitudeE7: 1, longitudeE7: 1, accuracy: 5)
+        let forged = try XCTUnwrap(ForResponders.seal(fake, from: responder.identity, as: responder.engine.saved!.me, in: g, at: clock.now).first)
+        XCTAssertNil(ForResponders.open(forged, in: coordinator.engine.group!, at: clock.now))
+        let claimed = try XCTUnwrap(ForResponders.seal(fake, from: responder.identity, as: caller.engine.saved!.me, in: g, at: clock.now).first)
+        XCTAssertNil(ForResponders.open(claimed, in: coordinator.engine.group!, at: clock.now), "nor by naming the caller")
+    }
+
+    func testDuringAChangeoverRespondersNotYetUpdatedStillRead() throws {
+        let old = responder.engine.group!
+        var updated = caller.engine.group!
+        updated.previousSecrets = updated.secrets
+        updated.previousUntil = clock.now.addingTimeInterval(86_400)
+        updated.secrets = updated.secrets.rotated()
+        let note = HelpFrame.note(unit: caller.engine.me!.unit!, request: 1, part: 1, typed: "Back door")
+        let sealed = ForResponders.seal(note, from: caller.identity, as: caller.engine.saved!.me, in: updated.copy(for: .caller), at: clock.now)
+        XCTAssertEqual(sealed.count, 2, "once with each responders' key in use")
+        XCTAssertEqual(sealed.compactMap { ForResponders.open($0, in: old, at: self.clock.now) }, [note], "the old key still reads it")
+        let after = ForResponders.seal(note, from: caller.identity, as: caller.engine.saved!.me, in: updated, at: clock.now.addingTimeInterval(2 * 86_400))
+        XCTAssertEqual(after.count, 1, "and only the new key once the changeover is over")
+    }
+
+    func testLongTypedTextGoesInPiecesThatEachFit() async {
+        caller.mesh.isReady = true
+        caller.engine.press(.red)
+        await air.run()
+        let text = "The back door is open and the key is under the blue pot by the step, please come round the side"
+        XCTAssertNil(caller.engine.addNote(text))
+        await air.run()
+        let pieces = responder.engine.activity.inbox.requests[key]?.orderedNotes ?? []
+        XCTAssertGreaterThan(pieces.count, 1)
+        XCTAssertEqual(pieces.joined(separator: " "), text, "broken between words, nothing lost")
+        XCTAssertTrue(air.groupSends.allSatisfy { $0.encoded().count <= 165 })
+        XCTAssertEqual(caller.request?.notes, [text], "the caller's own record keeps it whole")
     }
 
     func testADirectMessageFromTheWrongBoxIsIgnored() async {

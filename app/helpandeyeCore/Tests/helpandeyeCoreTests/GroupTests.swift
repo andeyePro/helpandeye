@@ -59,6 +59,28 @@ final class GroupTests: XCTestCase {
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPANDI1:abcd")) { XCTAssertEqual($0 as? Joining.Failure, .otherVersion) }
     }
 
+    func testOnlyRespondersAreGivenTheRespondersKeyOnJoiningAndInUpdates() throws {
+        let coord = DeviceIdentity(), responderPhone = DeviceIdentity(), callerPhone = DeviceIdentity()
+        var group = newGroup(coord)
+        group.members[0] = Member(number: 1, name: "Sam", role: .coordinator, publicKey: coord.publicKey, signingKey: coord.signingPublicKey)
+        let ri = Joining.invitation(for: group, coordinator: coord, role: .responder)
+        let rw = try Joining.admit(Joining.request(ri, name: "R", call: false, respond: true, me: responderPhone), to: &group, invite: ri, coordinator: coord)
+        XCTAssertNotNil(try Joining.open(rw, invite: ri, me: responderPhone).secrets.responderPrivateKey)
+        let ci = Joining.invitation(for: group, coordinator: coord, role: .caller)
+        let cw = try Joining.admit(Joining.request(ci, name: "C", call: true, respond: false, me: callerPhone), to: &group, invite: ci, coordinator: coord)
+        XCTAssertNil(try Joining.open(cw, invite: ci, me: callerPhone).secrets.responderPrivateKey)
+        // New keys, as after a removal, and the key update for each member.
+        group.previousSecrets = group.secrets
+        group.secrets = group.secrets.rotated()
+        let current = try Joining.open(cw, invite: ci, me: callerPhone)
+        let forCaller = try Joining.openUpdate(Joining.update(group, for: group.member(cw.memberNumber)!, coordinator: coord), current: current, me: callerPhone)
+        XCTAssertNil(forCaller.secrets.responderPrivateKey)
+        XCTAssertNil(forCaller.previousSecrets?.responderPrivateKey)
+        let rCurrent = try Joining.open(rw, invite: ri, me: responderPhone)
+        let forResponder = try Joining.openUpdate(Joining.update(group, for: group.member(rw.memberNumber)!, coordinator: coord), current: rCurrent, me: responderPhone)
+        XCTAssertNotNil(forResponder.secrets.responderPrivateKey)
+    }
+
     func testWelcomeCodesAreCompactAndTheOldFormStillOpens() throws {
         let coord = DeviceIdentity(), newcomer = DeviceIdentity()
         var group = newGroup(coord)

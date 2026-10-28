@@ -272,6 +272,9 @@ public struct GroupState: Codable, Equatable, Sendable {
             if let k = m.signingKey { removedKeys.insert(k) }
             if let u = m.unit { removedUnits.insert(u) }
         case let .memberRole(number, role, block, version):
+            // Only responders are made coordinators (promote), so no one gains or loses the
+            // responders' key this way. A change that did would need a key update: a phone that
+            // stopped responding would still hold the key, and one that started would not.
             guard let i = members.firstIndex(where: { $0.number == number }), version > (roleVersions[number] ?? 0) else { return }
             members[i].role = role
             members[i].block = role == .coordinator ? block : nil

@@ -444,16 +444,18 @@ public final class HelpEngine: ObservableObject {
         if let frame { spawn { _ = await self.sendOptional(frame) } }
     }
 
-    /// Typed text and position never go on the group channel (decision 12): over the internet,
-    /// sealed with the group key, or else as direct messages to each responder's box.
+    /// Typed text and position go only to responders (decision 12), sealed once for all of them;
+    /// in a group made before responders had their own key, over the internet sealed with the
+    /// group key, or else as direct messages to each responder's box.
     public var canSendPersonal: Bool { relay.isConfigured || mesh.isReady }
 
     public func addNote(_ text: String) -> String? {
         guard canSendPersonal else { return "Typed messages need the internet or your box." }
         guard var r = activity.outgoing.popLast() else { return nil }
-        let frame = r.addNote(text)
+        // Sealed and signed for responders, long text goes as several notes that each fit the radio.
+        let frames = group?.secrets.responderPublicKey == nil ? [r.addNote(text)] : r.addNotes(text, pieceBytes: ForResponders.maxNoteBytes)
         activity.outgoing.append(r)
-        spawn { await self.sendPersonal(frame) }
+        spawn { for f in frames { await self.sendPersonal(f) } }
         return nil
     }
 
@@ -468,9 +470,11 @@ public final class HelpEngine: ObservableObject {
     /// group channel. A group made before responders had their own key falls back to a direct
     /// message to each responder's box.
     private func sendPersonal(_ frame: HelpFrame) async {
-        if let g = group, let sealed = ForResponders.seal(frame, from: identity, in: g) {
-            if relay.isConfigured, await relay.send(sealed, wake: nil) == nil { return }
-            _ = await sendOnMesh(sealed, kind: .optional)
+        if let g = group, let me = saved?.me, g.secrets.responderPublicKey != nil {
+            for sealed in ForResponders.seal(frame, from: identity, as: me, in: g, at: now()) {
+                if relay.isConfigured, await relay.send(sealed, wake: nil) == nil { continue }
+                _ = await sendOnMesh(sealed, kind: .optional)
+            }
             return
         }
         if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return }
@@ -740,7 +744,7 @@ public final class HelpEngine: ObservableObject {
             return
         case .forResponders:
             // Only a responder can open it; what is inside is handled as if it came plainly.
-            guard me?.canRespond == true, let g = group, let inner = ForResponders.open(frame, in: g) else { return }
+            guard me?.canRespond == true, let g = group, let inner = ForResponders.open(frame, in: g, at: now()) else { return }
             receive(inner, via: route)
             return
         case let .board(member, key, _):
