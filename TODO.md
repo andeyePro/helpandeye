@@ -20,12 +20,11 @@
 ## Open (work)
 
 - [ ] **Watch straight to the box** - not built: watchOS reportedly offers only Pair or Dismiss for a Bluetooth accessory, with no way to type the box's six-digit code, which MeshCore's companion firmware needs. Waiting on Martin trying it (Help&I-fromClaude T1). Out of reach of its phone, the watch uses its own internet only.
-- [ ] **Responders' own key, one message for all of them** - decision 12 as agreed 2026-10-28: personal content sealed once with a key only responders hold, sent as one binary channel message instead of one text-encoded direct message per responder; positions as the change from the last one each responder confirmed receiving, or in full when that is smaller or unknown. Not built yet.
+- [ ] **Positions as a change, confirmed by responders** - the rest of decision 12: a position sent as the change from the last one each responder confirmed receiving, or in full when that is smaller or unknown, with a small signed receipt from each responder for positions only. The responders' key and the single sealed message are done.
 - [ ] **Smaller welcome codes** - a welcome is about 1,600 characters for a two-person group and grows with every member, because the whole group state goes as JSON whose keys are base64, then base64 again. A compact binary form, sent compressed, would be a fraction of that.
 - [ ] **One box for a household** - MeshCore's companion firmware takes one Bluetooth connection at a time, so each phone needs its own box. Sharing one box needs Help&I's own firmware (see Buttons on a plain Heltec) or a shared hub.
 - [ ] **Responders in more than one group** - Martin, 2026-10-28: "It would be useful if responders at least could be members of multiple groups."
 - [ ] **Group settings reach members at once** - button words and the relay address now reach members only when they next join or scan a key update; every one of the 15 frame kinds is in use, so this needs an extended frame kind.
 - [ ] **A default relay** - once a relay is deployed, new groups could use it without the coordinator entering an address.
-- [ ] **Watch uses the group's button words** - the watch still shows the standard words.
 - [ ] Name callers in pushes: built (`app/helpandeyeNotify`), but needs signing with a shared keychain group. Set `HelpAKeychainGroup` in both Info.plist sections of `app/project.yml` to `$(AppIdentifierPrefix)com.andeye.help.shared`, and add the matching keychain-access-groups entitlement to both targets.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).

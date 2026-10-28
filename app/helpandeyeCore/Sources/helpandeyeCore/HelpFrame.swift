@@ -47,6 +47,9 @@ public enum HelpFrame: Equatable, Sendable {
     case note(unit: UInt32, request: UInt16, part: UInt8, text: String)
     /// Where the caller is, in degrees times 10^7, with accuracy in metres. Personal content too.
     case position(unit: UInt32, request: UInt16, latitudeE7: Int32, longitudeE7: Int32, accuracy: UInt16)
+    /// A note or position sealed once for all responders (ForResponders): the five-byte nonce
+    /// salt, then the ciphertext and its tag. Safe on the group channel: callers cannot open it.
+    case forResponders(unit: UInt32, request: UInt16, part: UInt8, sealed: Data)
     /// A caller turned check-ins on, changed them or turned them off (an empty list). Responders'
     /// phones then watch for a missed one too. A routine is personal, so this goes only over the
     /// internet or in a key update, never on the group channel.
@@ -82,7 +85,7 @@ public enum HelpFrame: Equatable, Sendable {
     /// MeshCore's radio-side limit for a channel datagram payload.
     public static let maxPayload = 165
 
-    enum Kind: UInt8 { case call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10, memberAdded = 11, memberRemoved = 12, memberName = 13, memberRole = 14, memberPhone = 15 }
+    enum Kind: UInt8 { case forResponders = 0, call = 1, followUp = 2, ack = 3, availability = 4, noticeAck = 5, note = 6, position = 7, checkIns = 8, board = 9, signed = 10, memberAdded = 11, memberRemoved = 12, memberName = 13, memberRole = 14, memberPhone = 15 }
 
     /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
     public static let maxNoteBytes = 120
@@ -98,6 +101,16 @@ public enum HelpFrame: Equatable, Sendable {
         // A signed frame may go only if what it wraps may.
         case let .signed(_, inner, _): HelpFrame(inner)?.mayGoOnGroupChannel ?? false
         default: true
+        }
+    }
+
+    /// The unit, request and part of a note (parts from 1) or position (part 0), the personal
+    /// content that goes sealed for responders.
+    public var personalPart: (UInt32, UInt16, UInt8)? {
+        switch self {
+        case let .note(unit, request, part, _): (unit, request, part)
+        case let .position(unit, request, _, _, _): (unit, request, 0)
+        default: nil
         }
     }
 
@@ -146,6 +159,8 @@ public enum HelpFrame: Equatable, Sendable {
         case let .memberName(member, name):
             let bytes = Data(MeshText.fit(name, bytes: 40).utf8)
             w.u8(Self.header(.memberName)); w.u16(member); w.u8(UInt8(bytes.count)); w.bytes(bytes)
+        case let .forResponders(unit, request, part, sealed):
+            w.u8(Self.header(.forResponders)); w.u32(unit); w.u16(request); w.u8(part); w.bytes(sealed)
         case let .memberPhone(member, phone, at):
             let bytes = Data(phone.prefix(Self.maxPhoneBytes).utf8)
             w.u8(Self.header(.memberPhone)); w.u16(member); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
@@ -211,6 +226,9 @@ public enum HelpFrame: Equatable, Sendable {
             guard let member = r.u16(), let n = r.u8(), n <= 40, let bytes = r.take(Int(n)),
                   let name = String(bytes: bytes, encoding: .utf8) else { return nil }
             self = .memberName(member: member, name: name)
+        case .forResponders:
+            guard let unit = r.u32(), let request = r.u16(), let part = r.u8(), let rest = r.take(r.remaining), rest.count > 21 else { return nil }
+            self = .forResponders(unit: unit, request: request, part: part, sealed: Data(rest))
         case .memberPhone:
             guard let member = r.u16(), let at = r.u32(), let n = r.u8(), n <= Self.maxPhoneBytes, let bytes = r.take(Int(n)),
                   let phone = String(bytes: bytes, encoding: .utf8) else { return nil }

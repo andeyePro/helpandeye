@@ -24,7 +24,9 @@ final class GroupTests: XCTestCase {
         let welcome = try Joining.admit(try Joining.decode(Joining.JoinRequest.self, from: Joining.code(request)),
                                         to: &group, invite: invite, coordinator: coord)
         let joined = try Joining.open(try Joining.decode(Joining.Welcome.self, from: Joining.code(welcome)), invite: invite, me: newcomer)
-        XCTAssertEqual(joined, group)
+        XCTAssertEqual(joined, group.copy(for: .caller))
+        XCTAssertNil(joined.secrets.responderPrivateKey, "a caller is not given the responders' key")
+        XCTAssertNotNil(joined.secrets.responderPublicKey)
         XCTAssertEqual(joined.member(welcome.memberNumber)?.role, .caller)
         XCTAssertEqual(joined.member(welcome.memberNumber)?.unit, 70001)
         XCTAssertEqual(joined.membershipVersion, 2, "joining bumps the version the relay compares")

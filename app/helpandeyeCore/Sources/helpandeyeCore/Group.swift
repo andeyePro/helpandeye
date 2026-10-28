@@ -50,9 +50,18 @@ public struct GroupSecrets: Codable, Equatable, Sendable {
     /// End-to-end key for the internet route.
     public let groupKey: Data
     public let generation: UInt32
+    /// The responders' key pair (decision 12). Every member has the public half, so a caller can
+    /// seal what they type and where they are once for all responders; only responders hold the
+    /// private half, so no caller can read another's. Missing in groups made before it existed.
+    public var responderPublicKey: Data?
+    public var responderPrivateKey: Data?
 
     public static func random(generation: UInt32 = 1, groupID: Data? = nil) -> GroupSecrets {
-        GroupSecrets(groupID: groupID ?? randomBytes(16), channelSecret: randomNonZero(16), groupKey: randomBytes(32), generation: generation)
+        var s = GroupSecrets(groupID: groupID ?? randomBytes(16), channelSecret: randomNonZero(16), groupKey: randomBytes(32), generation: generation)
+        let pair = Curve25519.KeyAgreement.PrivateKey()
+        s.responderPrivateKey = pair.rawRepresentation
+        s.responderPublicKey = pair.publicKey.rawRepresentation
+        return s
     }
 
     /// A new group's secrets, with an ID made from its first coordinator's signing key: 8 random
@@ -280,6 +289,15 @@ public struct GroupState: Codable, Equatable, Sendable {
         }
     }
 
+    /// The group as a member in this role may hold it: a caller's copy has no responders' key.
+    public func copy(for role: Member.Role) -> GroupState {
+        guard role == .caller else { return self }
+        var g = self
+        g.secrets.responderPrivateKey = nil
+        g.previousSecrets?.responderPrivateKey = nil
+        return g
+    }
+
     /// What a coordinator's phone sends so other members learn of a new member.
     public func addedFrame(_ number: UInt16) -> HelpFrame? {
         guard let m = member(number), let key = m.signingKey else { return nil }
@@ -385,7 +403,7 @@ public enum Joining {
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,
                                     unit: role == .caller || role == .both ? group.nextUnit(by: me) : nil, phone: request.phone,
                                     signingKey: request.signingKey))
-        let box = try seal(JSONEncoder().encode(group), to: request.publicKey, from: coordinator, context: invite.token)
+        let box = try seal(JSONEncoder().encode(group.copy(for: role)), to: request.publicKey, from: coordinator, context: invite.token)
         return Welcome(groupID: group.secrets.groupID, memberNumber: number, sealed: box)
     }
 
@@ -399,7 +417,7 @@ public enum Joining {
     /// New secrets after a phone was removed, sealed for one remaining member. Sent over the
     /// internet route or shown as a QR code.
     public static func update(_ group: GroupState, for member: Member, coordinator: DeviceIdentity) throws -> Welcome {
-        let box = try seal(JSONEncoder().encode(group), to: member.publicKey, from: coordinator, context: group.secrets.groupID)
+        let box = try seal(JSONEncoder().encode(group.copy(for: member.role)), to: member.publicKey, from: coordinator, context: group.secrets.groupID)
         return Welcome(groupID: group.secrets.groupID, memberNumber: member.number, sealed: box)
     }
 

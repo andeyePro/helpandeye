@@ -464,7 +464,15 @@ public final class HelpEngine: ObservableObject {
         spawn { await self.sendPersonal(frame) }
     }
 
+    /// Sealed once for all responders (decision 12) and sent once, over the internet or else on the
+    /// group channel. A group made before responders had their own key falls back to a direct
+    /// message to each responder's box.
     private func sendPersonal(_ frame: HelpFrame) async {
+        if let g = group, let sealed = ForResponders.seal(frame, from: identity, in: g) {
+            if relay.isConfigured, await relay.send(sealed, wake: nil) == nil { return }
+            _ = await sendOnMesh(sealed, kind: .optional)
+            return
+        }
         if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return }
         await sendDirect(frame, to: nil)
     }
@@ -729,6 +737,11 @@ public final class HelpEngine: ObservableObject {
                 }
             default: break
             }
+            return
+        case .forResponders:
+            // Only a responder can open it; what is inside is handled as if it came plainly.
+            guard me?.canRespond == true, let g = group, let inner = ForResponders.open(frame, in: g) else { return }
+            receive(inner, via: route)
             return
         case let .board(member, key, _):
             // A watch has no box: other members' boxes are the phone's business.

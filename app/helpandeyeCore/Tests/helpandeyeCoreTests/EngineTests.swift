@@ -392,9 +392,31 @@ final class RelayModel {
         caller.engine.sharePosition(latitude: 55.4, longitude: -4.5, accuracy: 10)
         await air.run()
         XCTAssertFalse(air.groupSends.contains { !$0.mayGoOnGroupChannel })
-        XCTAssertFalse(air.directSends.isEmpty, "they went as direct messages instead")
+        let sealed = air.groupSends.filter { if case .forResponders = $0 { return true }; return false }
+        XCTAssertEqual(sealed.count, 2, "each went once for all responders, sealed")
+        XCTAssertTrue(air.directSends.isEmpty, "not one copy per responder")
+        XCTAssertFalse(air.groupSends.contains { $0.encoded().range(of: Data("Back door".utf8)) != nil })
         XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.orderedNotes, ["Back door is open"])
         XCTAssertNotNil(responder.engine.activity.inbox.requests[key]?.position)
+        XCTAssertEqual(coordinator.engine.activity.inbox.requests[key]?.orderedNotes, ["Back door is open"], "every responder reads it")
+        XCTAssertNil(caller.engine.group?.secrets.responderPrivateKey, "a caller holds no responders' key")
+        for f in sealed { XCTAssertNil(ForResponders.open(f, in: caller.engine.group!), "so another caller cannot read it") }
+    }
+
+    func testSealedForRespondersIsSmallAndTamperProof() throws {
+        let note = HelpFrame.note(unit: caller.engine.me!.unit!, request: 1, part: 1, typed: "Back door")
+        let sealed = try XCTUnwrap(ForResponders.seal(note, from: caller.identity, in: caller.engine.group!))
+        XCTAssertEqual(sealed.encoded().count, note.encoded().count + 1 + 4 + 2 + 1 + 5 + 16, "only the clear header, salt and tag are added")
+        XCTAssertEqual(ForResponders.open(sealed, in: responder.engine.group!), note)
+        guard case let .forResponders(u, r, p, box) = sealed else { return XCTFail() }
+        var bad = box; bad[bad.startIndex + 8] ^= 1
+        XCTAssertNil(ForResponders.open(.forResponders(unit: u, request: r, part: p, sealed: bad), in: responder.engine.group!))
+        XCTAssertNil(ForResponders.open(.forResponders(unit: u, request: r &+ 1, part: p, sealed: box), in: responder.engine.group!),
+                     "its outside cannot be changed to another call")
+        XCTAssertEqual(HelpFrame(sealed.encoded()), sealed)
+        let longest = HelpFrame.note(unit: 1, request: 1, part: 1, typed: String(repeating: "x", count: 500))
+        let big = try XCTUnwrap(ForResponders.seal(longest, from: caller.identity, in: caller.engine.group!))
+        XCTAssertLessThanOrEqual(big.encoded().count, 165, "the longest note still fits one MeshCore channel datagram")
     }
 
     func testADirectMessageFromTheWrongBoxIsIgnored() async {
