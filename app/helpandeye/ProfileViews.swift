@@ -28,6 +28,16 @@ extension Profile.AfterOK {
     }
 }
 
+/// Plays the chosen sounds, so they can be heard before a call needs them.
+struct HearSounds: View {
+    let profile: Profile
+
+    var body: some View {
+        Button("Hear the not-sent sound") { CallerVoice.shared.play(CallerVoice.file(.notSent, in: profile)) }
+        Button("Hear the seen sound") { CallerVoice.shared.play(CallerVoice.file(.seen, in: profile)) }
+    }
+}
+
 /// The caller's own settings. Those their profile lets them change can be changed here; the
 /// others are shown, as set by their coordinator.
 struct YourSettingsSection: View {
@@ -52,6 +62,7 @@ struct YourSettingsSection: View {
                     ForEach(Profile.SeenSound.allCases, id: \.self) { Text($0.label) }
                 }
             }.disabled(!given.mayChange(.sounds))
+            HearSounds(profile: model.profile)
             Picker("I'm OK after Help or Need a hand", selection: own(\.afterOK)) {
                 ForEach(Profile.AfterOK.allCases, id: \.self) { Text($0.label) }
             }.disabled(!given.mayChange(.afterOK))
@@ -146,6 +157,7 @@ struct ProfileEditor: View {
                 Picker("When someone has seen it", selection: $p.seen) {
                     ForEach(Profile.SeenSound.allCases, id: \.self) { Text($0.label) }
                 }
+                HearSounds(profile: p)
                 mayChange(.sounds)
             }
             Section(header: Header("I'm OK after Help or Need a hand")) {

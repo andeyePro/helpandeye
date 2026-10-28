@@ -1,4 +1,4 @@
-"""Makes the caller's two sounds, so they are the project's own and can be remade or changed.
+"""Makes the caller's sounds, so they are the project's own and can be remade or changed.
 Run from the repository root:  python3 tests/tools/make-sounds.py"""
 import math, struct, wave
 
@@ -20,6 +20,18 @@ def buzz(freq, seconds):
         out.append(0.35 * edge * sq)
     return out
 
+def eeh_ooh(high, low):
+    """A soft two-note "eeh-ooh", high then low: sine tones that swell in and fade out."""
+    out = []
+    for freq, seconds in ((high, 0.32), (low, 0.5)):
+        n = int(RATE * seconds)
+        for i in range(n):
+            t = i / RATE
+            env = min(1, i / (RATE * 0.04)) * min(1, (n - i) / (RATE * 0.12))
+            out.append(0.3 * env * (math.sin(2 * math.pi * freq * t) + 0.2 * math.sin(4 * math.pi * freq * t)))
+        out += [0.0] * int(RATE * 0.04)
+    return out
+
 def chime(freqs, step, seconds):
     """Soft bell notes, each starting a step after the last and fading away."""
     n = int(RATE * seconds)
@@ -33,5 +45,6 @@ def chime(freqs, step, seconds):
     return out
 
 silence = [0.0] * int(RATE * 0.08)
-write("app/helpandeye/Sounds/not-sent.wav", buzz(185, 0.35) + silence + buzz(139, 0.6))
+write("app/helpandeye/Sounds/eeh-ooh.wav", eeh_ooh(659.25, 493.88))
+write("app/helpandeye/Sounds/buzzer.wav", buzz(185, 0.35) + silence + buzz(139, 0.6))
 write("app/helpandeye/Sounds/seen.wav", chime([523.25, 659.25, 783.99, 1046.5], 0.14, 1.4))

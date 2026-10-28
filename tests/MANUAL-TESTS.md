@@ -311,7 +311,7 @@ Needs phone A (a caller) and phone B (a responder), with phone A's watch, and th
 5. Turn VoiceOver on and repeat step 2.
 6. Repeat steps 1 to 3 on phone A's watch, with its phone switched off.
 
-Pass: every press is felt as a short tap. In step 1 phone A plays the wrong-answer buzz, then says "Your Help message has not been sent. Try again, or call 999." In step 2 it says "Your Help message has been sent." with no sound, and then, only once phone B has acknowledged, plays the chime and says "<name> has seen your Help message, and says: I'm dealing with it." In step 3 phone A shows and says "You have requested non-urgent assistance. If you need help sooner, please press Help." (or the words in their profile). All of this is heard with the ringer on silent. In step 4 nothing is heard, but the taps and the words on the screen remain. In step 5 VoiceOver reads each message once, and it is not spoken a second time. In step 6 the watch does the same, with its own vibrations. A watch not yet set up shows how to set it up instead of the buttons.
+Pass: every press is felt as a short tap. In step 1 phone A plays a soft "eeh-ooh", high then low, then says "Your Help message has not been sent. Try again, or call 999." In step 2 it says "Your Help message has been sent." with no sound, and then, only once phone B has acknowledged, plays the chime and says "<name> has seen your Help message, and says: I'm dealing with it." In step 3 phone A shows and says "You have requested non-urgent assistance. If you need help sooner, please press Help." (or the words in their profile). All of this is heard with the ringer on silent. In step 4 nothing is heard, but the taps and the words on the screen remain. In step 5 VoiceOver reads each message once, and it is not spoken a second time. In step 6 the watch does the same, with its own vibrations. A watch not yet set up shows how to set it up instead of the buttons.
 
 ## 36. Profiles
 
@@ -336,3 +336,14 @@ Needs phone A (a caller), phone B (a responder) and phone C (the coordinator), w
 6. Repeat step 5 with the internet off on every phone, using the boxes.
 
 Pass: in step 1 phone A says it has been sent, then "Your responders have been told you're OK. One of them will still check on you." Phone B shows "Says they're OK now. Please still check on them.", and its alerts come calmly, about every half hour, not urgently, until it acknowledges. In step 3 the Need a hand call is closed on every phone and phone B's alerts stop. In step 4 phone A says "You closed your Help call." In step 5 phone A and phone B show who closed it and the reason. In step 6 they show who closed it, without the reason. Nothing closes or times out a call on its own.
+
+## 38. Choosing the caller's sounds
+
+Needs phone A (a caller) and phone C (the coordinator). Ringer on phone A switched to silent.
+
+1. On phone C, under Group, Profiles, open phone A's profile. Tap Hear the not-sent sound, and Hear the seen sound, for each choice of each.
+2. Choose A buzzer for the not-sent sound, save, and on phone A, with the internet off and no box, press Help.
+3. Choose No sound for both, save, and repeat step 2, then press Help with the internet on and acknowledge it on another phone.
+4. On phone A, under Group, Your settings, tap each Hear button.
+
+Pass: in step 1 each choice is heard as named: a soft eeh-ooh, high then low; a buzzer; a chime; nothing for No sound. In step 2 phone A plays the buzzer, then says the words. In step 3 no sound is played, but the words are still spoken and the taps still felt. In step 4 phone A plays its own profile's sounds, with the ringer on silent.

@@ -21,9 +21,8 @@
 
 ## Open (work)
 
-- [ ] **Coordinator settings, the watch countdown and a log** - agreed with Martin 2026-10-28; all items confirmed. Done so far: profiles with per-setting locks, button words and symbols (with the SOS warning), hiding the settings page, I'm OK after a call (A/B), closing a call, decision 6 (see CHANGELOG). Still to do:
+- [ ] **Coordinator settings, the watch countdown and a log** - agreed with Martin 2026-10-28; all items confirmed. Done so far: profiles with per-setting locks, button words and symbols (with the SOS warning), hiding the settings page, I'm OK after a call (A/B), closing a call, decision 6, the not-sent and seen sounds (see CHANGELOG). Still to do:
   - "Ask the coordinator to change this": a signed request shown under Group for coordinators. It lives only in the person's settings, never on the call screen, so it cannot confuse anyone in an emergency. Every settings change is logged and shown to the other coordinators.
-  - Not-sent sound: a softer "eeh-ooh", high then low, is the standard; the buzzer is a choice. The choice is in profiles already; the eeh-ooh sound itself, playing each choice, and a MANUAL-TESTS step so Martin hears each in the live app are still to do.
   - A log, on by default, which the coordinator can switch off for the group: every press, delivery, acknowledgement, close and settings change, with who and when, kept encrypted on each coordinator's phone, readable under Group and exportable. Today nothing keeps a history: phones hold the current calls and the relay keeps encrypted messages only until they expire.
   - Watch: a Help complication in every shape, and one-tap ready-made Apple faces (easy-read analogue and digital) with it large.
   - Complication countdown: tapping it starts a 60-second countdown shown in the red button, vibrating every 10 seconds. At 30 seconds with no touch it says "Calling for help in 30 seconds. Press I'm OK to stop, or Help to ask for help now." At 0 it sends Help. Keep it running with an extended runtime session; check on a real watch.
