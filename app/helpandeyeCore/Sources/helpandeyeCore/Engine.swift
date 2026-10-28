@@ -29,6 +29,12 @@ public enum MeshSendResult: Equatable, Sendable {
     func send(_ frame: HelpFrame, urgent: Bool) async -> MeshSendResult
     func sendText(_ text: String, to key: Data) async -> MeshSendResult
     func addContact(_ key: Data, name: String) async
+    /// Set when one box serves several groups (MeshHub): their sends share one hour's allowance.
+    var sharedAirtime: AirtimeLedger? { get }
+}
+
+extension MeshLink {
+    public var sharedAirtime: AirtimeLedger? { nil }
 }
 
 public enum RelayWake: String, Sendable { case call, quiet }
@@ -332,7 +338,7 @@ public final class HelpEngine: ObservableObject {
         if activity.checkInWatch.callers.keys.contains(where: { !units.contains($0) }) { activity.checkInWatch.keepOnly(units: units) }
         let listening = group?.listening(at: now()).map(\.channelSecret) ?? []
         if mesh.secrets != listening { mesh.secrets = listening }
-        if activity.airtime == nil { bandChanged(mesh.radio?.band) }
+        if budget == nil { bandChanged(mesh.radio?.band) }
         // A box already connected when the phone joins a group is announced now, not at the next
         // reconnect, so direct messages work both ways.
         if mesh.isReady, let me = saved?.me, let key = mesh.boxPublicKey, activity.boardKeys[me] != key {
@@ -346,11 +352,18 @@ public final class HelpEngine: ObservableObject {
     /// The box's radio band changed (or a box was paired): start a budget only if its limit
     /// differs, so re-pairing or relaunching never gives a fresh allowance within the hour.
     public func bandChanged(_ band: Band?) {
-        guard let band, activity.airtime?.dutyCycle != band.dutyCycle else { return }
-        activity.airtime = AirtimeBudget(dutyCycle: band.dutyCycle)
+        guard let band, budget?.dutyCycle != band.dutyCycle else { return }
+        budget = AirtimeBudget(dutyCycle: band.dutyCycle)
     }
 
-    func setAirtimeForTesting(_ budget: AirtimeBudget) { activity.airtime = budget }
+    /// The box's use of the radio in the last hour (IR 2030): shared by every group when one box
+    /// serves several, otherwise this engine's own.
+    private var budget: AirtimeBudget? {
+        get { mesh.sharedAirtime?.budget ?? activity.airtime }
+        set { if let shared = mesh.sharedAirtime { shared.budget = newValue } else { activity.airtime = newValue } }
+    }
+
+    func setAirtimeForTesting(_ b: AirtimeBudget) { budget = b }
     func resetMembershipRepeatForTesting() { lastMembershipRepeat = nil }
 
     // MARK: Calling for help
@@ -490,12 +503,12 @@ public final class HelpEngine: ObservableObject {
     /// Personal content as MeshCore direct messages to each responder's box (or one member's),
     /// which MeshCore encrypts to that box alone. Within the optional half of the airtime.
     private func sendDirect(_ frame: HelpFrame, to only: UInt16?) async {
-        guard mesh.isReady, let text = MeshText.encode(frame), let radio = mesh.radio, radio.band != nil, activity.airtime != nil else { return }
+        guard mesh.isReady, let text = MeshText.encode(frame), let radio = mesh.radio, radio.band != nil, budget != nil else { return }
         let seconds = radio.airtime(bytes: meshPacketBytes(payload: text.utf8.count + 8))
         for m in group?.members ?? [] where m.canRespond && m.number != saved?.me && (only == nil || m.number == only) {
-            guard let key = activity.boardKeys[m.number], activity.airtime!.allows(seconds, kind: .optional, at: now()) else { continue }
-            let reservation = activity.airtime!.record(seconds, at: now())
-            if case .refused = await mesh.sendText(text, to: key) { activity.airtime?.cancel(reservation) }
+            guard let key = activity.boardKeys[m.number], budget!.allows(seconds, kind: .optional, at: now()) else { continue }
+            let reservation = budget!.record(seconds, at: now())
+            if case .refused = await mesh.sendText(text, to: key) { budget?.cancel(reservation) }
         }
     }
 
@@ -525,14 +538,14 @@ public final class HelpEngine: ObservableObject {
         // Personal content never goes on the shared group channel (decision 12).
         guard frame.mayGoOnGroupChannel else { return "Only goes over the internet" }
         guard mesh.isReady, let radio = mesh.radio else { return mesh.unavailableReason }
-        guard radio.band != nil, activity.airtime != nil else { return "Box is on a frequency Help&I will not use" }
+        guard radio.band != nil, budget != nil else { return "Box is on a frequency Help&I will not use" }
         let seconds = radio.airtime(bytes: meshPacketBytes(payload: frame.encoded().count)) * Double(mesh.channelsPerSend)
-        guard activity.airtime!.allows(seconds, kind: kind, at: now()) else { return "Radio time used up for now" }
+        guard budget!.allows(seconds, kind: kind, at: now()) else { return "Radio time used up for now" }
         // Reserve before sending, so overlapping sends cannot each see the same allowance. Give it
         // back only when the box certainly did not transmit.
-        let reservation = activity.airtime!.record(seconds, at: now())
+        let reservation = budget!.record(seconds, at: now())
         let result = await mesh.send(frame, urgent: kind == .call)
-        if case .refused = result { activity.airtime?.cancel(reservation) }
+        if case .refused = result { budget?.cancel(reservation) }
         return result.failure
     }
 
