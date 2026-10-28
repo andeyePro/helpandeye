@@ -31,6 +31,11 @@ final class WatchScreensTests: XCTestCase {
         look("call-not-sent")
         app.swipeUp(); app.swipeUp()
         look("call-lower")
+        // The Help complication's countdown, opened as the complication opens it.
+        app.open(URL(string: "helpandeye://countdown")!)
+        app.swipeDown(); app.swipeDown()
+        look("countdown")
+        app.buttons["I'm OK"].tap()
 
         if !problems.isEmpty {
             XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))

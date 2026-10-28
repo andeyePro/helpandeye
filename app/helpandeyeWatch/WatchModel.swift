@@ -3,6 +3,7 @@ import Foundation
 import helpandeyeCore
 import UserNotifications
 import WatchConnectivity
+import WatchKit
 
 /// The watch's two ways of working. With the phone in reach, the buttons send through it and it
 /// does the routing. Out of reach, the watch calls and responds by itself over its own internet
@@ -35,6 +36,12 @@ final class WatchModel: NSObject, ObservableObject {
     @Published private var pressed: Colour?
     /// What the wearer is told after an I'm OK that settled an open call.
     @Published private(set) var okNote: String?
+    /// The complication's countdown to Help, while it runs, and the seconds left on it.
+    @Published private(set) var countdown: HelpCountdown?
+    @Published private(set) var secondsLeft = 0
+    private var countdownTimer: Timer?
+    private var countdownCheckedAt = Date()
+    private var runtime: WKExtendedRuntimeSession?
     /// Notifications for Help&I are turned off on this watch, so it cannot alert its owner.
     @Published private(set) var alertsOff = false
     private var voiceTracker = CallerFeedback.Tracker(nil)
@@ -284,6 +291,11 @@ final class WatchModel: NSObject, ObservableObject {
     /// and gives the same call to the phone to send on the phone's routes: one call, however many
     /// ways it goes, so a lost reply can never send it twice. Without one, the phone makes it.
     func press(_ colour: Colour) {
+        // A press during the countdown stops it; I'm OK then sends nothing, the others go now.
+        if countdown != nil {
+            stopCountdown()
+            if colour == .green { CallerVoice.shared.pressed(); return }
+        }
         CallerVoice.shared.pressed()
         pressed = colour
         okNote = colour == .green && !(engine?.settledByOK.isEmpty ?? true) ? profile.okSpoken : nil
@@ -309,6 +321,47 @@ final class WatchModel: NSObject, ObservableObject {
         }, errorHandler: { _ in
             Task { @MainActor in self.failed("Not sent: your phone did not answer. Use your phone, or call 999.") }
         })
+    }
+
+    // MARK: The complication's countdown
+
+    /// From the Help complication: Help goes in 60 seconds unless the wearer presses I'm OK. It
+    /// keeps running with the wrist lowered, in an extended runtime session.
+    func startCountdown() {
+        guard countdown == nil, !needsSetUp else { return }
+        let now = Date()
+        countdown = HelpCountdown(startedAt: now)
+        countdownCheckedAt = now
+        secondsLeft = Int(HelpCountdown.length)
+        CallerVoice.shared.pressed()
+        let session = WKExtendedRuntimeSession()
+        session.start()
+        runtime = session
+        countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkCountdown() }
+        }
+    }
+
+    private func checkCountdown() {
+        guard let c = countdown else { return }
+        let now = Date()
+        secondsLeft = c.remaining(at: now)
+        for event in c.events(from: countdownCheckedAt, to: now) {
+            switch event {
+            case .vibrate: WKInterfaceDevice.current().play(.notification)
+            case .warn: CallerVoice.shared.tell(.init(sound: nil, spoken: HelpCountdown.warning(in: profile)), profile: profile)
+            case .send: press(.red)
+            }
+        }
+        countdownCheckedAt = now
+    }
+
+    private func stopCountdown() {
+        countdown = nil
+        countdownTimer?.invalidate()
+        countdownTimer = nil
+        runtime?.invalidate()
+        runtime = nil
     }
 
     /// A call that could not even be handed on: shown, and heard as not sent.

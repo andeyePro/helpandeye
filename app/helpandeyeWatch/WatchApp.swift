@@ -9,7 +9,10 @@ struct HelpAWatchApp: App {
     @StateObject private var model = WatchModel.shared
 
     var body: some Scene {
-        WindowGroup { WatchCallView().environmentObject(model) }
+        WindowGroup {
+            WatchCallView().environmentObject(model)
+                .onOpenURL { if $0.host == "countdown" { model.startCountdown() } }
+        }
     }
 }
 
@@ -130,15 +133,26 @@ struct WatchCallView: View {
     }
 
     private func callButton(_ colour: Colour, shape: some Shape) -> some View {
-        Button { model.press(colour) } label: {
-            label(colour).font(.headline).multilineTextAlignment(.center)
-                .foregroundStyle(colour.onColor)
-                .padding(4)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(colour.color, in: shape)
+        let counting = colour == .red && model.countdown != nil
+        return Button { model.press(colour) } label: {
+            Group {
+                if counting {
+                    VStack(spacing: 0) {
+                        Text("\(model.words(.red)) in").font(.headline)
+                        Text("\(model.secondsLeft)").font(.system(.largeTitle, design: .rounded).bold()).monospacedDigit()
+                    }
+                } else {
+                    label(colour).font(.headline)
+                }
+            }
+            .multilineTextAlignment(.center)
+            .foregroundStyle(colour.onColor)
+            .padding(4)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(colour.color, in: shape)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(model.words(colour))
+        .accessibilityLabel(counting ? "\(model.words(.red)) in \(model.secondsLeft) seconds. Press to call now." : model.words(colour))
     }
 
     /// Words, a symbol, or both, as on the phone; the symbol is left out when both will not fit.

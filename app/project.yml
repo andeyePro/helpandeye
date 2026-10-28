@@ -82,13 +82,17 @@ targets:
       - helpandeye/Sounds
     dependencies:
       - package: helpandeyeCore
+      - target: helpandeyeWatchWidgets
     info:
       path: helpandeyeWatch/Info.plist
       properties:
         CFBundleDisplayName: "Help&I"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.andeye.help
-        WKBackgroundModes: [remote-notification]
+        # self-care keeps the complication's 60-second countdown running with the wrist lowered.
+        WKBackgroundModes: [remote-notification, self-care]
+        CFBundleURLTypes:
+          - CFBundleURLSchemes: [helpandeye]
     entitlements:
       path: helpandeyeWatch/helpandeyeWatch.entitlements
       properties:
@@ -96,6 +100,20 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+  helpandeyeWatchWidgets:
+    type: app-extension
+    platform: watchOS
+    sources: [helpandeyeWatchWidgets]
+    info:
+      path: helpandeyeWatchWidgets/Info.plist
+      properties:
+        CFBundleDisplayName: "Help&I"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.watchkitapp.widgets
         TARGETED_DEVICE_FAMILY: "4"
   helpandeyeUITests:
     type: bundle.ui-testing

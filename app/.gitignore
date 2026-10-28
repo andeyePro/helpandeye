@@ -7,5 +7,6 @@ helpandeye/Info.plist
 helpandeye/helpandeye.entitlements
 helpandeyeWatch/Info.plist
 helpandeyeNotify/Info.plist
+helpandeyeWatchWidgets/Info.plist
 Local.xcconfig
 helpandeyeWatch/helpandeyeWatch.entitlements

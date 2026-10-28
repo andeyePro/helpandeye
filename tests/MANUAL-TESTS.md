@@ -362,3 +362,14 @@ Needs phone A (a caller), phone B (a responder), and phones C and D (two coordin
 3. On phone D, under Profiles, change a profile's name. Then on phone C, under Log, switch Keep a log for this group off, and press Help again on phone A.
 
 Pass: in step 2 the log lists the call heard, phone B's acknowledgement and phone C's close with its reason, each with the time, newest first, and the exported file has the same lines. In step 3 phone C shows under For coordinators that phone D changed the profile, and the log records it and the log being switched off, but nothing after.
+
+## 40. The Help complication and its countdown
+
+Needs a real Apple Watch with Help&I set up (section 7), and a responder's phone. The simulator cannot show the countdown running with the wrist lowered.
+
+1. On the watch, edit a face and add Help&I's Help complication in each place it offers: a circle, a corner, a wide slot and the line of text. Try a face of each kind you have.
+2. Tap the complication, and do nothing for the whole minute, with the wrist lowered after the first ten seconds.
+3. Tap it again, and press I'm OK after a few seconds.
+4. Tap it again, and press Help after a few seconds.
+
+Pass: in step 1 the complication shows a raised hand and Help wherever it fits. In step 2 the watch opens Help&I with the red button counting down from 60, taps the wrist every 10 seconds, at 30 seconds left says "Calling for help in 30 seconds. Press I'm OK to stop, or Help to ask for help now." (in the profile's own words), and at 0 sends Help, which the responder receives; it keeps counting with the wrist lowered. In step 3 the countdown stops and nothing is sent. In step 4 Help goes at once.
