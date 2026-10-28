@@ -403,7 +403,7 @@ public enum Joining {
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,
                                     unit: role == .caller || role == .both ? group.nextUnit(by: me) : nil, phone: request.phone,
                                     signingKey: request.signingKey))
-        let box = try seal(JSONEncoder().encode(group.copy(for: role)), to: request.publicKey, from: coordinator, context: invite.token)
+        let box = try seal(pack(group.copy(for: role)), to: request.publicKey, from: coordinator, context: invite.token)
         return Welcome(groupID: group.secrets.groupID, memberNumber: number, sealed: box)
     }
 
@@ -411,13 +411,13 @@ public enum Joining {
     public static func open(_ welcome: Welcome, invite: Invitation, me: DeviceIdentity) throws -> GroupState {
         guard welcome.groupID == invite.groupID else { throw Failure.wrongGroup }
         let plain = try unseal(welcome.sealed, from: invite.coordinatorKey, me: me, context: invite.token)
-        return try JSONDecoder().decode(GroupState.self, from: plain)
+        return try unpack(plain)
     }
 
     /// New secrets after a phone was removed, sealed for one remaining member. Sent over the
     /// internet route or shown as a QR code.
     public static func update(_ group: GroupState, for member: Member, coordinator: DeviceIdentity) throws -> Welcome {
-        let box = try seal(JSONEncoder().encode(group.copy(for: member.role)), to: member.publicKey, from: coordinator, context: group.secrets.groupID)
+        let box = try seal(pack(group.copy(for: member.role)), to: member.publicKey, from: coordinator, context: group.secrets.groupID)
         return Welcome(groupID: group.secrets.groupID, memberNumber: member.number, sealed: box)
     }
 
@@ -428,7 +428,7 @@ public enum Joining {
         // Only the first coordinator changes the keys, so the group can never be split onto two.
         for c in current.members where c.number == current.primaryCoordinator {
             if let plain = try? unseal(welcome.sealed, from: c.publicKey, me: me, context: current.secrets.groupID),
-               let g = try? JSONDecoder().decode(GroupState.self, from: plain) {
+               let g = try? unpack(plain) {
                 guard g.secrets.generation > current.secrets.generation else { throw Failure.cannotOpen }
                 return g
             }
@@ -447,19 +447,51 @@ public enum Joining {
 
     /// Text form of any of the three codes, for QR codes and for sending as a link.
     public static let prefix = "HELPA1:"
+    /// A welcome or key update in its compact form: the group compressed before sealing, and the
+    /// code itself binary rather than text inside text, about half the length of the first form.
+    public static let welcomePrefix = "HELPA2:"
 
     public static func code<T: Encodable>(_ value: T) throws -> String {
         prefix + (try JSONEncoder().encode(value)).base64EncodedString()
     }
 
+    public static func code(_ welcome: Welcome) throws -> String {
+        var d = welcome.groupID
+        withUnsafeBytes(of: welcome.memberNumber.bigEndian) { d.append(contentsOf: $0) }
+        return welcomePrefix + (d + welcome.sealed).base64EncodedString()
+    }
+
+    /// The group as it goes inside a welcome: compressed, since keys and names repeat a lot.
+    static func pack(_ group: GroupState) throws -> Data {
+        try (JSONEncoder().encode(group) as NSData).compressed(using: .zlib) as Data
+    }
+
+    /// Reads either form: compressed, or plain from a phone before compression.
+    static func unpack(_ plain: Data) throws -> GroupState {
+        if plain.first == UInt8(ascii: "{") { return try JSONDecoder().decode(GroupState.self, from: plain) }
+        return try JSONDecoder().decode(GroupState.self, from: (plain as NSData).decompressed(using: .zlib) as Data)
+    }
+
     /// Reads a code wherever it sits in the text, as a message app may add words around it or
     /// break it across lines.
     public static func decode<T: Decodable>(_ type: T.Type, from code: String) throws -> T {
-        guard let start = code.range(of: prefix) else {
+        if T.self == Welcome.self, let w = payload(after: welcomePrefix, in: code, { d -> Welcome? in
+            guard d.count > 18 else { return nil }
+            return Welcome(groupID: Data(d.prefix(16)), memberNumber: UInt16(d[d.startIndex + 16]) << 8 | UInt16(d[d.startIndex + 17]), sealed: Data(d.dropFirst(18)))
+        }) {
+            return w as! T
+        }
+        guard code.range(of: prefix) != nil else {
             throw code.contains(":") && code.uppercased().contains("HELPANDI") ? Failure.otherVersion : Failure.badCode
         }
-        // The code may be broken across lines and followed by other words: try the longest run of
-        // pieces that reads as a code.
+        if let value = payload(after: prefix, in: code, { try? JSONDecoder().decode(type, from: $0) }) { return value }
+        throw Failure.badCode
+    }
+
+    /// The code may be broken across lines and followed by other words: tries the longest run of
+    /// pieces after the prefix that reads as one.
+    private static func payload<V>(after prefix: String, in code: String, _ make: (Data) -> V?) -> V? {
+        guard let start = code.range(of: prefix) else { return nil }
         let isCode: (Character) -> Bool = { $0.isASCII && ($0.isLetter || $0.isNumber || "+/=".contains($0)) }
         var pieces: [Substring] = []
         for piece in code[start.upperBound...].split(whereSeparator: \.isWhitespace) {
@@ -468,11 +500,9 @@ public enum Joining {
             if usable.count < piece.count { break }
         }
         for n in stride(from: pieces.count, through: 1, by: -1) {
-            if let data = Data(base64Encoded: pieces.prefix(n).joined()), let value = try? JSONDecoder().decode(type, from: data) {
-                return value
-            }
+            if let data = Data(base64Encoded: pieces.prefix(n).joined()), let value = make(data) { return value }
         }
-        throw Failure.badCode
+        return nil
     }
 }
 

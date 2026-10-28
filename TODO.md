@@ -21,7 +21,6 @@
 
 - [ ] **Watch straight to the box** - not built: watchOS reportedly offers only Pair or Dismiss for a Bluetooth accessory, with no way to type the box's six-digit code, which MeshCore's companion firmware needs. Waiting on Martin trying it (Help&I-fromClaude T1). Out of reach of its phone, the watch uses its own internet only.
 - [ ] **Positions as a change, confirmed by responders** - the rest of decision 12: a position sent as the change from the last one each responder confirmed receiving, or in full when that is smaller or unknown, with a small signed receipt from each responder for positions only. The responders' key and the single sealed message are done.
-- [ ] **Smaller welcome codes** - a welcome is about 1,600 characters for a two-person group and grows with every member, because the whole group state goes as JSON whose keys are base64, then base64 again. A compact binary form, sent compressed, would be a fraction of that.
 - [ ] **One box for a household** - MeshCore's companion firmware takes one Bluetooth connection at a time, so each phone needs its own box. Sharing one box needs Help&I's own firmware (see Buttons on a plain Heltec) or a shared hub.
 - [ ] **Responders in more than one group** - Martin, 2026-10-28: "It would be useful if responders at least could be members of multiple groups."
 - [ ] **Group settings reach members at once** - button words and the relay address now reach members only when they next join or scan a key update; every one of the 15 frame kinds is in use, so this needs an extended frame kind.

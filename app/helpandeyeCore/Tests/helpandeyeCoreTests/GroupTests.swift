@@ -59,6 +59,23 @@ final class GroupTests: XCTestCase {
         XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPANDI1:abcd")) { XCTAssertEqual($0 as? Joining.Failure, .otherVersion) }
     }
 
+    func testWelcomeCodesAreCompactAndTheOldFormStillOpens() throws {
+        let coord = DeviceIdentity(), newcomer = DeviceIdentity()
+        var group = newGroup(coord)
+        let invite = Joining.invitation(for: group, coordinator: coord, role: .both)
+        let welcome = try Joining.admit(Joining.request(invite, name: "Alex", call: true, respond: true, me: newcomer), to: &group, invite: invite, coordinator: coord)
+        let code = try Joining.code(welcome)
+        XCTAssertTrue(code.hasPrefix(Joining.welcomePrefix))
+        XCTAssertLessThan(code.count, 1000, "about half the first form's length for a small group")
+        XCTAssertEqual(Joining.kind(of: code), .welcome)
+        XCTAssertEqual(try Joining.open(Joining.decode(Joining.Welcome.self, from: code), invite: invite, me: newcomer), group)
+        // A welcome from a phone before compression: the group sealed as plain JSON, the code as JSON text.
+        let plain = try seal(JSONEncoder().encode(group), to: newcomer.publicKey, from: coord, context: invite.token)
+        let old = Joining.Welcome(groupID: welcome.groupID, memberNumber: welcome.memberNumber, sealed: plain)
+        let oldCode = Joining.prefix + (try JSONEncoder().encode(old)).base64EncodedString()
+        XCTAssertEqual(try Joining.open(Joining.decode(Joining.Welcome.self, from: oldCode), invite: invite, me: newcomer), group)
+    }
+
     func testButtonWordsDefaultAndCanBeChangedOrCleared() {
         var g = newGroup(DeviceIdentity())
         XCTAssertEqual(ButtonWords.words(.red, in: g), "Come now")
