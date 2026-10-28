@@ -153,10 +153,16 @@ public final class HelpEngine: ObservableObject {
     private var lastBoxAnswer: Date?
     private var tasks: [UUID: Task<Void, Never>] = [:]
 
+    /// A watch acting for its owner's phone while the phone is out of reach. It calls and responds
+    /// as the same member, numbering its calls apart from the phone's, and leaves the phone's other
+    /// duties (the member list, check-ins, rota gaps) to the phone.
+    public let companion: Bool
+
     public init(identity: DeviceIdentity, mesh: MeshLink, relay: RelayLink, alerts: AlertScheduler, store: EngineStore,
-                saved: SavedState?, activity: Activity, calendar: Calendar = .current, now: @escaping () -> Date = Date.init) {
+                saved: SavedState?, activity: Activity, calendar: Calendar = .current, now: @escaping () -> Date = Date.init,
+                companion: Bool = false) {
         self.identity = identity; self.mesh = mesh; self.relay = relay; self.alerts = alerts; self.store = store
-        self.saved = saved; self.activity = activity; self.calendar = calendar; self.now = now
+        self.saved = saved; self.activity = activity; self.calendar = calendar; self.now = now; self.companion = companion
         applyGroup()
     }
 
@@ -210,7 +216,7 @@ public final class HelpEngine: ObservableObject {
         let before = Set(s.group.members.map(\.number))
         change(&s.group)
         setState(s)
-        guard me?.role == .coordinator else { return }
+        guard actsAsCoordinator else { return }
         let roleChanged = s.group.members.filter { m in old.member(m.number).map { $0.role != m.role } ?? false }.map(\.number)
         announce(membershipOf: s.group, added: Set(s.group.members.map(\.number)).subtracting(before),
                  removed: before.subtracting(s.group.members.map(\.number)), roles: Set(roleChanged))
@@ -265,6 +271,16 @@ public final class HelpEngine: ObservableObject {
         fresh.airtime = activity.airtime
         activity = fresh
         alerts.cancelAll()
+    }
+
+    /// On a watch: takes in what the paired phone sent. Returns false if it was made with other keys,
+    /// so the watch must start a new engine with them.
+    @discardableResult
+    public func take(_ handover: WatchHandover) -> Bool {
+        guard companion, handover.keys == identity.rawRepresentation else { return false }
+        let next = handover.state(keeping: saved)
+        if next != saved { setState(next) }
+        return true
     }
 
     private func setState(_ s: SavedState?) {
@@ -326,10 +342,12 @@ public final class HelpEngine: ObservableObject {
 
     // MARK: Calling for help
 
+    /// The phone numbers its calls 1 to 32767 and a watch acting for it 32768 to 65535, so the
+    /// two never give different calls the same number.
     private func nextRequestNumber() -> UInt16 {
         guard var s = saved else { return 0 }
-        s.lastRequest &+= 1
-        if s.lastRequest == 0 { s.lastRequest = 1 }
+        let low: UInt16 = companion ? 0x8000 : 1, high: UInt16 = companion ? 0xFFFF : 0x7FFF
+        s.lastRequest = s.lastRequest >= low && s.lastRequest < high ? s.lastRequest + 1 : low
         saved = s
         store.save(s)
         return s.lastRequest
@@ -507,21 +525,23 @@ public final class HelpEngine: ObservableObject {
     public static let confirmationWait: TimeInterval = 2 * 86_400
 
     public func tick() {
-        if let s = saved, !s.confirmed, let at = s.joinedAt, now().timeIntervalSince(at) > Self.confirmationWait { raise(.unconfirmed) }
-        if me?.role == .coordinator { spawn { await self.repeatMembershipIfDue() } }
+        if !companion, let s = saved, !s.confirmed, let at = s.joinedAt, now().timeIntervalSince(at) > Self.confirmationWait { raise(.unconfirmed) }
+        if actsAsCoordinator { spawn { await self.repeatMembershipIfDue() } }
         pruneInbox()
         publishMembersIfDue()
         if !boxesToAnswer.isEmpty { spawn { await self.answerNewBoxesIfDue() } }
         checkResends()
         // Repeat this caller's check-ins once a day, for responders who missed them.
-        if var s = saved, s.checkInSince != nil, now().timeIntervalSince(s.checkInSharedAt ?? .distantPast) > 86_400 {
+        if !companion, var s = saved, s.checkInSince != nil, now().timeIntervalSince(s.checkInSharedAt ?? .distantPast) > 86_400 {
             s.checkInSharedAt = now()
             saved = s
             store.save(s)
             spawn { await self.shareCheckIns(to: nil) }
         }
-        checkMissedCheckIn()
-        watchOthersCheckIns()
+        if !companion {
+            checkMissedCheckIn()
+            watchOthersCheckIns()
+        }
         topUpAlerts()
         // Stop listening on the old channel once the changeover after a removal is over.
         let listening = group?.listening(at: now()).map(\.channelSecret) ?? []
@@ -533,7 +553,7 @@ public final class HelpEngine: ObservableObject {
     /// the relay cannot be reached, it tries again after a growing pause; if it refuses a list, that
     /// list is not tried again until it changes, so a refusal cannot use up the free allowance.
     private func publishMembersIfDue() {
-        guard me?.role == .coordinator, relay.isConfigured, let g = group else { return }
+        guard actsAsCoordinator, relay.isConfigured, let g = group else { return }
         let list = RelayProtocol.memberList(g)
         let t = now()
         let changed = list != publishedList
@@ -563,7 +583,7 @@ public final class HelpEngine: ObservableObject {
     /// the first coordinator's repeat is what confirms people other coordinators invited. Runs from
     /// the box connecting and from every tick, so it happens with no box too.
     private func repeatMembershipIfDue() async {
-        guard me?.role == .coordinator, let myNumber = saved?.me, let g = group,
+        guard actsAsCoordinator, let myNumber = saved?.me, let g = group,
               now().timeIntervalSince(lastMembershipRepeat ?? .distantPast) > 86_400, mesh.isReady || relay.isConfigured else { return }
         lastMembershipRepeat = now()
         for m in g.members where m.number != myNumber {
@@ -679,7 +699,7 @@ public final class HelpEngine: ObservableObject {
                     if case let .memberRemoved(n, _) = inner, n == s.invitedBy, !s.confirmed { raise(.inviterLeft) }
                     // The first coordinator lists at once anyone it hears another coordinator add, so
                     // they are confirmed without waiting for the daily repeat.
-                    if case let .memberAdded(n, _, _, _, _, _) = inner, isPrimaryCoordinator, let f = group?.addedFrame(n), let me = saved?.me {
+                    if case let .memberAdded(n, _, _, _, _, _) = inner, isPrimaryCoordinator, !companion, let f = group?.addedFrame(n), let me = saved?.me {
                         let signed = HelpFrame.signing(f, as: me, identity: identity, group: groupID)
                         spawn { await self.sendToAll(signed) }
                     }
@@ -844,6 +864,7 @@ public final class HelpEngine: ObservableObject {
 
     /// Every phone works out gaps for itself, so the coordinator hears with no network at all.
     private func checkGaps() {
+        guard !companion else { return }
         if group != nil, !gaps.isEmpty { raise(.rotaGap) } else if activity.notices[.rotaGap] != nil { activity.notices[.rotaGap] = nil }
     }
 
@@ -911,6 +932,9 @@ public final class HelpEngine: ObservableObject {
     }
 
     public var isPrimaryCoordinator: Bool { saved?.me != nil && saved?.me == group?.primaryCoordinator }
+
+    /// A watch never speaks for the group as its coordinator: the phone does.
+    private var actsAsCoordinator: Bool { !companion && me?.role == .coordinator }
 
     public func setRelay(_ url: String) {
         let trimmed = url.trimmingCharacters(in: .whitespaces)

@@ -70,7 +70,16 @@ targets:
   helpandeyeWatch:
     type: application
     platform: watchOS
-    sources: [helpandeyeWatch]
+    # The watch calls and responds by itself when the phone is out of reach, with the phone's own
+    # relay, storage, notification and colour code.
+    sources:
+      - helpandeyeWatch
+      - helpandeye/Relay.swift
+      - helpandeye/Store.swift
+      - helpandeye/Alerts.swift
+      - helpandeye/Colours.swift
+    dependencies:
+      - package: helpandeyeCore
     info:
       path: helpandeyeWatch/Info.plist
       properties:

@@ -181,17 +181,20 @@ final class RelayModel {
 }
 
 @MainActor final class Phone {
-    let identity = DeviceIdentity()
+    let identity: DeviceIdentity
     /// Replaced when a test closes and reopens the app.
     let mesh = FakeMesh()
     let relay = FakeRelay()
     let alerts = FakeAlerts()
     var engine: HelpEngine!
 
-    init(air: Air, clock: Clock) {
+    /// `watchOf` makes this the paired watch of that phone, acting as the same member.
+    init(air: Air, clock: Clock, watchOf owner: Phone? = nil) {
+        identity = owner?.identity ?? DeviceIdentity()
         mesh.air = air; relay.air = air
         engine = HelpEngine(identity: identity, mesh: mesh, relay: relay, alerts: alerts, store: NoStore(),
-                            saved: nil, activity: Activity(), calendar: Calendar(identifier: .gregorian), now: { clock.now })
+                            saved: nil, activity: Activity(), calendar: Calendar(identifier: .gregorian), now: { clock.now },
+                            companion: owner != nil)
         mesh.phone = self; relay.phone = self
         engine.bandChanged(mesh.radio?.band)
         air.phones.append(self)

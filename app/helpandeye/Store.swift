@@ -31,6 +31,15 @@ enum Store {
         }
     }
 
+    /// On a watch: the owner's keys, from their paired phone (WatchHandover).
+    static func handedOverIdentity() -> DeviceIdentity? {
+        guard case let .success(raw) = read("handover.identity") else { return nil }
+        return try? DeviceIdentity(rawRepresentation: raw)
+    }
+
+    @discardableResult
+    static func keep(handedOver identity: DeviceIdentity) -> Bool { write("handover.identity", identity.rawRepresentation) }
+
     static func loadState() -> SavedState? {
         guard case let .success(data) = read("state") else { return nil }
         return try? JSONDecoder().decode(SavedState.self, from: data)

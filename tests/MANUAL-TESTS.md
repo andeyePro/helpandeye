@@ -75,7 +75,15 @@ Pass: one of B or C alerts at once and the other about two minutes later. Neithe
 
 1. On phone A's paired watch, open Help&I and press Come now.
 
-Pass: phone B alerts as in section 3, and the watch shows "Sent. Waiting for a responder." Put phone A out of the watch's range and press again: the watch shows a cross and tells the wearer to use their phone or call 999.
+Pass: phone B alerts as in section 3, and the watch shows "Sent. Waiting for a responder."
+
+Then, with the internet route set up (section 5) and the watch on Wi-Fi or its own mobile service:
+
+2. Open Help&I on phone A once with the watch nearby, so the phone hands the watch the group. Then put phone A out of the watch's range (or switch phone A off).
+3. On the watch, press Come now. On phone B, acknowledge.
+4. Make phone B a responder's own watch test too: put phone B out of range of its watch, press Come now on phone A, and acknowledge on phone B's watch.
+
+Pass: with phone A out of reach the watch says calls go over its own internet, the call reaches phone B, and the watch shows the acknowledgement only after phone B's person pressed it. Phone B's watch buzzes for the call only while phone B is out of reach, and its acknowledgement shows on phone A as phone B's. With no internet on the watch either, it shows a cross and tells the wearer to use their phone or call 999.
 
 ## 8. Removing a lost phone
 

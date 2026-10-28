@@ -36,6 +36,12 @@ final class PhoneWatchLink: NSObject, ObservableObject {
                  "who": model.name(ofUnit: r.key.unit)]
             }
         }
+        // The group and this person's keys, so the watch can call and respond as them when this
+        // phone is out of reach. They go only to this person's own paired watch.
+        if WCSession.default.isWatchAppInstalled, let saved = model.saved,
+           let handover = try? JSONEncoder().encode(WatchHandover(saved: saved, identity: model.identity)) {
+            context["handover"] = handover
+        }
         try? WCSession.default.updateApplicationContext(context)
     }
 }
