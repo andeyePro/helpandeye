@@ -459,17 +459,20 @@ struct CheckInSection: View {
     var body: some View {
         Section(header: Header("Check-ins")) {
             let mayChange = model.group.map { $0.profile(of: model.saved?.me).mayChange(.checkIns) } ?? true
-            Toggle("Check in at set times", isOn: $on).disabled(!mayChange)
-            if on {
-                DatePicker("First check-in", selection: $morning, displayedComponents: .hourAndMinute).disabled(!mayChange)
-                Toggle("A second check-in", isOn: $twice).disabled(!mayChange)
-                if twice { DatePicker("Second check-in", selection: $evening, displayedComponents: .hourAndMinute).disabled(!mayChange) }
-                Text("Press I'm OK within half an hour of each time. If you do not, your responders get a Need a hand call.")
-            }
-            if mayChange {
-                Button("Save") { model.setCheckIn(on ? CheckInSchedule(times: [minutes(morning)] + (twice ? [minutes(evening)] : [])) : nil) }
+            if !mayChange {
+                // Set by the coordinator: said in words, not shown as controls that do nothing.
+                let times = (model.checkIn?.times ?? []).map { date($0).formatted(date: .omitted, time: .shortened) }
+                Text(times.isEmpty ? "No check-ins. \(SetByCoordinator.text)" : "Check in at \(times.joined(separator: " and ")). \(SetByCoordinator.text)")
+                if !times.isEmpty { Text("Press I'm OK within half an hour of each time. If you do not, your responders get a Need a hand call.") }
             } else {
-                Text(SetByCoordinator.text)
+                Toggle("Check in at set times", isOn: $on)
+                if on {
+                    DatePicker("First check-in", selection: $morning, displayedComponents: .hourAndMinute)
+                    Toggle("A second check-in", isOn: $twice)
+                    if twice { DatePicker("Second check-in", selection: $evening, displayedComponents: .hourAndMinute) }
+                    Text("Press I'm OK within half an hour of each time. If you do not, your responders get a Need a hand call.")
+                }
+                Button("Save") { model.setCheckIn(on ? CheckInSchedule(times: [minutes(morning)] + (twice ? [minutes(evening)] : [])) : nil) }
             }
         }
         .onAppear {
