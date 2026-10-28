@@ -44,11 +44,29 @@ jobs:
             ($d.comments.nodes[] | "---\n**\(.author.login // "unknown"):**\(if .id == $c then " (this is the message that mentioned you)" else "" end)\n\(.body)\n",
               (.replies.nodes[] | "> **reply from \(.author.login // "unknown"):**\(if .id == $c then " (this is the message that mentioned you)" else "" end)\n\(.body)\n"))' \
             "$RUNNER_TEMP/thread.json" > "$RUNNER_TEMP/thread.md"
+          reply_to=""
+          if [ -n "$COMMENT_ID" ]; then
+            # The history above stops at 100 comments and 100 replies, so the mention is fetched by its own
+            # ID: it is added if the history missed it, and it names the top-level comment to reply under.
+            gh api graphql -f id="$COMMENT_ID" -f query='
+              query($id:ID!){node(id:$id){... on DiscussionComment{id body author{login} replyTo{id}}}}' \
+              > "$RUNNER_TEMP/trigger.json"
+            if ! jq -e --arg c "$COMMENT_ID" '[.. | objects | select(.id? == $c)] | length > 0' "$RUNNER_TEMP/thread.json" > /dev/null; then
+              {
+                printf -- '---\n**%s:** (this is the message that mentioned you)\n' "$(jq -r '.data.node.author.login // "unknown"' "$RUNNER_TEMP/trigger.json")"
+                jq -r '.data.node.body' "$RUNNER_TEMP/trigger.json"
+              } >> "$RUNNER_TEMP/thread.md"
+            fi
+            # A reply to a reply has to hang off the top-level comment.
+            reply_to=$(jq -r '.data.node.replyTo.id // .data.node.id // ""' "$RUNNER_TEMP/trigger.json")
+            if [ -z "$reply_to" ]; then echo "::error::Could not find the comment that mentioned Claude."; exit 1; fi
+          fi
+          if [ "$(grep -c 'this is the message that mentioned you' "$RUNNER_TEMP/thread.md")" != 1 ]; then
+            echo "::error::Expected exactly one message marked as the mention."; exit 1
+          fi
           {
             echo "discussion_id=$(jq -r .data.repository.discussion.id "$RUNNER_TEMP/thread.json")"
-            # A reply to a reply has to hang off the top-level comment.
-            echo "reply_to=$(jq -r --arg c "$COMMENT_ID" '[.data.repository.discussion.comments.nodes[] |
-              select(.id == $c or any(.replies.nodes[]; .id == $c)) | .id][0] // ""' "$RUNNER_TEMP/thread.json")"
+            echo "reply_to=$reply_to"
           } >> "$GITHUB_OUTPUT"
 
       - name: Ask Claude
@@ -58,7 +76,7 @@ jobs:
           npm install -g --silent @anthropic-ai/claude-code@2.1.310
           {
             cat .github/claude/discussion-prompt.md
-            for f in README.md AGENTS.md CONTRIBUTING.md docs/design-decisions.md; do
+            for f in README.md AGENTS.md CONTRIBUTING.md docs/design-decisions.md docs/app-spec.md; do
               printf '\n\n# Project document: %s\n\n' "$f"; cat "$f"
             done
             printf '\n\n# The discussion thread\n\n'; cat "$RUNNER_TEMP/thread.md"
