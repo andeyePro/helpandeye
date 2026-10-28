@@ -23,8 +23,9 @@ final class WatchModel: NSObject, ObservableObject {
     /// Which call the phone's status is about.
     @Published private var phoneCall: IncomingRequest.Key?
     @Published private var phoneOpen: [Open] = []
-    /// The acknowledgement last made from the watch, so whether it went out can be shown.
-    @Published private var lastAck: IncomingRequest.Key?
+    /// The acknowledgement last made from the watch, and its group, so whether it went out can be
+    /// shown.
+    @Published private var lastAck: (group: String, key: IncomingRequest.Key)?
     /// What happened when the watch could not even ask the phone or the internet.
     @Published private var problem: String?
     /// Set when the last call went out from the watch itself, so its own status is shown.
@@ -52,7 +53,11 @@ final class WatchModel: NSObject, ObservableObject {
     override init() {
         super.init()
         relay.device = "watch"
-        if let id = Store.handedOverIdentity() { start(id) }
+        if let id = Store.handedOverIdentity() {
+            start(id)
+            // The other groups come back too: a handover may not come again after a relaunch.
+            for tag in Store.otherGroups { makeOther(tag, identity: id) }
+        }
         if WCSession.isSupported() {
             WCSession.default.delegate = self
             WCSession.default.activate()
@@ -103,19 +108,29 @@ final class WatchModel: NSObject, ObservableObject {
         }
         for part in parts {
             let tag = part.group.tag
-            if let o = others[tag], o.engine.take(part) { continue }
-            let relay = Relay(), alerts = WatchAlerts(prefix: tag + "-")
-            relay.device = "watch"
-            relay.pushToken = self.relay.pushToken
+            if let o = others[tag] {
+                if o.engine.take(part) { continue }
+                // Made with other keys: start again, and nothing held back is let go later.
+                o.alerts.cancelAll()
+            }
             Store.save(part.state(keeping: Store.loadState(tag)), group: tag)
-            let e = HelpEngine(identity: identity, mesh: NoBox(), relay: relay, alerts: alerts, store: AppStore(group: tag),
-                               saved: Store.loadState(tag), activity: Store.loadActivity(tag), companion: true)
-            relay.onFrame = { [weak e] in e?.receive($0, via: .internet) }
-            e.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
-            e.take(part)
-            others[tag] = Other(engine: e, relay: relay, alerts: alerts)
+            makeOther(tag, identity: identity)
+            others[tag]?.engine.take(part)
         }
+        Store.otherGroups = others.keys.sorted()
         settleAlerts()
+    }
+
+    /// An engine, relay and alerts for another group, from what is saved under its tag.
+    private func makeOther(_ tag: String, identity: DeviceIdentity) {
+        let relay = Relay(), alerts = WatchAlerts(prefix: tag + "-")
+        relay.device = "watch"
+        relay.pushToken = self.relay.pushToken
+        let e = HelpEngine(identity: identity, mesh: NoBox(), relay: relay, alerts: alerts, store: AppStore(group: tag),
+                           saved: Store.loadState(tag), activity: Store.loadActivity(tag), companion: true)
+        relay.onFrame = { [weak e] in e?.receive($0, via: .internet) }
+        e.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+        others[tag] = Other(engine: e, relay: relay, alerts: alerts)
     }
 
     /// Each group's alerts stay quiet only for calls the phone, in reach, says it has.
@@ -131,6 +146,7 @@ final class WatchModel: NSObject, ObservableObject {
         alerts.cancelAll()
         for (tag, o) in others { o.alerts.cancelAll(); Store.forget(group: tag) }
         others = [:]
+        Store.otherGroups = []
         engine = nil
         bag = []
         Store.forgetHandedOver()
@@ -183,7 +199,7 @@ final class WatchModel: NSObject, ObservableObject {
 
     var status: (text: String, cross: Bool)? {
         if let problem { return (problem, true) }
-        if let key = lastAck, let s = allEngines.lazy.compactMap({ $0.ackSendStatus(key) }).first {
+        if let ack = lastAck, let s = engine(forGroup: ack.group)?.ackSendStatus(ack.key) {
             switch s {
             case .notSent: return ("Not acknowledged: this watch cannot reach the internet. Use your phone.", true)
             case .sending: return ("Sending your acknowledgement…", false)
@@ -201,19 +217,18 @@ final class WatchModel: NSObject, ObservableObject {
         return phoneStatus.map { ($0, phoneFailed) }
     }
 
+    /// Every group's open calls together, most urgent first, then the first five.
     var open: [Open] {
         if phoneInReach { return phoneOpen }
-        return allEngines.flatMap { e in
-            e.activity.inbox.sorted.filter { !$0.isAcknowledged }.prefix(5).map {
-                Open(unit: $0.key.unit, request: $0.key.request, colour: $0.colour ?? .red, who: e.name(ofUnit: $0.key.unit),
-                     group: e === engine ? "" : (e.group?.tag ?? ""))
-            }
+        let all = allEngines.flatMap { e in e.activity.inbox.requests.values.filter { !$0.isAcknowledged }.map { (e, $0) } }
+        return all.sorted { ResponderInbox.moreUrgent($0.1, $1.1) }.prefix(5).map { e, r in
+            Open(unit: r.key.unit, request: r.key.request, colour: r.colour ?? .red, who: e.name(ofUnit: r.key.unit), group: e.group?.tag ?? "")
         }
     }
 
-    /// The engine for an open call's group.
-    private func engine(for r: Open) -> HelpEngine? {
-        r.group.isEmpty || r.group == engine?.group?.tag ? engine : others[r.group]?.engine
+    /// The engine for a group's tag; an empty tag (from a phone before several groups) is the first.
+    private func engine(forGroup tag: String) -> HelpEngine? {
+        tag.isEmpty || tag == engine?.group?.tag ? engine : others[tag]?.engine
     }
 
     // MARK: Buttons
@@ -250,18 +265,19 @@ final class WatchModel: NSObject, ObservableObject {
     /// reach. Two copies of one person's acknowledgement are one acknowledgement.
     func acknowledge(_ r: Open) {
         problem = nil
-        if engine(for: r)?.acknowledge(r.key) == true { lastAck = r.key }
+        let mine = engine(forGroup: r.group)?.acknowledge(r.key) == true
+        lastAck = mine ? (r.group, r.key) : nil
         guard phoneInReach else {
-            if lastAck != r.key { problem = "Not acknowledged: use your phone." }
+            if !mine { problem = "Not acknowledged: use your phone." }
             return
         }
         WCSession.default.sendMessage(["ackUnit": Int(r.unit), "ackRequest": Int(r.request), "group": r.group], replyHandler: { reply in
             let ok = reply["ok"] as? Bool == true
             Task { @MainActor in
-                if ok { self.phoneOpen.removeAll { $0 == r } } else if self.lastAck != r.key { self.problem = "Not acknowledged. Use your phone." }
+                if ok { self.phoneOpen.removeAll { $0 == r } } else if !mine { self.problem = "Not acknowledged. Use your phone." }
             }
         }, errorHandler: { _ in
-            Task { @MainActor in if self.lastAck != r.key { self.problem = "Not acknowledged: your phone did not answer. Use your phone." } }
+            Task { @MainActor in if !mine { self.problem = "Not acknowledged: your phone did not answer. Use your phone." } }
         })
     }
 }

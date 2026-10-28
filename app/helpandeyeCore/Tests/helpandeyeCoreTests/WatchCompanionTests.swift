@@ -113,6 +113,13 @@ import XCTest
         XCTAssertEqual(old.each.count, 1)
     }
 
+    func testAWatchAcknowledgementGoesOnlyToAGroupItCanBeSureOf() {
+        XCTAssertEqual(AckRouting.group(named: "gB", holding: ["gA", "gB"]), "gB")
+        XCTAssertEqual(AckRouting.group(named: nil, holding: ["gA"]), "gA", "an older watch's ack, one group holds that call")
+        XCTAssertNil(AckRouting.group(named: "", holding: ["gA", "gB"]), "two groups hold the same numbers: no guess")
+        XCTAssertNil(AckRouting.group(named: nil, holding: []))
+    }
+
     func testAHandoverWithOtherKeysIsRefused() {
         XCTAssertFalse(watch.engine.take(WatchHandover(saved: caller.engine.saved!, identity: DeviceIdentity())))
         XCTAssertFalse(responder.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity)),

@@ -1,5 +1,15 @@
 import Foundation
 
+/// Which group an acknowledgement made on the watch belongs to: the group it names, or, from a
+/// watch too old to name one, the only group holding that call open. Never a guess: with two
+/// groups holding the same unit and request numbers, none.
+public enum AckRouting {
+    public static func group(named tag: String?, holding: [String]) -> String? {
+        if let tag, !tag.isEmpty { return tag }
+        return holding.count == 1 ? holding[0] : nil
+    }
+}
+
 /// What a phone gives its paired watch so the watch can call for help and respond when the phone
 /// is out of reach: the group, the owner's member number, and the owner's keys, so the watch acts
 /// as the same member. It goes only to the owner's own paired watch, which keeps it as the phone

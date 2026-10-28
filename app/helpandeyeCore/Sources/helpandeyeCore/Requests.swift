@@ -305,13 +305,15 @@ public struct ResponderInbox: Sendable, Codable {
 
     /// Open requests, most urgent first: unacknowledged before acknowledged, red before amber
     /// before green, then oldest first.
-    public var sorted: [IncomingRequest] {
-        requests.values.sorted { a, b in
-            if a.isAcknowledged != b.isAcknowledged { return !a.isAcknowledged }
-            let ca = a.colour?.rawValue ?? 0, cb = b.colour?.rawValue ?? 0
-            if ca != cb { return ca < cb }
-            return a.firstHeardAt < b.firstHeardAt
-        }
+    public var sorted: [IncomingRequest] { requests.values.sorted(by: Self.moreUrgent) }
+
+    /// Open before acknowledged, red before amber before green, then oldest first. Also used to
+    /// merge several groups' lists.
+    public static func moreUrgent(_ a: IncomingRequest, _ b: IncomingRequest) -> Bool {
+        if a.isAcknowledged != b.isAcknowledged { return !a.isAcknowledged }
+        let ca = a.colour?.rawValue ?? 0, cb = b.colour?.rawValue ?? 0
+        if ca != cb { return ca < cb }
+        return a.firstHeardAt < b.firstHeardAt
     }
 }
 

@@ -35,11 +35,13 @@ final class PhoneWatchLink: NSObject, ObservableObject {
         // Open requests this person can acknowledge from the wrist, most urgent first. Names stay on
         // the paired watch, which is this person's own device.
         if model.engines.contains(where: { $0.me?.canRespond == true }) {
-            context["open"] = model.engines.filter { $0.me?.canRespond == true }.flatMap { e in
-                e.activity.inbox.sorted.filter { !$0.isAcknowledged }.prefix(5).map { r -> [String: Any] in
-                    ["unit": Int(r.key.unit), "request": Int(r.key.request), "colour": Int(r.colour?.rawValue ?? 1),
-                     "who": e.name(ofUnit: r.key.unit), "group": e.group?.tag ?? ""]
-                }
+            // Every group's open calls together, most urgent first, then the first five.
+            let open = model.engines.filter { $0.me?.canRespond == true }.flatMap { e in
+                e.activity.inbox.requests.values.filter { !$0.isAcknowledged }.map { (e, $0) }
+            }
+            context["open"] = open.sorted { ResponderInbox.moreUrgent($0.1, $1.1) }.prefix(5).map { e, r -> [String: Any] in
+                ["unit": Int(r.key.unit), "request": Int(r.key.request), "colour": Int(r.colour?.rawValue ?? 1),
+                 "who": e.name(ofUnit: r.key.unit), "group": e.group?.tag ?? ""]
             }
         }
         try? WCSession.default.updateApplicationContext(context)
@@ -73,9 +75,12 @@ extension PhoneWatchLink: WCSessionDelegate {
             Task { @MainActor in
                 guard let u = UInt32(exactly: unit), let r = UInt16(exactly: request) else { replyHandler(["ok": false]); return }
                 let key = IncomingRequest.Key(unit: u, request: r)
-                // In the group the watch named; the first group if it named none.
-                let tag = message["group"] as? String
-                let engine = self.model?.engines.first { tag == nil || tag == "" || $0.group?.tag == tag }
+                // In the group the watch named, or, from an older watch, the only group with that
+                // call open; never a guess.
+                let engines = self.model?.engines ?? []
+                let holding = engines.filter { $0.activity.inbox.requests[key]?.isAcknowledged == false }.compactMap(\.group?.tag)
+                let tag = AckRouting.group(named: message["group"] as? String, holding: holding)
+                let engine = engines.first { tag != nil && $0.group?.tag == tag }
                 // The watch is told whether an acknowledgement was really made.
                 replyHandler(["ok": engine?.acknowledge(key) == true])
             }
