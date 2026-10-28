@@ -24,10 +24,12 @@ targets:
       - package: helpandeyeCore
       - target: helpandeyeWatch
       - target: helpandeyeNotify
+      - target: helpandeyeLocalPush
     entitlements:
       path: helpandeye/helpandeye.entitlements
       properties:
         com.apple.developer.usernotifications.time-sensitive: true
+        com.apple.developer.networking.networkextension: [app-push-provider]
         aps-environment: development
     info:
       path: helpandeye/Info.plist
@@ -68,6 +70,32 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.notify
+        TARGETED_DEVICE_FAMILY: "1,2"
+  # Keeps home Wi-Fi listening with the phone locked (decision 19).
+  helpandeyeLocalPush:
+    type: app-extension
+    platform: iOS
+    sources: [helpandeyeLocalPush, helpandeye/HomeWiFi.swift, helpandeyeNotify/SharedStore.swift]
+    dependencies:
+      - package: helpandeyeCore
+    entitlements:
+      path: helpandeyeLocalPush/helpandeyeLocalPush.entitlements
+      properties:
+        com.apple.developer.networking.networkextension: [app-push-provider]
+        com.apple.developer.usernotifications.time-sensitive: true
+    info:
+      path: helpandeyeLocalPush/Info.plist
+      properties:
+        CFBundleDisplayName: "Help&I"
+        HelpAKeychainGroup: ""
+        NSLocalNetworkUsageDescription: "Help&I finds the other phones of your group on this Wi-Fi, so calls for help reach them directly, with no internet."
+        NSBonjourServices: [_helpandi._tcp]
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.networkextension.app-push
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).LocalPushProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.localpush
         TARGETED_DEVICE_FAMILY: "1,2"
   helpandeyeWatch:
     type: application

@@ -384,4 +384,15 @@ Needs phone A (a caller) and phone B (a responder) on the same home Wi-Fi networ
 4. Lock phone B, wait a minute, and press Help on phone A.
 5. Join phone C, of another group, to the same Wi-Fi, and press Help on phone A.
 
-Pass: in step 1 each phone shows one other phone of the group on this Wi-Fi. In step 2 phone A shows Home Wi-Fi: sent, then the acknowledgement, and phone B alerts. In step 3 phone B shows the note and the position. In step 4 phone B still alerts (once local push is set up, section 42), or else phone A shows the cross for Home Wi-Fi, never a false "sent". In step 5 phone C shows nothing.
+Pass: in step 1 each phone shows one other phone of the group on this Wi-Fi. In step 2 phone A shows Home Wi-Fi: sent, then the acknowledgement, and phone B alerts. In step 3 phone B shows the note and the position. In step 4, without section 42's set-up, phone A shows the cross for Home Wi-Fi, never a false "sent". In step 5 phone C shows nothing.
+
+## 42. Home Wi-Fi with the phone locked
+
+Needs a signed build (shared keychain group and the Network Extensions capability, TODO.md), and phones A (a caller) and B (a responder) on the same home Wi-Fi, with no box and no internet route.
+
+1. On phone B, under Group, Home Wi-Fi, enter the Wi-Fi's name and tap Keep listening on this Wi-Fi.
+2. Close Help&I on phone B (swipe it away) and lock it. Press Help on phone A.
+3. Tap phone B's alert and acknowledge.
+4. Take phone B off the Wi-Fi (another network or mobile data only) and press Help on phone A again.
+
+Pass: in step 2 phone B alerts within a few seconds, naming the caller, even with the app closed and the phone locked. In step 3 phone A shows the acknowledgement. In step 4 phone B does not alert over Wi-Fi, and phone A shows the cross for Home Wi-Fi (other routes as set up).

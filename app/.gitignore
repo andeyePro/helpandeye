@@ -10,3 +10,5 @@ helpandeyeNotify/Info.plist
 helpandeyeWatchWidgets/Info.plist
 Local.xcconfig
 helpandeyeWatch/helpandeyeWatch.entitlements
+helpandeyeLocalPush/Info.plist
+helpandeyeLocalPush/helpandeyeLocalPush.entitlements

@@ -189,11 +189,7 @@ struct GroupView: View {
                         }
                     }
                 }
-                Section(header: Header("Home Wi-Fi")) {
-                    Text(model.home.peerCount == 0 ? "No other phones of the group on this Wi-Fi now."
-                         : "\(model.home.peerCount) other phone\(model.home.peerCount == 1 ? "" : "s") of the group on this Wi-Fi: calls reach them directly, with no internet.")
-                    Text("Only while Help&I is open on both phones.")
-                }
+                HomeWiFiSection()
                 MyPhoneSection()
                 if model.me?.canCall == true {
                     YourSettingsSection()

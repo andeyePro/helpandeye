@@ -123,8 +123,9 @@ Agreed with Martin, 2026-10-28 ([decision 6](design-decisions.md#d6)).
 - It is the first route tried, and goes alongside every other route that works. A call that
   reached no other phone of the group shows the cross, as on every route.
 - iOS stops an app listening in the background. To keep the route working with phones locked,
-  the app uses Apple's local push connectivity on the home Wi-Fi network, which the coordinator
-  names when setting the group up.
+  the app uses Apple's local push connectivity: on the home Wi-Fi network each phone's owner
+  names under Group, iOS keeps a small part of the app listening, which alerts for a call; opening
+  Help&I does the rest.
 
 ## How the internet route works
 
