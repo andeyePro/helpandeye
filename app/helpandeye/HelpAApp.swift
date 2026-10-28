@@ -39,7 +39,10 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 /// Applies the reader's chosen text size to every screen.
 struct SizedRoot: View {
     @AppStorage(TextSize.key) private var size = TextSize.asPhone
-    var body: some View { RootView().dynamicTypeSize(size.sizes).tint(.link) }
+    var body: some View {
+        // Left alone unless a larger size is chosen, so the phone's own setting applies directly.
+        if size == .asPhone { RootView().tint(.link) } else { RootView().dynamicTypeSize(size.sizes).tint(.link) }
+    }
 }
 
 struct RootView: View {

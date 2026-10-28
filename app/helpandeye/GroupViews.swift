@@ -97,7 +97,7 @@ struct JoinGroupView: View {
             } else if let invite, let requestCode {
                 Section(header: Header("Show this to the coordinator")) {
                     QRCode(text: requestCode).frame(maxWidth: 260).frame(maxWidth: .infinity)
-                    ShareLink(item: requestCode) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
+                    ShareLink(item: requestCode) { WrappingLabel("Send it as a message instead", systemImage: "square.and.arrow.up") }
                     Text("If you are not together, read this number to each other on a call: \(Joining.safetyNumber(invite.coordinatorKey, model.identity.publicKey)). It must match on both phones.")
                 }
                 CodeReader(prompt: "Then scan the welcome code they show you") { code in
@@ -220,7 +220,7 @@ struct GroupView: View {
                 }
                 DisplaySection()
                 Section {
-                    Button("Leave this group", role: .destructive) { model.leave() }
+                    Button("Leave this group", role: .destructive) { model.leave() }.foregroundStyle(Color.warning)
                 }
             }
             .navigationTitle(model.group?.name ?? "Group")
@@ -268,7 +268,7 @@ struct InviteView: View {
             if let invite, let code = try? Joining.code(invite), request == nil {
                 Section(header: Header("Ask them to scan this")) {
                     QRCode(text: code).frame(maxWidth: 260).frame(maxWidth: .infinity)
-                    ShareLink(item: code) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
+                    ShareLink(item: code) { WrappingLabel("Send it as a message instead", systemImage: "square.and.arrow.up") }
                 }
                 CodeReader(prompt: "Then scan the code on their phone") { c in
                     do { request = try Joining.decode(Joining.JoinRequest.self, from: c); error = nil } catch { self.error = codeProblem(c, expected: .request) }
@@ -287,7 +287,7 @@ struct InviteView: View {
             } else if let welcomeCode {
                 Section(header: Header("Ask them to scan this welcome code")) {
                     QRCode(text: welcomeCode).frame(maxWidth: 320).frame(maxWidth: .infinity)
-                    ShareLink(item: welcomeCode) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
+                    ShareLink(item: welcomeCode) { WrappingLabel("Send it as a message instead", systemImage: "square.and.arrow.up") }
                     Button("Done") { dismiss() }
                 }
             }
@@ -315,7 +315,7 @@ struct KeyUpdatesSection: View {
                 VStack(spacing: 16) {
                     Text("Update for \(m.name)").font(.headline)
                     QRCode(text: code).frame(maxWidth: 320)
-                    ShareLink(item: code) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
+                    ShareLink(item: code) { WrappingLabel("Send it as a message instead", systemImage: "square.and.arrow.up") }
                 }
                 .padding()
             }

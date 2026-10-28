@@ -129,3 +129,13 @@ struct Header: View {
     init(_ title: String) { self.title = title }
     var body: some View { Text(title).font(.headline).foregroundStyle(Color.primary).textCase(nil) }
 }
+
+/// A label whose words wrap onto more lines at large text sizes instead of being cut off.
+struct WrappingLabel: View {
+    let title: String
+    let systemImage: String
+    init(_ title: String, systemImage: String) { self.title = title; self.systemImage = systemImage }
+    var body: some View {
+        Label { Text(title).fixedSize(horizontal: false, vertical: true) } icon: { Image(systemName: systemImage) }
+    }
+}

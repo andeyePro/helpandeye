@@ -35,9 +35,9 @@ final class ScreensTests: XCTestCase {
         allowSystemAlerts()
         look("help-not-sent")
 
-        app.tabBars.buttons["Respond"].tap()
+        tab("Respond")
         look("respond")
-        app.tabBars.buttons["Group"].tap()
+        tab("Group")
         look("group")
         reveal(app.buttons["Invite someone"]).tap()
         look("invite-role")
@@ -49,12 +49,18 @@ final class ScreensTests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
         app.swipeUp(); app.swipeUp()
         look("group-lower")
-        app.tabBars.buttons["Box"].tap()
+        tab("Box")
         look("box")
 
         if !problems.isEmpty {
             XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
         }
+    }
+
+    /// iPhone puts the tabs along the bottom; iPad puts them along the top, as plain buttons.
+    private func tab(_ name: String) {
+        let bar = app.tabBars.buttons[name]
+        (bar.exists ? bar : app.buttons[name].firstMatch).tap()
     }
 
     /// The phone-number keyboard has no return key, so Done above it must be there.
