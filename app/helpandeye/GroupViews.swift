@@ -21,7 +21,10 @@ struct WelcomeView: View {
         }
         .padding()
         .sheet(item: $mode) { m in
-            NavigationStack { m == .create ? AnyView(CreateGroupView()) : AnyView(JoinGroupView()) }
+            NavigationStack {
+                (m == .create ? AnyView(CreateGroupView()) : AnyView(JoinGroupView()))
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { mode = nil } } }
+            }
         }
     }
 }
@@ -295,6 +298,8 @@ struct InviteView: View {
         }
         .navigationTitle("Invite someone")
         .keyboardDismissable()
+        // A plain way out: on iPad, and with VoiceOver, a sheet is not always easy to swipe away.
+        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
     }
 }
 
@@ -380,7 +385,7 @@ struct RelaySection: View {
             LabeledField(label: "Relay address, starting https://", text: $url, keyboard: .URL)
             Button("Save") { model.setRelay(url) }
             Text(model.relay.isConfigured ? "Calls also go over the internet." : "Not set up: calls go over the local radio only.")
-            Text("Members get the address the next time they join or scan a key update.")
+            Text("Members get the new address at once, over the old address or the local radio, or when they next join.")
         }
         .onAppear { url = model.group?.relayURL ?? "" }
     }
@@ -419,7 +424,7 @@ struct ButtonWordsSection: View {
                 saved = true
             }
             .buttonStyle(.action)
-            Text(saved ? "Saved. Members see the new words when they next join or scan a key update."
+            Text(saved ? "Saved. The new words go to every member now."
                        : "Leave a box empty to keep the words shown above it. At most \(ButtonWords.longest) letters each.")
         }
         .onAppear { words = model.group?.policy.buttonWords ?? [:] }

@@ -35,7 +35,11 @@ struct CodeReader: View {
             if DataScannerViewController.isSupported {
                 Button("Scan with the camera") { scanning = true }.buttonStyle(.action)
             }
-            TextField("Or paste the code here", text: $pasted, axis: .vertical).textFieldStyle(.roundedBorder)
+            // Labelled above, not by a faint placeholder.
+            Text("Or paste the code here")
+            TextField("Or paste the code here", text: $pasted, prompt: Text(""), axis: .vertical)
+                .accessibilityLabel("Or paste the code here")
+                .textFieldStyle(.roundedBorder)
             Button("Use pasted code") { if !pasted.isEmpty { onCode(pasted) } }
         }
         .sheet(isPresented: $scanning) {

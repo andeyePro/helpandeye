@@ -222,8 +222,14 @@ public final class HelpEngine: ObservableObject {
         let old = s.group
         let before = Set(s.group.members.map(\.number))
         change(&s.group)
+        // Changed settings go to every member at once, under a newer version.
+        let settingsChanged = actsAsCoordinator && s.group.settings != old.settings
+        if settingsChanged { s.group.settingsVersion = old.settingsVersion + 1 }
         setState(s)
         guard actsAsCoordinator else { return }
+        if settingsChanged, let f = s.group.settingsFrame(as: s.me, identity: identity) {
+            spawn { _ = await self.sendOptional(f) }
+        }
         let roleChanged = s.group.members.filter { m in old.member(m.number).map { $0.role != m.role } ?? false }.map(\.number)
         announce(membershipOf: s.group, added: Set(s.group.members.map(\.number)).subtracting(before),
                  removed: before.subtracting(s.group.members.map(\.number)), roles: Set(roleChanged))
@@ -621,6 +627,8 @@ public final class HelpEngine: ObservableObject {
         guard actsAsCoordinator, let myNumber = saved?.me, let g = group,
               now().timeIntervalSince(lastMembershipRepeat ?? .distantPast) > 86_400, mesh.isReady || relay.isConfigured else { return }
         lastMembershipRepeat = now()
+        // The settings too, for members who missed them.
+        if g.settingsVersion > 0, let f = g.settingsFrame(as: myNumber, identity: identity) { _ = await sendOptional(f) }
         for m in g.members where m.number != myNumber {
             if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
             if m.role == .coordinator, let f = g.roleFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
@@ -741,6 +749,10 @@ public final class HelpEngine: ObservableObject {
                 }
             default: break
             }
+            return
+        case .groupSettings:
+            guard var s = saved, s.group.apply(settings: frame) else { return }
+            setState(s)
             return
         case .forResponders:
             // Only a responder can open it; what is inside is handled as if it came plainly.

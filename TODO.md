@@ -23,7 +23,6 @@
 - [ ] **Positions as a change, confirmed by responders** - the rest of decision 12: a position sent as the change from the last one each responder confirmed receiving, or in full when that is smaller or unknown, with a small signed receipt from each responder for positions only. The responders' key and the single sealed message are done.
 - [ ] **One box for a household** - MeshCore's companion firmware takes one Bluetooth connection at a time, so each phone needs its own box. Sharing one box needs Help&I's own firmware (see Buttons on a plain Heltec) or a shared hub.
 - [ ] **Responders in more than one group** - Martin, 2026-10-28: "It would be useful if responders at least could be members of multiple groups."
-- [ ] **Group settings reach members at once** - button words and the relay address now reach members only when they next join or scan a key update; every one of the 15 frame kinds is in use, so this needs an extended frame kind.
 - [ ] **A default relay** - once a relay is deployed, new groups could use it without the coordinator entering an address.
 - [ ] Name callers in pushes: built (`app/helpandeyeNotify`), but needs signing with a shared keychain group. Set `HelpAKeychainGroup` in both Info.plist sections of `app/project.yml` to `$(AppIdentifierPrefix)com.andeye.help.shared`, and add the matching keychain-access-groups entitlement to both targets.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).

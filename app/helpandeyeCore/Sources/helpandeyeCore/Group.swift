@@ -108,6 +108,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var roleVersions: [UInt16: UInt32] = [:]
     /// When each member's mobile number was last set, so an older change heard late is ignored.
     public var phoneVersions: [UInt16: UInt32] = [:]
+    /// Goes up each time a coordinator changes the group's settings (GroupSettings).
+    public var settingsVersion: UInt32 = 0
     /// The highest number block ever given to a coordinator.
     public var highestBlock: UInt16 {
         get { max(members.compactMap(\.block).max() ?? 0, roleBlocksSeen) }
@@ -136,7 +138,7 @@ public struct GroupState: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, highestMember, roleVersions
-        case policy, relayURL, membershipVersion, roleBlocksSeen, phoneVersions
+        case policy, relayURL, membershipVersion, roleBlocksSeen, phoneVersions, settingsVersion
     }
 
     /// Fields added after the first release are optional when reading, so a group saved by an
@@ -154,6 +156,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         highestMember = try c.decodeIfPresent(UInt16.self, forKey: .highestMember) ?? 0
         roleVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .roleVersions) ?? [:]
         phoneVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .phoneVersions) ?? [:]
+        settingsVersion = try c.decodeIfPresent(UInt32.self, forKey: .settingsVersion) ?? 0
         policy = try c.decodeIfPresent(StoredPolicy.self, forKey: .policy) ?? .init()
         relayURL = try c.decodeIfPresent(String.self, forKey: .relayURL)
         membershipVersion = try c.decodeIfPresent(UInt32.self, forKey: .membershipVersion) ?? 1

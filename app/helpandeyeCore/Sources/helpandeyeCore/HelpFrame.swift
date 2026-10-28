@@ -50,6 +50,9 @@ public enum HelpFrame: Equatable, Sendable {
     /// A note or position sealed once for all responders (ForResponders): the five-byte nonce
     /// salt, then the ciphertext and its tag. Safe on the group channel: callers cannot open it.
     case forResponders(unit: UInt32, request: UInt16, part: UInt8, sealed: Data)
+    /// A coordinator's group settings (GroupSettings, JSON), signed, newest `version` wins. The
+    /// first of a second page of kinds: its header is 0x21, as the first page's 16 kinds are used.
+    case groupSettings(signer: UInt16, version: UInt32, settings: Data, signature: Data)
     /// A caller turned check-ins on, changed them or turned them off (an empty list). Responders'
     /// phones then watch for a missed one too. A routine is personal, so this goes only over the
     /// internet or in a key update, never on the group channel.
@@ -79,6 +82,7 @@ public enum HelpFrame: Equatable, Sendable {
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
 
     public static let formatVersion: UInt8 = 1
+    static let settingsHeader: UInt8 = 0x21
     /// MeshCore data_type for Help&I datagrams: inside the testing range, which needs no
     /// registration. See TODO.md about registering a permanent value.
     public static let meshDataType: UInt16 = 0xFF48
@@ -161,6 +165,9 @@ public enum HelpFrame: Equatable, Sendable {
             w.u8(Self.header(.memberName)); w.u16(member); w.u8(UInt8(bytes.count)); w.bytes(bytes)
         case let .forResponders(unit, request, part, sealed):
             w.u8(Self.header(.forResponders)); w.u32(unit); w.u16(request); w.u8(part); w.bytes(sealed)
+        case let .groupSettings(signer, version, settings, signature):
+            w.u8(Self.settingsHeader); w.u16(signer); w.u32(version); w.u16(UInt16(min(settings.count, 1024))); w.bytes(settings.prefix(1024))
+            w.bytes(signature.count == 64 ? signature : Data(count: 64))
         case let .memberPhone(member, phone, at):
             let bytes = Data(phone.prefix(Self.maxPhoneBytes).utf8)
             w.u8(Self.header(.memberPhone)); w.u16(member); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
@@ -175,7 +182,14 @@ public enum HelpFrame: Equatable, Sendable {
     /// understands, so stray traffic on the channel is ignored rather than shown.
     public init?(_ data: Data) {
         var r = ByteReader(data)
-        guard let head = r.u8(), head >> 4 == Self.formatVersion, let kind = Kind(rawValue: head & 0x0F) else { return nil }
+        guard let head = r.u8() else { return nil }
+        if head == Self.settingsHeader {
+            guard let signer = r.u16(), let version = r.u32(), let n = r.u16(), n <= 1024, let settings = r.take(Int(n)),
+                  let sig = r.take(64) else { return nil }
+            self = .groupSettings(signer: signer, version: version, settings: Data(settings), signature: Data(sig))
+            return
+        }
+        guard head >> 4 == Self.formatVersion, let kind = Kind(rawValue: head & 0x0F) else { return nil }
         switch kind {
         case .call:
             guard let unit = r.u32(), let req = r.u16(), let c = r.u8().flatMap(Colour.init), let at = r.u32() else { return nil }
