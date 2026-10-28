@@ -5,7 +5,7 @@ open work and decisions, `TODO.md`.
 
 ## What works, as far as a machine can check
 
-- **The app's rules** (`app/helpandeyeCore`), with 224 tests including a fuzz test that runs groups of
+- **The app's rules** (`app/helpandeyeCore`), with 237 tests including a fuzz test that runs groups of
   phones through random presses, acknowledgements, removals, lost packets, links going down and
   clock jumps, checking the safety rules after every step:
   - a red press goes out at once on every route and is sent again until a person acknowledges it;
@@ -20,6 +20,10 @@ open work and decisions, `TODO.md`.
   slots, reading the relay, and what the caller is told, are in the core package and tested.
 - **The internet relay** (`relay/`), with 22 tests, including checks that it verifies what the app
   signs and follows the same membership rules the app's tests assume.
+- **Home Wi-Fi** (decision 19): within one Wi-Fi network the group's phones call each other
+  directly, with no box, server or internet; only another proven member counts, and only once
+  their Help&I confirms it read the call. The core is tested; the app's Bonjour link and the
+  locked-phone listener are built but not run.
 - **Coordinator settings**: profiles with per-setting locks, closing a call, the log, change
   requests, and the watch's Help complication with its countdown, all in the core and tested;
   the screens are screenshotted and audited on the MacBook's simulators.
@@ -28,7 +32,7 @@ open work and decisions, `TODO.md`.
 
 - **Nothing has run on a phone, a watch or a radio.** Screens have been seen only in the
   simulator, and signing needs your Apple team, so no Bluetooth or radio behaviour, sound or
-  vibration has been tried. `tests/MANUAL-TESTS.md` has 40 checks for that, with how to set up
+  vibration has been tried. `tests/MANUAL-TESTS.md` has 42 checks for that, with how to set up
   first.
 - **The relay is not deployed**, and push notifications are off until it has an APNs key.
 
