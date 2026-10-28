@@ -13,14 +13,14 @@ final class CallerFeedbackTests: XCTestCase {
     }
 
     func testNeedAHandIsFollowedByTheGroupsNote() {
-        var g = GroupState(name: "Mill Lane", secrets: .random(), members: [])
+        var g = Profile.standard
         let standard = ButtonWords.amberNote(in: g)
         XCTAssertEqual(standard, "You have requested non-urgent assistance. If you need help sooner, please press Help.")
         let f = CallerFeedback.change(from: .sending, to: .waitingForResponder, words: "Need a hand", note: standard, name: { _ in "" })
         XCTAssertEqual(f?.spoken, "Your Need a hand message has been sent. " + standard)
-        ButtonWords.set("Hang on, someone will come.", for: ButtonWords.amberNoteKey, in: &g.policy)
+        ButtonWords.set("Hang on, someone will come.", for: ButtonWords.amberNoteKey, in: &g)
         XCTAssertEqual(ButtonWords.amberNote(in: g), "Hang on, someone will come.")
-        ButtonWords.set(String(repeating: "a", count: 300), for: ButtonWords.amberNoteKey, in: &g.policy)
+        ButtonWords.set(String(repeating: "a", count: 300), for: ButtonWords.amberNoteKey, in: &g)
         XCTAssertEqual(ButtonWords.amberNote(in: g).count, ButtonWords.longestNote)
         XCTAssertNil(CallerFeedback.change(from: .sending, to: .notSent, words: "Need a hand", note: standard, name: { _ in "" })?
             .spoken.range(of: standard), "a call that did not go says only to try again or call 999")

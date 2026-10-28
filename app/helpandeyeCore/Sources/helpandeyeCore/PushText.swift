@@ -15,6 +15,6 @@ public enum PushText {
         guard let frame = RelayProtocol.open(sealed, with: group.listening(at: now)),
               case let .call(unit, _, colour, _) = frame else { return nil }
         let who = group.member(unit: unit)?.name ?? "Unit \(unit)"
-        return Text(title: "\(who): \(ButtonWords.words(colour, in: group))", body: "Open Help&I to acknowledge.")
+        return Text(title: "\(who): \(ButtonWords.words(colour, in: group.profile(ofUnit: unit)))", body: "Open Help&I to acknowledge.")
     }
 }

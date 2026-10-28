@@ -20,6 +20,8 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     public let keys: Data
     /// Other groups the owner responds in, so the watch hears their calls too.
     public var others: [Part] = []
+    /// The owner's own choices for their profile, so the watch looks and sounds as the phone does.
+    public var own: Profile?
 
     public struct Part: Codable, Equatable, Sendable {
         public let group: GroupState
@@ -27,13 +29,15 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     }
 
     public init(saved: SavedState, identity: DeviceIdentity, others: [SavedState] = []) {
-        group = saved.group; me = saved.me; keys = identity.rawRepresentation
+        group = saved.group; me = saved.me; keys = identity.rawRepresentation; own = saved.own
         self.others = others.map { Part(group: $0.group, me: $0.me) }
     }
 
     /// One handover per group, the first group's first, each as if it were the only one.
     public var each: [WatchHandover] {
-        [WatchHandover(group: group, me: me, keys: keys)] + others.map { WatchHandover(group: $0.group, me: $0.me, keys: keys) }
+        var first = WatchHandover(group: group, me: me, keys: keys)
+        first.own = own
+        return [first] + others.map { WatchHandover(group: $0.group, me: $0.me, keys: keys) }
     }
 
     init(group: GroupState, me: UInt16, keys: Data) { self.group = group; self.me = me; self.keys = keys }
@@ -44,6 +48,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
         me = try c.decode(UInt16.self, forKey: .me)
         keys = try c.decode(Data.self, forKey: .keys)
         others = try c.decodeIfPresent([Part].self, forKey: .others) ?? []
+        own = try c.decodeIfPresent(Profile.self, forKey: .own)
     }
 
     public var identity: DeviceIdentity? { try? DeviceIdentity(rawRepresentation: keys) }
@@ -52,6 +57,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     /// own call numbering kept so a repeated or newer handover never reuses a number.
     public func state(keeping current: SavedState?) -> SavedState {
         var s = SavedState(group: group, me: me)
+        s.own = own
         if let current, current.me == me, current.group.secrets.groupID == group.secrets.groupID {
             s.lastRequest = current.lastRequest
         }

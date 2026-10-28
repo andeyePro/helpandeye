@@ -17,6 +17,18 @@ public enum CallCategory: UInt8, Sendable, CaseIterable, Codable {
     public static let choices: [CallCategory] = [.fallen, .unwell, .lockedOut, .powerCut, .needCompany, .other]
 }
 
+/// A person settling a call (decision 6): the caller saying they are OK, the caller closing it, or
+/// a coordinator closing it with the caller's consent or a written reason.
+public enum CallState: UInt8, Sendable, Codable {
+    /// I'm OK after the call: the urgent repeats stop, but a responder still checks.
+    case callerOK = 1
+    case closedByCaller = 2
+    case closedWithConsent = 3
+    case closedWithReason = 4
+
+    public var closes: Bool { self != .callerOK }
+}
+
 /// Things a coordinator is told about and must acknowledge.
 public enum Notice: UInt8, Sendable, Codable, CaseIterable {
     case rotaGap = 1, allowanceLow = 2
@@ -77,12 +89,19 @@ public enum HelpFrame: Equatable, Sendable {
     case memberName(member: UInt16, name: String)
     /// A member's mobile number, for the ready-written text; empty clears it. `at` orders changes.
     case memberPhone(member: UInt16, phone: String, at: UInt32)
+    /// A person settled a call (decision 6). Counts only inside a frame signed by the caller (for
+    /// their own call) or a coordinator. A coordinator's reason is personal, so a frame with one
+    /// goes over the internet only.
+    case callState(unit: UInt32, request: UInt16, state: CallState, at: UInt32, reason: String)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
 
     public static let formatVersion: UInt8 = 1
     static let settingsHeader: UInt8 = 0x21
+    static let callStateHeader: UInt8 = 0x22
+    /// Room for a coordinator's reason inside a signed frame.
+    public static let maxReasonBytes = 56
     /// MeshCore data_type for Help&I datagrams: inside the testing range, which needs no
     /// registration. See TODO.md about registering a permanent value.
     public static let meshDataType: UInt16 = 0xFF48
@@ -93,6 +112,9 @@ public enum HelpFrame: Equatable, Sendable {
 
     /// The most text a note may carry, in UTF-8 bytes, so a sealed note still fits a mesh packet.
     public static let maxNoteBytes = 120
+    /// The most a group's compressed settings may take: room for several profiles. Too big for the
+    /// radio, so settings that large go over the internet only, and in welcome and update codes.
+    public static let maxSettingsBytes = 2048
     /// Room for an international mobile number.
     public static let maxPhoneBytes = 20
 
@@ -102,6 +124,7 @@ public enum HelpFrame: Equatable, Sendable {
     public var mayGoOnGroupChannel: Bool {
         switch self {
         case .note, .position, .checkIns, .memberName, .memberPhone: false
+        case let .callState(_, _, _, _, reason): reason.isEmpty
         // A signed frame may go only if what it wraps may.
         case let .signed(_, inner, _): HelpFrame(inner)?.mayGoOnGroupChannel ?? false
         default: true
@@ -166,8 +189,11 @@ public enum HelpFrame: Equatable, Sendable {
         case let .forResponders(unit, request, part, sealed):
             w.u8(Self.header(.forResponders)); w.u32(unit); w.u16(request); w.u8(part); w.bytes(sealed)
         case let .groupSettings(signer, version, settings, signature):
-            w.u8(Self.settingsHeader); w.u16(signer); w.u32(version); w.u16(UInt16(min(settings.count, 1024))); w.bytes(settings.prefix(1024))
+            w.u8(Self.settingsHeader); w.u16(signer); w.u32(version); w.u16(UInt16(min(settings.count, Self.maxSettingsBytes))); w.bytes(settings.prefix(Self.maxSettingsBytes))
             w.bytes(signature.count == 64 ? signature : Data(count: 64))
+        case let .callState(unit, request, state, at, reason):
+            let bytes = Data(MeshText.fit(reason, bytes: Self.maxReasonBytes).utf8)
+            w.u8(Self.callStateHeader); w.u32(unit); w.u16(request); w.u8(state.rawValue); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
         case let .memberPhone(member, phone, at):
             let bytes = Data(phone.prefix(Self.maxPhoneBytes).utf8)
             w.u8(Self.header(.memberPhone)); w.u16(member); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
@@ -184,9 +210,15 @@ public enum HelpFrame: Equatable, Sendable {
         var r = ByteReader(data)
         guard let head = r.u8() else { return nil }
         if head == Self.settingsHeader {
-            guard let signer = r.u16(), let version = r.u32(), let n = r.u16(), n <= 1024, let settings = r.take(Int(n)),
+            guard let signer = r.u16(), let version = r.u32(), let n = r.u16(), n <= Self.maxSettingsBytes, let settings = r.take(Int(n)),
                   let sig = r.take(64) else { return nil }
             self = .groupSettings(signer: signer, version: version, settings: Data(settings), signature: Data(sig))
+            return
+        }
+        if head == Self.callStateHeader {
+            guard let unit = r.u32(), let req = r.u16(), let state = r.u8().flatMap(CallState.init), let at = r.u32(), let n = r.u8(),
+                  Int(n) <= Self.maxReasonBytes, let text = r.take(Int(n)), let reason = String(data: Data(text), encoding: .utf8) else { return nil }
+            self = .callState(unit: unit, request: req, state: state, at: at, reason: reason)
             return
         }
         guard head >> 4 == Self.formatVersion, let kind = Kind(rawValue: head & 0x0F) else { return nil }
@@ -312,6 +344,8 @@ public enum HelpFrame: Equatable, Sendable {
         case .memberPhone: return frame
         // The caller of this checks that the signer owns the unit.
         case .checkIns, .note, .position: return frame
+        // The caller of this checks that the signer owns the unit or is a coordinator.
+        case .callState: return frame
         default: return nil
         }
     }

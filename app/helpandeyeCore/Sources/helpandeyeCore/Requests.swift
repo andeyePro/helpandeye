@@ -20,6 +20,28 @@ public enum CallerStatus: Equatable, Sendable {
     case seen(responder: UInt16)
     /// The cross: nothing could be sent on any route.
     case notSent
+    /// A person closed the call: the caller, or a coordinator (decision 6). Never on a timer.
+    case closed(by: UInt16)
+}
+
+/// How a person settled a call (decision 6), and who.
+public struct Settled: Equatable, Sendable, Codable {
+    public let state: CallState
+    public let by: UInt16
+    public let at: Date
+    /// A coordinator's reason for closing, heard over the internet; empty otherwise.
+    public let reason: String
+
+    public init(state: CallState, by: UInt16, at: Date, reason: String = "") {
+        self.state = state; self.by = by; self.at = at; self.reason = reason
+    }
+
+    /// A close is final; "I'm OK" never undoes one, nor replaces an earlier close's details.
+    func replacing(_ old: Settled?) -> Settled? {
+        guard let old else { return self }
+        if old.state.closes { return old.reason.isEmpty && state == old.state && !reason.isEmpty ? self : old }
+        return state.closes ? self : old
+    }
 }
 
 /// A request as the caller's app tracks it.
@@ -34,6 +56,12 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     private var categoryParts: [CallCategory: UInt8] = [:]
     public private(set) var notes: [String] = []
     public private(set) var acknowledgedBy: [UInt16] = []
+    public private(set) var settled: Settled?
+
+    public mutating func settle(_ s: Settled) { settled = s.replacing(settled) }
+
+    /// A Help or Need a hand call nobody has closed, which I'm OK can settle.
+    public var isUnsettled: Bool { unit != 0 && colour != .green && settled?.state.closes != true }
     /// Takes back acknowledgements from people no longer in the group: one heard from a phone
     /// before this phone learned it had been removed must not go on reassuring the caller.
     public mutating func revoke(keeping members: Set<UInt16>) {
@@ -123,6 +151,7 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     }
 
     public var status: CallerStatus {
+        if let s = settled, s.state.closes { return .closed(by: s.by) }
         if let first = acknowledgedBy.first { return .seen(responder: first) }
         let states = Array(routes.values)
         if states.contains(.sent) { return .waitingForResponder }
@@ -160,6 +189,7 @@ public struct IncomingRequest: Equatable, Sendable, Identifiable, Codable {
     /// The signed acknowledgements heard, so any phone can pass one on to a caller still waiting.
     public internal(set) var acks: [UInt16: HelpFrame] = [:]
     public internal(set) var position: Position?
+    public internal(set) var settled: Settled?
 
     public struct Position: Equatable, Sendable, Codable {
         public let latitude: Double
@@ -168,6 +198,11 @@ public struct IncomingRequest: Equatable, Sendable, Identifiable, Codable {
     }
 
     public var isAcknowledged: Bool { !acknowledgedBy.isEmpty }
+    public var isClosed: Bool { settled?.state.closes == true }
+    /// Nobody has acknowledged it and nobody has closed it.
+    public var isOpen: Bool { !isAcknowledged && !isClosed }
+    /// The caller pressed I'm OK after it: still open, until a responder has checked.
+    public var callerIsOK: Bool { settled?.state == .callerOK }
     public var orderedNotes: [String] { notes.keys.sorted().compactMap { notes[$0] } }
     public var orderedCategories: [CallCategory] { categories.keys.sorted().compactMap { categories[$0] } }
 }
@@ -272,9 +307,21 @@ public struct ResponderInbox: Sendable, Codable {
             r.heardOn.insert(route)
             requests[key] = r
             return isNew ? .new(key) : (changed ? .updated(key) : .duplicate)
-        case .availability, .noticeAck, .checkIns, .board, .signed, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .forResponders, .groupSettings:
+        case .availability, .noticeAck, .checkIns, .board, .signed, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .forResponders, .groupSettings, .callState:
             return .ignored
         }
+    }
+
+    /// A person settled a call (check who before calling this). It may overtake its call.
+    @discardableResult
+    public mutating func settle(_ key: IncomingRequest.Key, _ s: Settled, via route: Route? = nil, at now: Date) -> InboxEvent {
+        var r = requests[key] ?? IncomingRequest(key: key, colour: nil, firstHeardAt: now)
+        let updated = s.replacing(r.settled)
+        guard updated != r.settled else { return .duplicate }
+        r.settled = updated
+        if let route { r.heardOn.insert(route) }
+        requests[key] = r
+        return .updated(key)
     }
 
     /// Called only from the acknowledge button. Returns the signed frame to send back.
@@ -295,7 +342,7 @@ public struct ResponderInbox: Sendable, Codable {
             r.acknowledgedBy.removeAll { !members.contains($0) }
             r.acks = r.acks.filter { members.contains($0.key) }
             requests[k] = r
-            if !r.isAcknowledged { reopened.append(k) }
+            if r.isOpen { reopened.append(k) }
         }
         return reopened
     }
@@ -303,14 +350,14 @@ public struct ResponderInbox: Sendable, Codable {
     /// Forgets requests, for pruning old ones. Callers must never remove one nobody acknowledged.
     public mutating func remove(_ keys: [IncomingRequest.Key]) { for k in keys { requests[k] = nil } }
 
-    /// Open requests, most urgent first: unacknowledged before acknowledged, red before amber
-    /// before green, then oldest first.
+    /// Requests, most urgent first: open before acknowledged or closed, red before amber before
+    /// green, then oldest first.
     public var sorted: [IncomingRequest] { requests.values.sorted(by: Self.moreUrgent) }
 
     /// Open before acknowledged, red before amber before green, then oldest first. Also used to
     /// merge several groups' lists.
     public static func moreUrgent(_ a: IncomingRequest, _ b: IncomingRequest) -> Bool {
-        if a.isAcknowledged != b.isAcknowledged { return !a.isAcknowledged }
+        if a.isOpen != b.isOpen { return a.isOpen }
         let ca = a.colour?.rawValue ?? 0, cb = b.colour?.rawValue ?? 0
         if ca != cb { return ca < cb }
         return a.firstHeardAt < b.firstHeardAt
@@ -338,6 +385,7 @@ extension OutgoingRequest {
         categoryParts = try c.value(.categoryParts, or: [:])
         notes = try c.value(.notes, or: [])
         acknowledgedBy = try c.value(.acknowledgedBy, or: [])
+        settled = try c.decodeIfPresent(Settled.self, forKey: .settled)
         parts = try c.value(.parts, or: 0)
         resends = try c.value(.resends, or: 0)
     }
@@ -357,5 +405,6 @@ extension IncomingRequest {
         notes = try c.value(.notes, or: [:])
         acks = try c.value(.acks, or: [:])
         position = try c.decodeIfPresent(Position.self, forKey: .position)
+        settled = try c.decodeIfPresent(Settled.self, forKey: .settled)
     }
 }

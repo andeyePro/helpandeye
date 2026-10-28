@@ -314,12 +314,12 @@ import XCTest
             // Only the first coordinator's removals ever take effect.
             if !g.removedMembers.isSubset(of: w.removedNumbers) { try fail("member removed without the first coordinator: \(g.removedMembers)") }
             for r in p.engine.activity.inbox.requests.values {
-                if r.isAcknowledged, p.alerts.scheduled[r.key] != nil { try fail("alerts still scheduled for acknowledged \(r.key)") }
+                if !r.isOpen, p.alerts.scheduled[r.key] != nil { try fail("alerts still scheduled for acknowledged or closed \(r.key)") }
                 for who in r.acknowledgedBy where !w.humanAcks.contains("\(r.key.unit)-\(r.key.request)-\(who)") && (g.member(who) == nil || !w.removedNumbers.contains(who)) {
                     try fail("request \(r.key) marked acknowledged by \(who), who never did")
                 }
                 // An open call keeps alerting on this responder's phone.
-                if !r.isAcknowledged, r.colour != .green, p.engine.me?.canRespond == true,
+                if r.isOpen, r.colour != .green, p.engine.me?.canRespond == true,
                    !(p.alerts.scheduled[r.key]?.times.contains { $0 >= w.clock.now.addingTimeInterval(-1) } ?? false), r.key.unit != p.engine.me?.unit {
                     try fail("open request \(r.key) has no alerts on member \(p.engine.saved!.me)")
                 }

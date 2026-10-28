@@ -191,7 +191,7 @@ struct GroupView: View {
                 }
                 MyPhoneSection()
                 if model.me?.canCall == true {
-                    ShareEveryCallSection()
+                    YourSettingsSection()
                     CheckInSection()
                 }
                 if model.me?.role == .coordinator {
@@ -226,7 +226,11 @@ struct GroupView: View {
                 OtherGroupsSection()
                 if model.me?.role == .coordinator {
                     Section(header: Header("For coordinators")) {
+                        NavigationLink("Profiles") { ProfilesView() }
                         NavigationLink("Advanced settings") { AdvancedSettingsView() }
+                        if model.group?.needsSecondCoordinator == true {
+                            Text("Someone here sees only the three buttons, and the group has one coordinator. Consider making a second coordinator, so their settings can still be changed if your phone is lost.")
+                        }
                     }
                 }
                 if model.engine.isPrimaryCoordinator {
@@ -236,9 +240,6 @@ struct GroupView: View {
                     ReceiveUpdateSection()
                 }
                 DisplaySection()
-                if model.me?.canCall == true {
-                    Section(header: Header("Sounds")) { CallerVoiceToggle() }
-                }
                 Section {
                     // The first group goes last: the others' calls are answered from its screens.
                     Button("Leave this group", role: .destructive) {
@@ -370,17 +371,6 @@ struct ReceiveUpdateSection: View {
 }
 
 /// Whether red and amber calls also send where the caller is.
-struct ShareEveryCallSection: View {
-    @AppStorage(ShareEveryCall.key) private var on = false
-
-    var body: some View {
-        Section(header: Header("When you call")) {
-            Toggle(isOn: $on) { Text("Send where I am with every \(Colour.red.label) or \(Colour.amber.label)").font(.body) }
-            Text("It goes only to your responders, encrypted, after the call itself.")
-        }
-    }
-}
-
 /// The number a caller's ready-written text goes to, if nothing else got through.
 struct MyPhoneSection: View {
     @EnvironmentObject var model: AppModel
@@ -437,44 +427,14 @@ struct OtherGroupsSection: View {
     }
 }
 
-/// Settings most groups never change: the internet route and the words on the buttons.
+/// Settings most groups never change: the internet route.
 struct AdvancedSettingsView: View {
     var body: some View {
         Form {
             RelaySection()
-            ButtonWordsSection()
         }
         .navigationTitle("Advanced settings")
         .keyboardDismissable()
-    }
-}
-
-/// The group's own words for each button (decision 15). Blank keeps the app's words.
-struct ButtonWordsSection: View {
-    @EnvironmentObject var model: AppModel
-    @State private var words: [String: String] = [:]
-    @State private var saved = false
-
-    private var buttons: [(key: String, standard: String)] {
-        Colour.allCases.map { (ButtonWords.key($0), ButtonWords.standard($0)) }
-            + CallCategory.choices.map { (ButtonWords.key($0), ButtonWords.standard($0)) }
-            + [(ButtonWords.amberNoteKey, "After \(ButtonWords.standard(.amber)): " + ButtonWords.amberNote(in: nil))]
-    }
-
-    var body: some View {
-        Section(header: Header("Words on the buttons")) {
-            ForEach(buttons, id: \.key) { b in
-                LabeledField(label: b.standard, text: Binding(get: { words[b.key] ?? "" }, set: { words[b.key] = $0 }))
-            }
-            Button("Save") {
-                model.updateGroup { g in for b in buttons { ButtonWords.set(words[b.key] ?? "", for: b.key, in: &g.policy) } }
-                saved = true
-            }
-            .buttonStyle(.action)
-            Text(saved ? "Saved. The new words go to every member now."
-                       : "Leave a box empty to keep the words shown above it. At most \(ButtonWords.longest) letters each, or \(ButtonWords.longestNote) for what is said after \(ButtonWords.standard(.amber)).")
-        }
-        .onAppear { words = model.group?.policy.buttonWords ?? [:] }
     }
 }
 
@@ -488,14 +448,19 @@ struct CheckInSection: View {
 
     var body: some View {
         Section(header: Header("Check-ins")) {
-            Toggle("Check in at set times", isOn: $on)
+            let mayChange = model.group.map { $0.profile(of: model.saved?.me).mayChange(.checkIns) } ?? true
+            Toggle("Check in at set times", isOn: $on).disabled(!mayChange)
             if on {
-                DatePicker("First check-in", selection: $morning, displayedComponents: .hourAndMinute)
-                Toggle("A second check-in", isOn: $twice)
-                if twice { DatePicker("Second check-in", selection: $evening, displayedComponents: .hourAndMinute) }
+                DatePicker("First check-in", selection: $morning, displayedComponents: .hourAndMinute).disabled(!mayChange)
+                Toggle("A second check-in", isOn: $twice).disabled(!mayChange)
+                if twice { DatePicker("Second check-in", selection: $evening, displayedComponents: .hourAndMinute).disabled(!mayChange) }
                 Text("Press I'm OK within half an hour of each time. If you do not, your responders get a Need a hand call.")
             }
-            Button("Save") { model.setCheckIn(on ? CheckInSchedule(times: [minutes(morning)] + (twice ? [minutes(evening)] : [])) : nil) }
+            if mayChange {
+                Button("Save") { model.setCheckIn(on ? CheckInSchedule(times: [minutes(morning)] + (twice ? [minutes(evening)] : [])) : nil) }
+            } else {
+                Text(SetByCoordinator.text)
+            }
         }
         .onAppear {
             guard let s = model.checkIn else { return }

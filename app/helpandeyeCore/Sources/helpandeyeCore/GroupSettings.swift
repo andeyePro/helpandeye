@@ -1,9 +1,9 @@
 import CryptoKit
 import Foundation
 
-/// What a coordinator can change for the whole group from Advanced settings: the escalation
-/// times, the words on the buttons and the relay's address. It goes to every member at once,
-/// signed, over the internet and, when it fits, the group channel; the newest version wins.
+/// What a coordinator can change for the whole group from Advanced settings: the profiles and who
+/// has which, the log, and the relay's address. It goes to every member at once, signed and
+/// compressed, over the internet and, when it fits, the group channel; the newest version wins.
 public struct GroupSettings: Codable, Equatable, Sendable {
     public var policy: GroupState.StoredPolicy
     public var relayURL: String?
@@ -17,7 +17,8 @@ extension GroupState {
 
     /// The settings as a signed frame from coordinator `signer`.
     public func settingsFrame(as signer: UInt16, identity: DeviceIdentity) -> HelpFrame? {
-        guard let data = try? JSONEncoder().encode(settings), data.count <= 1024 else { return nil }
+        guard let json = try? JSONEncoder().encode(settings), let data = try? (json as NSData).compressed(using: .zlib) as Data,
+              data.count <= HelpFrame.maxSettingsBytes else { return nil }
         let input = Self.settingsInput(group: secrets.groupID, signer: signer, version: settingsVersion, settings: data)
         guard let sig = try? identity.signingKey.signature(for: input) else { return nil }
         return .groupSettings(signer: signer, version: settingsVersion, settings: data, signature: sig)
@@ -31,11 +32,17 @@ extension GroupState {
               let coordinator = member(signer), coordinator.role == .coordinator, let key = coordinator.signingKey,
               let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
               pub.isValidSignature(sig, for: Self.settingsInput(group: secrets.groupID, signer: signer, version: version, settings: data)),
-              let s = try? JSONDecoder().decode(GroupSettings.self, from: data) else { return false }
+              let s = Self.decodeSettings(data) else { return false }
         policy = s.policy
         relayURL = s.relayURL
         settingsVersion = version
         return true
+    }
+
+    /// Compressed, or plain from a phone before profiles.
+    static func decodeSettings(_ data: Data) -> GroupSettings? {
+        let json = (try? (data as NSData).decompressed(using: .zlib) as Data) ?? data
+        return try? JSONDecoder().decode(GroupSettings.self, from: json)
     }
 
     static func settingsInput(group: Data, signer: UInt16, version: UInt32, settings: Data) -> Data {

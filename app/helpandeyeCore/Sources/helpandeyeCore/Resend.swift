@@ -18,10 +18,12 @@ public enum Resend {
 }
 
 extension OutgoingRequest {
-    /// True when the call should go out again now: nobody has acknowledged it and its next
-    /// resend time has come. Only an acknowledgement ends resending.
+    /// True when the call should go out again now: nobody has acknowledged or closed it, and its
+    /// next resend time has come. Only a person ends resending. A caller who said they are OK is
+    /// still sent, with that news, so a responder who missed both still comes to check.
     public func resendDue(at now: Date) -> Bool {
         if case .seen = status { return false }
+        if case .closed = status { return false }
         // "I'm OK" is repeated a few times against lost packets, then left: it asks for no one.
         if colour == .green && resends >= Resend.gaps.count { return false }
         return now >= Resend.due(resends + 1, after: createdAt)
@@ -29,6 +31,7 @@ extension OutgoingRequest {
 
     public var nextResend: Date? {
         if case .seen = status { return nil }
+        if case .closed = status { return nil }
         return Resend.due(resends + 1, after: createdAt)
     }
 }

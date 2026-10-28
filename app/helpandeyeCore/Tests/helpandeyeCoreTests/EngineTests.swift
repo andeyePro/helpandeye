@@ -448,29 +448,48 @@ final class RelayModel {
     func testACoordinatorsSettingsReachEveryoneAtOnce() async {
         for p in air.phones { p.relay.isConfigured = true }
         await relaySetUp()
-        coordinator.engine.updateGroup { ButtonWords.set("Please come", for: ButtonWords.key(.red), in: &$0.policy) }
+        coordinator.engine.updateGroup { ButtonWords.set("Please come", for: ButtonWords.key(.red), in: &$0.policy.profiles[0]) }
         await air.run()
-        XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.group), "Please come")
-        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group), "Please come")
+        XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.profile), "Please come")
+        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group?.profile(ofUnit: caller.engine.me?.unit)), "Please come")
         XCTAssertEqual(caller.engine.group?.settingsVersion, 1)
         // An old copy heard late changes nothing back.
         let old = coordinator.engine.group!.settingsFrame(as: coordinator.engine.saved!.me, identity: coordinator.identity)!
-        coordinator.engine.updateGroup { ButtonWords.set("", for: ButtonWords.key(.red), in: &$0.policy) }
+        coordinator.engine.updateGroup { ButtonWords.set("", for: ButtonWords.key(.red), in: &$0.policy.profiles[0]) }
         await air.run()
         caller.engine.receive(old, via: .internet)
-        XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.group), "Help")
+        XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.profile), "Help")
+    }
+
+    func testAProfilesLockedSettingsReachTheCaller() async {
+        for p in air.phones { p.relay.isConfigured = true }
+        await relaySetUp()
+        let callerNumber = caller.engine.saved!.me
+        caller.engine.setOwn { $0.soundsAndSpeech = false; $0.callerMayClose = true }
+        coordinator.engine.updateGroup { g in
+            var p = Profile(id: 1, name: "Living alone")
+            p.checkIns = CheckInSchedule(times: [600])
+            p.personMayChange = [.sounds]
+            g.policy.profiles.append(p)
+            g.policy.profileOf[callerNumber] = 1
+        }
+        await air.run()
+        XCTAssertEqual(caller.engine.profile.name, "Living alone")
+        XCTAssertFalse(caller.engine.profile.soundsAndSpeech, "their own choice, which they may change")
+        XCTAssertFalse(caller.engine.profile.callerMayClose, "not theirs to change")
+        XCTAssertEqual(caller.engine.checkIn?.times, [600], "the profile's check-ins, which they may not change")
     }
 
     func testOnlyACoordinatorCanChangeTheGroupsSettings() {
         var g = caller.engine.group!
         g.settingsVersion = 9
-        ButtonWords.set("Ignore me", for: ButtonWords.key(.red), in: &g.policy)
+        ButtonWords.set("Ignore me", for: ButtonWords.key(.red), in: &g.policy.profiles[0])
         let fromCaller = g.settingsFrame(as: caller.engine.saved!.me, identity: caller.identity)!
         responder.engine.receive(fromCaller, via: .internet)
-        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group), "Help")
+        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group?.profile(ofUnit: caller.engine.me?.unit)), "Help")
         let forged = g.settingsFrame(as: coordinator.engine.saved!.me, identity: caller.identity)!
         responder.engine.receive(forged, via: .internet)
-        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group), "Help", "a coordinator's number without their signature")
+        XCTAssertEqual(ButtonWords.words(.red, in: responder.engine.group?.profile(ofUnit: caller.engine.me?.unit)), "Help", "a coordinator's number without their signature")
         XCTAssertEqual(HelpFrame(fromCaller.encoded()), fromCaller)
     }
 

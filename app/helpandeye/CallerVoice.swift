@@ -12,9 +12,6 @@ import UIKit
 @MainActor
 final class CallerVoice {
     static let shared = CallerVoice()
-    /// The caller's choice to hear sounds and words; touch stays on. Kept on this device.
-    static let key = "callerSounds"
-
     private let speech = AVSpeechSynthesizer()
     private var player: AVAudioPlayer?
 
@@ -27,7 +24,8 @@ final class CallerVoice {
         #endif
     }
 
-    func tell(_ feedback: CallerFeedback) {
+    /// `profile` says whether sounds and spoken words are on; touch stays on.
+    func tell(_ feedback: CallerFeedback, profile: Profile) {
         #if os(watchOS)
         if let sound = feedback.sound { WKInterfaceDevice.current().play(sound == .seen ? .success : .failure) }
         let voiceOver = WKAccessibilityIsVoiceOverRunning()
@@ -38,7 +36,7 @@ final class CallerVoice {
         if voiceOver {
             AccessibilityNotification.Announcement(feedback.spoken).post()
         }
-        guard UserDefaults.standard.object(forKey: Self.key) as? Bool ?? true else { return }
+        guard profile.soundsAndSpeech else { return }
         // Heard with the ringer off: someone who pressed for help is waiting to know.
         try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
         if let sound = feedback.sound,
@@ -52,15 +50,5 @@ final class CallerVoice {
         words.preUtteranceDelay = feedback.sound == nil ? 0 : (player?.duration ?? 0) + 0.2
         speech.stopSpeaking(at: .immediate)
         speech.speak(words)
-    }
-}
-
-/// The switch for sounds and spoken words, on the phone and on the watch.
-struct CallerVoiceToggle: View {
-    @AppStorage(CallerVoice.key) private var on = true
-
-    var body: some View {
-        Toggle("Sounds and spoken words", isOn: $on)
-            .accessibilityHint("Says out loud whether your call went, and when someone has seen it")
     }
 }

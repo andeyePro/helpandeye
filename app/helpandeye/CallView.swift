@@ -8,7 +8,6 @@ import SwiftUI
 struct CallView: View {
     @EnvironmentObject var model: AppModel
     @State private var composingSMS = false
-    @AppStorage(ShareEveryCall.key) private var shareEveryCall = false
     @StateObject private var location = OneShotLocation()
 
     var body: some View {
@@ -37,7 +36,7 @@ struct CallView: View {
     private func press(_ colour: Colour) {
         CallerVoice.shared.pressed()
         model.press(colour)
-        if shareEveryCall, colour != .green, model.canSendPersonal {
+        if model.profile.shareWhere, colour != .green, model.canSendPersonal {
             location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) }
         }
     }
@@ -56,18 +55,13 @@ struct CallView: View {
             }
             // The most urgent button is the largest and the lowest, nearest the thumb.
             Button { press(.red) } label: {
-                Text(Colour.red.label).font(.largeTitle.weight(.heavy)).frame(maxWidth: .infinity, minHeight: 180)
+                CallButtonLabel(colour: .red, profile: model.profile).font(.largeTitle.weight(.heavy)).frame(maxWidth: .infinity, minHeight: 180)
             }
             .buttonStyle(CallButtonStyle(colour: .red))
             .accessibilityHint("Asks your responders to come now")
             NotA999Notice()
         }
     }
-}
-
-/// The caller's choice to send where they are with every red or amber call. Kept on this phone.
-enum ShareEveryCall {
-    static let key = "shareEveryCall"
 }
 
 func hideKeyboard() {
@@ -77,7 +71,7 @@ func hideKeyboard() {
 extension CallView {
     private var amber: some View {
         Button { press(.amber) } label: {
-            Text(Colour.amber.label).font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
+            CallButtonLabel(colour: .amber, profile: model.profile).font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
         }
         .buttonStyle(CallButtonStyle(colour: .amber))
         .accessibilityHint("Asks your responders to come when they can")
@@ -85,10 +79,27 @@ extension CallView {
 
     private var green: some View {
         Button { press(.green) } label: {
-            Text(Colour.green.label).font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
+            CallButtonLabel(colour: .green, profile: model.profile).font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
         }
         .buttonStyle(CallButtonStyle(colour: .green))
         .accessibilityHint("Tells your responders you are all right")
+    }
+}
+
+/// A button's words, its symbol, or both, as the caller's profile says. VoiceOver always reads the words.
+struct CallButtonLabel: View {
+    let colour: Colour
+    let profile: Profile
+
+    var body: some View {
+        let words = ButtonWords.words(colour, in: profile)
+        VStack(spacing: 6) {
+            if profile.showsSymbol { Image(systemName: profile.symbol(colour)).imageScale(.large) }
+            if profile.showsWords { Text(words) }
+        }
+        .padding(.vertical, 8)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(words)
     }
 }
 
@@ -116,19 +127,25 @@ struct StatusCard: View {
                 Text(headline).font(.title3.bold())
             }
             Text("\(request.colour.label), \(request.createdAt.formatted(date: .omitted, time: .shortened))")
-            if request.colour == .amber, request.status != .notSent { Text(ButtonWords.amberNote(in: model.group)) }
+            if request.colour == .amber, request.status != .notSent { Text(ButtonWords.amberNote(in: model.profile)) }
+            if request.colour == .green, request.status != .notSent, let note = model.okNote { Text(note) }
+            if let s = request.settled, !s.reason.isEmpty { Text("Why: \(s.reason)") }
             ForEach(Route.allCases.filter { request.routes[$0] != nil }, id: \.self) { route in
                 Text(line(route))
             }
             if request.status == .notSent {
                 HStack {
                     Button("Try again") { CallerVoice.shared.pressed(); model.press(request.colour) }.buttonStyle(.action)
-                    if RoutePlan.offerManualSMS(for: request, smsAvailable: MFMessageComposeViewController.canSendText(), smsIsAutomatic: false,
+                    if model.profile.textFallback, RoutePlan.offerManualSMS(for: request, smsAvailable: MFMessageComposeViewController.canSendText(), smsIsAutomatic: false,
                                                 recipients: RoutePlan.smsRecipients(in: model.group, me: model.saved?.me)) {
                         Button("Send as a text") { composingSMS = true }.buttonStyle(.secondaryAction)
                     }
                 }
                 if words.call999 { Text("If you need help now, call 999.").font(.callout.bold()) }
+            }
+            if model.profile.callerMayClose, request.isUnsettled, request.status != .notSent {
+                Button("Close this call") { model.closeMyCall() }.buttonStyle(.secondaryAction)
+                    .accessibilityHint("Tells your responders you no longer need them for this call")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

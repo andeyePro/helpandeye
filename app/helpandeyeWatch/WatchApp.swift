@@ -103,11 +103,11 @@ struct WatchCallView: View {
                         Text(status.text)
                     }
                 }
-                if let note = model.amberNote { Text(note) }
+                if let note = model.amberNote ?? model.okNote { Text(note) }
                 ForEach(model.open) { r in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(r.who).font(.headline)
-                        Text(model.words(r.colour))
+                        Text(model.words(r))
                         Button("Acknowledge") { model.acknowledge(r) }
                             .buttonStyle(.borderedProminent)
                             .tint(Color(red: 0, green: 0x55 / 255, blue: 0xD4 / 255))
@@ -124,7 +124,6 @@ struct WatchCallView: View {
                         .foregroundStyle(Colour.amber.color)
                 }
                 Text("Not a replacement for 999.")
-                CallerVoiceToggle()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -132,12 +131,28 @@ struct WatchCallView: View {
 
     private func callButton(_ colour: Colour, shape: some Shape) -> some View {
         Button { model.press(colour) } label: {
-            Text(model.words(colour)).font(.headline).multilineTextAlignment(.center)
+            label(colour).font(.headline).multilineTextAlignment(.center)
                 .foregroundStyle(colour.onColor)
                 .padding(4)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(colour.color, in: shape)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(model.words(colour))
+    }
+
+    /// Words, a symbol, or both, as on the phone; the symbol is left out when both will not fit.
+    @ViewBuilder private func label(_ colour: Colour) -> some View {
+        let p = model.profile
+        let symbol = Image(systemName: p.symbol(colour))
+        switch p.face {
+        case .words: Text(model.words(colour))
+        case .symbol: symbol.font(.title2)
+        case .wordsAndSymbol:
+            ViewThatFits(in: .vertical) {
+                VStack(spacing: 2) { symbol; Text(model.words(colour)) }
+                Text(model.words(colour))
+            }
+        }
     }
 }

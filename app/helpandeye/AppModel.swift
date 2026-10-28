@@ -20,6 +20,8 @@ final class AppModel: ObservableObject {
     private var bag: Set<AnyCancellable> = []
     private var ticker: Timer?
     private var voiceTracker = CallerFeedback.Tracker(nil)
+    /// What the caller is told after an I'm OK that settled an open call (their profile's words).
+    @Published private(set) var okNote: String?
 
     struct Other: Identifiable {
         let tag: String
@@ -61,7 +63,7 @@ final class AppModel: ObservableObject {
                 for (e, r) in zip(self.engines, [self.relay] + self.others.map(\.relay)) {
                     e.tick()
                     r.busy = e.activity.outgoing.contains { $0.nextResend != nil && $0.unit != 0 }
-                        || e.activity.inbox.requests.values.contains { !$0.isAcknowledged && $0.colour != .green }
+                        || e.activity.inbox.requests.values.contains { $0.isOpen && $0.colour != .green }
                 }
             }
         }
@@ -72,15 +74,16 @@ final class AppModel: ObservableObject {
     /// made itself (numbered 32768 and up), so they are not heard twice.
     private func tellCaller() {
         if let r = engine.current, r.number >= 0x8000 { return }
-        let words = engine.current.map { ButtonWords.words($0.colour, in: group) } ?? ""
-        let note = engine.current?.colour == .amber ? ButtonWords.amberNote(in: group) : nil
-        if let f = voiceTracker.update(engine.current, words: words, note: note, name: name(ofMember:)) { CallerVoice.shared.tell(f) }
+        let words = engine.current.map { ButtonWords.words($0.colour, in: profile) } ?? ""
+        let note = engine.current?.colour == .amber ? ButtonWords.amberNote(in: profile) : (engine.current?.colour == .green ? okNote : nil)
+        if let f = voiceTracker.update(engine.current, words: words, note: note, name: name(ofMember:)) { CallerVoice.shared.tell(f, profile: profile) }
     }
 
     var identity: DeviceIdentity { engine.identity }
     var saved: SavedState? { engine.saved }
     var group: GroupState? { engine.group }
     var me: Member? { engine.me }
+    var profile: Profile { engine.profile }
     var inbox: ResponderInbox { engine.activity.inbox }
     var rota: Rota { engine.activity.rota }
     var current: OutgoingRequest? { engine.current }
@@ -101,8 +104,13 @@ final class AppModel: ObservableObject {
     func updateGroup(_ change: (inout GroupState) -> Void) { engine.updateGroup(change) }
     func leave() { engine.leave() }
     func setRelay(_ url: String) { engine.setRelay(url) }
+    func setOwn(_ change: (inout Profile) -> Void) { engine.setOwn(change) }
 
-    func press(_ colour: Colour) { engine.press(colour) }
+    func press(_ colour: Colour) {
+        okNote = colour == .green && !engine.settledByOK.isEmpty ? profile.okSpoken : nil
+        engine.press(colour)
+    }
+    func closeMyCall() { engine.closeMyCall() }
     func add(_ category: CallCategory) { engine.add(category) }
     func withdraw(_ category: CallCategory) { engine.withdraw(category) }
     func addNote(_ text: String) -> String? { engine.addNote(text) }

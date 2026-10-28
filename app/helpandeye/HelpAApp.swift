@@ -51,7 +51,8 @@ struct RootView: View {
         if let me = model.me {
             VStack(spacing: 0) {
                 NoticeBanner()
-                tabs(me)
+                // A profile can leave a caller only the three buttons (app spec, Profiles).
+                if me.role == .caller && model.profile.hidesSettings { CallView() } else { tabs(me) }
             }
         } else {
             WelcomeView()
@@ -65,7 +66,7 @@ struct RootView: View {
                 }
                 if me.canRespond || !model.others.isEmpty {
                     RespondView().tabItem { Label("Respond", systemImage: "bell.fill") }
-                        .badge(model.engines.reduce(0) { $0 + $1.activity.inbox.requests.values.filter { !$0.isAcknowledged }.count })
+                        .badge(model.engines.reduce(0) { $0 + $1.activity.inbox.requests.values.filter(\.isOpen).count })
                 }
                 GroupView().tabItem { Label("Group", systemImage: "person.3.fill") }
                 BoxView().tabItem { Label("Box", systemImage: "antenna.radiowaves.left.and.right") }
@@ -114,10 +115,10 @@ struct NotA999Notice: View {
 }
 
 extension Colour {
-    /// The group's own words for the button, if its coordinator set them.
-    @MainActor var label: String { ButtonWords.words(self, in: AppModel.shared.group) }
+    /// This caller's words for the button, from their profile.
+    @MainActor var label: String { ButtonWords.words(self, in: AppModel.shared.profile) }
 }
 
 extension CallCategory {
-    @MainActor var label: String { ButtonWords.words(self, in: AppModel.shared.group) }
+    @MainActor var label: String { ButtonWords.words(self, in: AppModel.shared.profile) }
 }

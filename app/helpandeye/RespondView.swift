@@ -33,6 +33,7 @@ struct RespondView: View {
 struct RequestRow: View {
     let engine: HelpEngine
     let request: IncomingRequest
+    @State private var closing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -42,8 +43,8 @@ struct RequestRow: View {
                 Spacer()
                 Text(request.firstHeardAt, style: .relative)
             }
-            Text(request.colour.map { ButtonWords.words($0, in: engine.group) } ?? "Call for help (details still arriving)")
-            ForEach(request.orderedCategories, id: \.self) { Text("• \(ButtonWords.words($0, in: engine.group))") }
+            Text(request.colour.map { ButtonWords.words($0, in: callers) } ?? "Call for help (details still arriving)")
+            ForEach(request.orderedCategories, id: \.self) { Text("• \(ButtonWords.words($0, in: callers))") }
             ForEach(request.orderedNotes, id: \.self) { Text("“\($0)”").italic() }
             if let p = request.position,
                let url = URL(string: "https://maps.apple.com/?ll=\(p.latitude),\(p.longitude)&q=Help%26I%20caller") {
@@ -54,6 +55,7 @@ struct RequestRow: View {
                 Text("Acknowledged by " + request.acknowledgedBy.map(engine.name(ofMember:)).joined(separator: ", "))
                     .font(.callout.bold())
             }
+            if let s = request.settled { Text(settledWords(s)).font(.callout.bold()) }
             switch engine.ackSendStatus(request.key) {
             case .sending?: Text("Sending your acknowledgement…")
             case .notSent?:
@@ -70,8 +72,57 @@ struct RequestRow: View {
                 }
                 .buttonStyle(.action)
             }
+            if engine.me?.role == .coordinator, !request.isClosed {
+                Button("Close this call") { closing = true }.buttonStyle(.secondaryAction)
+            }
         }
         .padding(.vertical, 6)
+        .sheet(isPresented: $closing) { NavigationStack { CloseCallView(engine: engine, key: request.key) } }
+    }
+
+    private func settledWords(_ s: Settled) -> String {
+        let who = engine.name(ofMember: s.by)
+        switch s.state {
+        case .callerOK: return "Says they're OK now. Please still check on them."
+        case .closedByCaller: return "Closed by \(who)."
+        case .closedWithConsent: return "Closed by \(who), with the caller's agreement."
+        case .closedWithReason: return s.reason.isEmpty ? "Closed by \(who), with a reason." : "Closed by \(who): \(s.reason)"
+        }
+    }
+
+    /// The words the caller sees on their own buttons.
+    private var callers: Profile? { engine.group?.profile(ofUnit: request.key.unit) }
+}
+
+/// A coordinator closes someone's call: only with the caller's agreement, or a reason written
+/// down (decision 6). Nothing closes a call on its own.
+struct CloseCallView: View {
+    let engine: HelpEngine
+    let key: IncomingRequest.Key
+    @Environment(\.dismiss) private var dismiss
+    @State private var reason = ""
+
+    var body: some View {
+        Form {
+            Section(header: Header("Close \(engine.name(ofUnit: key.unit))'s call")) {
+                Text("Only close a call you know is dealt with. Everyone in the group sees who closed it and why.")
+                Button("They agreed to close it") { close(consent: true) }.buttonStyle(.action)
+            }
+            Section(header: Header("Or write why")) {
+                LabeledField(label: "Reason, such as: spoke to them on the phone, all well", text: $reason)
+                Button("Close with this reason") { close(consent: false) }
+                    .buttonStyle(.action)
+                    .disabled(reason.trimmingCharacters(in: .whitespaces).isEmpty)
+                Text("The reason goes over the internet only, never the local radio.")
+            }
+        }
+        .navigationTitle("Close this call")
+        .keyboardDismissable()
+        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+    }
+
+    private func close(consent: Bool) {
+        if engine.close(key, consent: consent, reason: reason) { dismiss() }
     }
 }
 

@@ -8,8 +8,9 @@
 export const MAX_SKEW_MS = 5 * 60 * 1000;
 export const KEEP_MS = 7 * 24 * 3600 * 1000;
 export const MAX_KEPT = 2000;
-// The largest real sealed frame is under 300 characters; anything far bigger is not from the app.
-export const MAX_BODY = 512;
+// Most sealed frames are under 300 characters; the largest, a group's settings with several
+// profiles, is under 3,000. Anything far bigger is not from the app.
+export const MAX_BODY = 4096;
 // Cloudflare's free plan allows 100,000 Worker requests and 100,000 Durable Object requests a
 // day. Each relay request uses two Durable Object requests (its group and the meter), so the
 // Durable Object allowance runs out first, at 50,000 relay requests. Coordinators are warned well

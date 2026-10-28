@@ -307,8 +307,32 @@ Needs phone A (a caller) and phone B (a responder), with phone A's watch, and th
 1. On phone A, with the internet off and no box, press Help.
 2. Turn the internet back on and press Help again. Leave it a few seconds, then acknowledge on phone B.
 3. Press Need a hand on phone A.
-4. Under Group, Sounds, turn Sounds and spoken words off, and repeat step 2.
+4. Under Group, Your settings, turn Sounds and spoken words off, and repeat step 2.
 5. Turn VoiceOver on and repeat step 2.
 6. Repeat steps 1 to 3 on phone A's watch, with its phone switched off.
 
-Pass: every press is felt as a short tap. In step 1 phone A plays the wrong-answer buzz, then says "Your Help message has not been sent. Try again, or call 999." In step 2 it says "Your Help message has been sent." with no sound, and then, only once phone B has acknowledged, plays the chime and says "<name> has seen your Help message, and says: I'm dealing with it." In step 3 phone A shows and says "You have requested non-urgent assistance. If you need help sooner, please press Help." (or the group's own words from Advanced settings). All of this is heard with the ringer on silent. In step 4 nothing is heard, but the taps and the words on the screen remain. In step 5 VoiceOver reads each message once, and it is not spoken a second time. In step 6 the watch does the same, with its own vibrations. A watch not yet set up shows how to set it up instead of the buttons.
+Pass: every press is felt as a short tap. In step 1 phone A plays the wrong-answer buzz, then says "Your Help message has not been sent. Try again, or call 999." In step 2 it says "Your Help message has been sent." with no sound, and then, only once phone B has acknowledged, plays the chime and says "<name> has seen your Help message, and says: I'm dealing with it." In step 3 phone A shows and says "You have requested non-urgent assistance. If you need help sooner, please press Help." (or the words in their profile). All of this is heard with the ringer on silent. In step 4 nothing is heard, but the taps and the words on the screen remain. In step 5 VoiceOver reads each message once, and it is not spoken a second time. In step 6 the watch does the same, with its own vibrations. A watch not yet set up shows how to set it up instead of the buttons.
+
+## 36. Profiles
+
+Needs phone A (a caller), phone B (a responder) and phone C (the coordinator), all with the internet.
+
+1. On phone C, under Group, Profiles, add a profile called Living alone. Give it to phone A's person. Set its Help words to SOS, its buttons to a symbol only, and turn off They may change this under Sounds. Save.
+2. On phone A, look at the Help screen, then Group, Your settings, and try to turn Sounds and spoken words off.
+3. On phone C, set the buttons back to words and a symbol, turn on Show them only the three buttons, and save.
+4. On phone C, delete the profile.
+
+Pass: in step 1 phone C warns that SOS can sound like an emergency service. In step 2 phone A's buttons show only their symbols (VoiceOver still reads the words), the sounds switch cannot be changed, and the screen says settings it cannot change are set by the coordinator. In step 3 phone A shows only the Help screen, with the 999 notice, and phone C suggests making a second coordinator. In step 4 phone A is back on the first profile, with all its screens.
+
+## 37. Closing a call, and I'm OK after a call
+
+Needs phone A (a caller), phone B (a responder) and phone C (the coordinator), with the internet.
+
+1. On phone A press Help, then I'm OK.
+2. On phone B, look at the call, wait for its next alert, then acknowledge it.
+3. On phone C, under Profiles, set I'm OK to Closes the call, and turn on They may close their own call. On phone A press Need a hand, then I'm OK.
+4. On phone A press Help, then Close this call.
+5. On phone A press Help. On phone C, on the Respond screen, tap Close this call, write a reason, and close it.
+6. Repeat step 5 with the internet off on every phone, using the boxes.
+
+Pass: in step 1 phone A says it has been sent, then "Your responders have been told you're OK. One of them will still check on you." Phone B shows "Says they're OK now. Please still check on them.", and its alerts come calmly, about every half hour, not urgently, until it acknowledges. In step 3 the Need a hand call is closed on every phone and phone B's alerts stop. In step 4 phone A says "You closed your Help call." In step 5 phone A and phone B show who closed it and the reason. In step 6 they show who closed it, without the reason. Nothing closes or times out a call on its own.

@@ -1,7 +1,7 @@
 import Foundation
 
-/// The words on the caller's buttons. A coordinator can set the group's own (decision 15: button
-/// labels are set per deployment); any left blank keep the app's.
+/// The words on the caller's buttons. A coordinator can set their own in each profile (decision
+/// 15: button labels are set per deployment); any left blank keep the app's.
 public enum ButtonWords {
     public static let longest = 40
     /// What a caller is told, shown and spoken, after asking for a hand: longer than a button's words.
@@ -26,28 +26,33 @@ public enum ButtonWords {
         }
     }
 
-    public static func words(_ colour: Colour, in group: GroupState?) -> String {
-        chosen(key(colour), in: group) ?? standard(colour)
+    public static func words(_ colour: Colour, in profile: Profile?) -> String {
+        chosen(key(colour), in: profile) ?? standard(colour)
     }
 
-    public static func amberNote(in group: GroupState?) -> String {
-        chosen(amberNoteKey, in: group)
-            ?? "You have requested non-urgent assistance. If you need help sooner, please press \(words(.red, in: group))."
+    public static func amberNote(in profile: Profile?) -> String {
+        chosen(amberNoteKey, in: profile)
+            ?? "You have requested non-urgent assistance. If you need help sooner, please press \(words(.red, in: profile))."
     }
 
-    public static func words(_ category: CallCategory, in group: GroupState?) -> String {
-        chosen(key(category), in: group) ?? standard(category)
+    public static func words(_ category: CallCategory, in profile: Profile?) -> String {
+        chosen(key(category), in: profile) ?? standard(category)
     }
 
     /// Sets or, with blank words, clears one button's words. Words are trimmed and cut to fit.
-    public static func set(_ words: String, for key: String, in policy: inout GroupState.StoredPolicy) {
+    public static func set(_ words: String, for key: String, in profile: inout Profile) {
         let trimmed = String(words.trimmingCharacters(in: .whitespacesAndNewlines).prefix(key == amberNoteKey ? longestNote : longest))
-        var all = policy.buttonWords ?? [:]
-        all[key] = trimmed.isEmpty ? nil : trimmed
-        policy.buttonWords = all.isEmpty ? nil : all
+        profile.buttonWords[key] = trimmed.isEmpty ? nil : trimmed
     }
 
-    private static func chosen(_ key: String, in group: GroupState?) -> String? {
-        group?.policy.buttonWords?[key].flatMap { $0.isEmpty ? nil : $0 }
+    /// Words such as SOS can be read as an emergency service, so the coordinator is warned to make
+    /// doubly clear that Help&I does not replace 999.
+    public static func soundsLikeEmergencyService(_ words: String) -> Bool {
+        let w = words.lowercased()
+        return ["sos", "999", "112", "911", "emergency", "ambulance"].contains { w.contains($0) }
+    }
+
+    private static func chosen(_ key: String, in profile: Profile?) -> String? {
+        profile?.buttonWords[key].flatMap { $0.isEmpty ? nil : $0 }
     }
 }

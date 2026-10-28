@@ -125,11 +125,41 @@ public struct GroupState: Codable, Equatable, Sendable {
 
     public struct StoredPolicy: Codable, Equatable, Sendable {
         public var useDistance = false
-        public var redInterval: TimeInterval = 120
-        public var amberInterval: TimeInterval = 900
-        /// The coordinator's own words for buttons, by `ButtonWords` key; the app's own otherwise.
-        public var buttonWords: [String: String]? = nil
+        /// The group's profiles; the first is the one everyone has until given another.
+        public var profiles: [Profile] = [.standard]
+        /// Who has which profile, by member number.
+        public var profileOf: [UInt16: UInt8] = [:]
+        /// Whether coordinators' phones keep the group's log (app spec, The log). On by default.
+        public var keepsLog = true
         public init() {}
+
+        enum CodingKeys: String, CodingKey { case useDistance, profiles, profileOf, keepsLog, redInterval, amberInterval, buttonWords }
+
+        /// Settings from before profiles (escalation times and button words for the whole group)
+        /// become the first profile's.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            useDistance = try c.value(.useDistance, or: false)
+            profileOf = try c.value(.profileOf, or: [:])
+            keepsLog = try c.value(.keepsLog, or: true)
+            if let p = try c.decodeIfPresent([Profile].self, forKey: .profiles), !p.isEmpty {
+                profiles = p
+            } else {
+                var first = Profile.standard
+                first.redInterval = try c.value(.redInterval, or: first.redInterval)
+                first.amberInterval = try c.value(.amberInterval, or: first.amberInterval)
+                first.buttonWords = try c.value(.buttonWords, or: [:])
+                profiles = [first]
+            }
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(useDistance, forKey: .useDistance)
+            try c.encode(profiles, forKey: .profiles)
+            try c.encode(profileOf, forKey: .profileOf)
+            try c.encode(keepsLog, forKey: .keepsLog)
+        }
     }
 
     public init(name: String, secrets: GroupSecrets, members: [Member]) {
@@ -311,8 +341,10 @@ public struct GroupState: Codable, Equatable, Sendable {
                             sealKey: m.publicKey.count == 32 ? m.publicKey : Data(count: 32), version: membershipVersion)
     }
 
-    public var escalationPolicy: EscalationPolicy {
-        EscalationPolicy(useDistance: policy.useDistance, redInterval: policy.redInterval, amberInterval: policy.amberInterval)
+    /// How the calls of the caller on `unit` escalate: their profile's alert times.
+    public func escalationPolicy(forUnit unit: UInt32?) -> EscalationPolicy {
+        let p = profile(ofUnit: unit)
+        return EscalationPolicy(useDistance: policy.useDistance, redInterval: p.redInterval, amberInterval: p.amberInterval)
     }
 }
 

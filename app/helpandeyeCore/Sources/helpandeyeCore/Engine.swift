@@ -106,8 +106,14 @@ public struct SavedState: Codable, Equatable, Sendable {
     public var invitedBy: UInt16?
     public var confirmed = true
     public var joinedAt: Date?
+    /// This person's own choices for the settings their profile lets them change.
+    public var own: Profile?
 
     public init(group: GroupState, me: UInt16) { self.group = group; self.me = me }
+
+    /// The settings that apply to this person now: their profile, with their own choices where
+    /// it lets them choose.
+    public var profile: Profile { group.profile(of: me).applying(own) }
 }
 
 /// What is happening now: open calls, the responder's list, the rota, radio use.
@@ -219,6 +225,7 @@ public final class HelpEngine: ObservableObject {
         s.confirmed = invitedBy == nil || invitedBy == group.primaryCoordinator
         s.joinedAt = now()
         setState(s)
+        followProfileCheckIns()
     }
 
     /// Changes the group. On a coordinator's phone, everyone is told who joined or left, signed,
@@ -232,6 +239,7 @@ public final class HelpEngine: ObservableObject {
         let settingsChanged = actsAsCoordinator && s.group.settings != old.settings
         if settingsChanged { s.group.settingsVersion = old.settingsVersion + 1 }
         setState(s)
+        followProfileCheckIns()
         guard actsAsCoordinator else { return }
         if settingsChanged, let f = s.group.settingsFrame(as: s.me, identity: identity) {
             spawn { _ = await self.sendOptional(f) }
@@ -398,6 +406,7 @@ public final class HelpEngine: ObservableObject {
             activity.outgoing.append(r)
             return
         }
+        if colour == .green { settleOnOK() }
         launch(OutgoingRequest(unit: unit, number: nextRequestNumber(), colour: colour, createdAt: now()))
     }
 
@@ -408,6 +417,7 @@ public final class HelpEngine: ObservableObject {
     public func adopt(_ call: HelpFrame) -> Bool {
         guard !companion, case let .call(unit, number, colour, sentAt) = call, unit == me?.unit, number >= 0x8000 else { return false }
         if activity.outgoing.contains(where: { $0.unit == unit && $0.number == number }) { return true }
+        if colour == .green { settleOnOK() }
         launch(OutgoingRequest(unit: unit, number: number, colour: colour, createdAt: Date(timeIntervalSince1970: TimeInterval(sentAt))))
         return true
     }
@@ -461,6 +471,75 @@ public final class HelpEngine: ObservableObject {
         let frame = r.withdraw(category)
         activity.outgoing.append(r)
         if let frame { spawn { _ = await self.sendOptional(frame) } }
+    }
+
+    // MARK: Settling a call (decision 6)
+
+    /// The calls I'm OK would settle now: every open Help or Need a hand when it closes them, or
+    /// those still waiting for a responder when it only stops the urgent repeats.
+    public var settledByOK: [OutgoingRequest] {
+        activity.outgoing.filter { r in
+            guard r.isUnsettled else { return false }
+            if profile.afterOK == .closesCall { return true }
+            if case .seen = r.status { return false }
+            return r.settled == nil
+        }
+    }
+
+    private func settleOnOK() {
+        guard let n = saved?.me else { return }
+        let state: CallState = profile.afterOK == .closesCall ? .closedByCaller : .callerOK
+        for r in settledByOK { settleCall(r.unit, r.number, Settled(state: state, by: n, at: now())) }
+    }
+
+    /// The caller closes their latest open call, where their profile lets them.
+    public func closeMyCall() {
+        guard profile.callerMayClose, let n = saved?.me, let r = activity.outgoing.last(where: \.isUnsettled) else { return }
+        settleCall(r.unit, r.number, Settled(state: .closedByCaller, by: n, at: now()))
+    }
+
+    /// A coordinator closes someone's call, recording the caller's consent or a reason.
+    @discardableResult
+    public func close(_ key: IncomingRequest.Key, consent: Bool, reason: String = "") -> Bool {
+        let reason = MeshText.fit(reason.trimmingCharacters(in: .whitespacesAndNewlines), bytes: HelpFrame.maxReasonBytes)
+        guard me?.role == .coordinator, let n = saved?.me, activity.inbox.requests[key] != nil, consent || !reason.isEmpty else { return false }
+        settleCall(key.unit, key.request, Settled(state: consent ? .closedWithConsent : .closedWithReason, by: n, at: now(), reason: consent ? "" : reason))
+        return true
+    }
+
+    /// The caller's signed "I'm OK" for a call still being sent, so it goes with each resend.
+    private func okFrame(_ r: OutgoingRequest) -> HelpFrame? {
+        guard let s = r.settled, s.state == .callerOK, let n = saved?.me else { return nil }
+        return .signing(.callState(unit: r.unit, request: r.number, state: .callerOK, at: UInt32(s.at.timeIntervalSince1970), reason: ""),
+                        as: n, identity: identity, group: groupID)
+    }
+
+    /// Settles a call here and tells everyone, signed. A reason goes over the internet only; the
+    /// radio carries the close without it.
+    private func settleCall(_ unit: UInt32, _ request: UInt16, _ s: Settled) {
+        let key = IncomingRequest.Key(unit: unit, request: request)
+        settleCall(key, s, via: nil)
+        guard let n = saved?.me else { return }
+        let at = UInt32(s.at.timeIntervalSince1970)
+        let full = HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: s.reason), as: n, identity: identity, group: groupID)
+        let onAir = s.reason.isEmpty ? full
+            : HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: ""), as: n, identity: identity, group: groupID)
+        spawn {
+            if self.relay.isConfigured { _ = await self.relay.send(full, wake: nil) }
+            _ = await self.sendOnMesh(onAir, kind: .optional)
+        }
+    }
+
+    /// Records a settled call on the caller's own list and on a responder's, where calm or
+    /// closed it stops alerting urgently.
+    private func settleCall(_ key: IncomingRequest.Key, _ s: Settled, via route: Route?) {
+        if let i = activity.outgoing.firstIndex(where: { $0.unit == key.unit && $0.number == key.request }) {
+            activity.outgoing[i].settle(s)
+        }
+        guard me?.canRespond == true, key.unit != me?.unit,
+              case .updated = activity.inbox.settle(key, s, via: route, at: now()) else { return }
+        alerts.cancel(key)
+        scheduleAlerts(for: key)
     }
 
     /// Typed text and position go only to responders (decision 12), sealed once for all of them;
@@ -659,7 +738,7 @@ public final class HelpEngine: ObservableObject {
     private func pruneInbox() {
         let cutoff = now().addingTimeInterval(-7 * 86_400)
         let stale = activity.inbox.requests.values.filter { r in
-            (r.isAcknowledged || r.colour == .green) && r.firstHeardAt < cutoff
+            (!r.isOpen || r.colour == .green) && r.firstHeardAt < cutoff
         }.map(\.key)
         guard !stale.isEmpty else { return }
         activity.inbox.remove(stale)
@@ -683,6 +762,7 @@ public final class HelpEngine: ObservableObject {
                     let failure = firstOnInternet ? await self.relay.send(r.callFrame, wake: .call)
                         : await self.send(r.callFrame, on: route, kind: .optional)
                     if failure == nil { self.updateOutgoing(r, route, .sent) }
+                    if let ok = self.okFrame(r) { _ = await self.send(ok, on: route, kind: .optional) }
                 }
             }
         }
@@ -717,7 +797,7 @@ public final class HelpEngine: ObservableObject {
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
             }
-        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone:
+        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .callState:
             // Counted only when signed (below), so a removed phone cannot fake them.
             return
         case let .signed(signer, _, _):
@@ -733,6 +813,13 @@ public final class HelpEngine: ObservableObject {
                 if sender.canRespond { activity.rota.apply(inner); checkGaps() }
             case let .checkIns(unit, _, _, _):
                 if sender.unit == unit, unit != me?.unit { activity.checkInWatch.apply(inner) }
+            case let .callState(unit, request, state, at, reason):
+                // The caller settles their own call; a coordinator may close anyone's (decision 6).
+                let allowed = state == .callerOK || state == .closedByCaller ? sender.unit == unit : sender.role == .coordinator
+                if allowed {
+                    settleCall(IncomingRequest.Key(unit: unit, request: request),
+                           Settled(state: state, by: signer, at: Date(timeIntervalSince1970: TimeInterval(at)), reason: reason), via: route)
+                }
             case let .memberAdded(n, _, _, _, _, _) where n == saved?.me && signer == group?.primaryCoordinator:
                 // The first coordinator lists this phone: the whole group knows it is in.
                 if var s = saved, !s.confirmed { s.confirmed = true; saved = s; store.save(s); activity.notices[.unconfirmed] = nil }
@@ -766,6 +853,7 @@ public final class HelpEngine: ObservableObject {
         case .groupSettings:
             guard var s = saved, s.group.apply(settings: frame) else { return }
             setState(s)
+            followProfileCheckIns()
             return
         case .forResponders:
             // Only a responder can open it; what is inside is handled as if it came plainly.
@@ -798,7 +886,7 @@ public final class HelpEngine: ObservableObject {
         guard me?.canRespond == true else { return }
         switch activity.inbox.receive(frame, via: route, at: now()) {
         case let .new(key): scheduleAlerts(for: key)
-        case let .updated(key) where activity.inbox.requests[key]?.isAcknowledged == true: alerts.cancel(key)
+        case let .updated(key) where activity.inbox.requests[key]?.isOpen == false: alerts.cancel(key)
         case .duplicate:
             // The caller is still sending, so it has not heard an acknowledgement. Pass on the
             // signed acknowledgements this phone has, its own or another responder's.
@@ -867,14 +955,15 @@ public final class HelpEngine: ObservableObject {
         let responders = group.members.filter { $0.canRespond && $0.unit != r.key.unit }.map {
             ResponderInfo(member: $0.number, availableNow: activity.rota.isAvailable($0.number, at: at), lastAnsweredAt: activity.lastAnswered[$0.number])
         }
-        return Escalation(colour: r.colour ?? .red, responders: responders, policy: group.escalationPolicy)
+        return Escalation(colour: r.colour ?? .red, responders: responders, policy: group.escalationPolicy(forUnit: r.key.unit))
     }
 
     /// Every phone works out the order from the same group, rota and record of who answered, and
     /// alerts its own person from their turn, counted from when the caller pressed, until someone
     /// acknowledges.
     private func scheduleAlerts(for key: IncomingRequest.Key) {
-        guard let r = activity.inbox.requests[key], !r.isAcknowledged, let e = escalation(for: r), let me = saved?.me else { return }
+        guard let r = activity.inbox.requests[key], r.isOpen, let e = escalation(for: r), let me = saved?.me else { return }
+        let calm = r.colour == .green || r.callerIsOK
         let turn = TimeInterval(e.order.firstIndex(of: me) ?? e.order.count) * e.interval
         let turnAt = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn)
         // "I'm OK" asks for no one: tell them once, calmly, and never again.
@@ -884,24 +973,28 @@ public final class HelpEngine: ObservableObject {
         }
         // iOS keeps at most 64 pending notifications per app: up to four go to check-in reminders,
         // the rest are shared between open requests. A long tail keeps alerting with the app asleep.
-        let open = max(activity.inbox.requests.values.filter { !$0.isAcknowledged && $0.colour != .green }.count, 1)
+        let open = max(activity.inbox.requests.values.filter { $0.isOpen && $0.colour != .green }.count, 1)
         let count = max(3, 58 / open)
         let t = now()
         let times: [Date]
         switch r.colour {
         case .green?: times = [max(turnAt, t)]
+        // The caller said they are OK after it: calm reminders, until a responder has checked.
+        case _ where r.callerIsOK: times = alertTimes(turnAt: max(turnAt, t), every: 1800, from: t, count: count)
         case .amber?: times = alertTimes(turnAt: turnAt, every: 300, quick: 6, later: 1800, from: t, count: count)
         default: times = alertTimes(turnAt: turnAt, every: 60, quick: 10, later: 600, from: t, count: count)
         }
         let who = name(ofUnit: key.unit)
-        var title = "\(who): \(ButtonWords.words(r.colour ?? .red, in: group))"
+        var title = "\(who): \(ButtonWords.words(r.colour ?? .red, in: group?.profile(ofUnit: key.unit)))"
         if key.request == 0 { title = "\(who) missed a check-in" }
-        alerts.schedule(Alert(key: key, title: title, body: "Open Help&I to acknowledge.", calm: r.colour == .green, times: times))
+        if r.callerIsOK { title = "\(who) says they're OK now" }
+        let body = r.callerIsOK ? "Please check on them, then acknowledge in Help&I." : "Open Help&I to acknowledge."
+        alerts.schedule(Alert(key: key, title: title, body: body, calm: calm, times: times))
     }
 
     /// Re-schedules each open request's alerts from now, so they keep coming however long it takes.
     private func topUpAlerts() {
-        for r in activity.inbox.requests.values where !r.isAcknowledged && r.colour != .green {
+        for r in activity.inbox.requests.values where r.isOpen && r.colour != .green {
             guard now().timeIntervalSince(lastTopUp[r.key] ?? .distantPast) > 120 else { continue }
             lastTopUp[r.key] = now()
             scheduleAlerts(for: r.key)
@@ -1002,6 +1095,28 @@ public final class HelpEngine: ObservableObject {
         updateGroup { $0.relayURL = trimmed.isEmpty ? nil : trimmed }
     }
 
+    // MARK: Profiles
+
+    /// The settings that apply to this person now (`SavedState.profile`).
+    public var profile: Profile { saved?.profile ?? .standard }
+
+    /// Changes this person's own choices. Only the settings their profile lets them change count.
+    public func setOwn(_ change: (inout Profile) -> Void) {
+        guard var s = saved else { return }
+        var own = s.own ?? s.group.profile(of: s.me)
+        change(&own)
+        s.own = own
+        setState(s)
+    }
+
+    /// Check-ins set by a profile the person may not change replace their own.
+    private func followProfileCheckIns() {
+        guard !companion, let s = saved, me?.canCall == true else { return }
+        let p = s.group.profile(of: s.me)
+        guard !p.mayChange(.checkIns), s.checkIn != p.checkIns else { return }
+        setCheckIn(p.checkIns)
+    }
+
     // MARK: Check-ins (decision 16)
 
     public var checkIn: CheckInSchedule? { saved?.checkIn }
@@ -1080,6 +1195,7 @@ extension SavedState {
         invitedBy = try c.decodeIfPresent(UInt16.self, forKey: .invitedBy)
         confirmed = try c.value(.confirmed, or: true)
         joinedAt = try c.decodeIfPresent(Date.self, forKey: .joinedAt)
+        own = try c.decodeIfPresent(Profile.self, forKey: .own)
     }
 }
 

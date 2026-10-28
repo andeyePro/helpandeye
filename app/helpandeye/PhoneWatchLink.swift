@@ -37,7 +37,7 @@ final class PhoneWatchLink: NSObject, ObservableObject {
         if model.engines.contains(where: { $0.me?.canRespond == true }) {
             // Every group's open calls together, most urgent first, then the first five.
             let open = model.engines.filter { $0.me?.canRespond == true }.flatMap { e in
-                e.activity.inbox.requests.values.filter { !$0.isAcknowledged }.map { (e, $0) }
+                e.activity.inbox.requests.values.filter(\.isOpen).map { (e, $0) }
             }
             context["open"] = open.sorted { ResponderInbox.moreUrgent($0.1, $1.1) }.prefix(5).map { e, r -> [String: Any] in
                 ["unit": Int(r.key.unit), "request": Int(r.key.request), "colour": Int(r.colour?.rawValue ?? 1),
@@ -78,7 +78,7 @@ extension PhoneWatchLink: WCSessionDelegate {
                 // In the group the watch named, or, from an older watch, the only group with that
                 // call open; never a guess.
                 let engines = self.model?.engines ?? []
-                let holding = engines.filter { $0.activity.inbox.requests[key]?.isAcknowledged == false }.compactMap(\.group?.tag)
+                let holding = engines.filter { $0.activity.inbox.requests[key]?.isOpen == true }.compactMap(\.group?.tag)
                 let tag = AckRouting.group(named: message["group"] as? String, holding: holding)
                 let engine = engines.first { tag != nil && $0.group?.tag == tag }
                 // The watch is told whether an acknowledgement was really made.

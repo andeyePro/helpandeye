@@ -67,7 +67,8 @@ test("messages are kept for a week at most and must be base64 of a sane size", a
   await relay.post(coord.key, "AQ==");
   assert.deepEqual((await relay.since(coord.key, 0)).messages.map((m) => m.seq), [2]);
   await rejects(relay.post(coord.key, "not base64!"), 400);
-  await rejects(relay.post(coord.key, "A".repeat(600)), 400);
+  await relay.post(coord.key, "A".repeat(3000));
+  await rejects(relay.post(coord.key, "A".repeat(5000)), 400);
   await rejects(relay.post(coord.key, ""), 400);
 });
 

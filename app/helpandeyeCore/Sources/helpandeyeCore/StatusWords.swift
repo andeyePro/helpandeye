@@ -18,6 +18,7 @@ public enum StatusWords {
         case .waitingForResponder: .init(headline: "Sent. Waiting for a responder to see it.", cross: false, call999: false)
         case let .seen(who): .init(headline: "\(name(who)) has seen your call.", cross: false, call999: false)
         case .notSent: .init(headline: "Not sent. Nobody has been told.", cross: true, call999: true)
+        case let .closed(who): .init(headline: "\(name(who)) closed this call.", cross: false, call999: false)
         }
     }
 
@@ -27,6 +28,7 @@ public enum StatusWords {
         case .waitingForResponder: .init(headline: "Sent. Waiting for a responder.", cross: false, call999: false)
         case let .seen(who): .init(headline: "\(name(who)) has seen it.", cross: false, call999: false)
         case .notSent: .init(headline: "Not sent. Use your phone, or call 999.", cross: true, call999: true)
+        case let .closed(who): .init(headline: "\(name(who)) closed it.", cross: false, call999: false)
         }
     }
 }

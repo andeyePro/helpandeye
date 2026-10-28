@@ -49,6 +49,8 @@ public struct CallerFeedback: Equatable, Sendable {
             // Said once, as it goes; not again if a later route also gets it out.
             guard old == nil || old == .sending || old == .notSent else { return nil }
             return .init(sound: nil, spoken: (["Your \(words) message has been sent."] + [note].compactMap { $0 }).joined(separator: " "))
+        case let .closed(who):
+            return .init(sound: nil, spoken: "\(name(who)) closed your \(words) call.")
         case let .seen(who):
             if case .seen = old { return nil }
             return .init(sound: .seen, spoken: "\(name(who)) has seen your \(words) message, and says: \(acknowledgeWords).")

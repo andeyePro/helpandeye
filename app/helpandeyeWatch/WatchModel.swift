@@ -33,6 +33,8 @@ final class WatchModel: NSObject, ObservableObject {
     @Published private var sentByWatch = false
     /// The button last pressed here, for what is said after Need a hand.
     @Published private var pressed: Colour?
+    /// What the wearer is told after an I'm OK that settled an open call.
+    @Published private(set) var okNote: String?
     /// Notifications for Help&I are turned off on this watch, so it cannot alert its owner.
     @Published private(set) var alertsOff = false
     private var voiceTracker = CallerFeedback.Tracker(nil)
@@ -82,7 +84,7 @@ final class WatchModel: NSObject, ObservableObject {
                     guard let e else { continue }
                     e.tick()
                     r.busy = e.activity.outgoing.contains { $0.nextResend != nil && $0.unit != 0 }
-                        || e.activity.inbox.requests.values.contains { !$0.isAcknowledged && $0.colour != .green }
+                        || e.activity.inbox.requests.values.contains { $0.isOpen && $0.colour != .green }
                 }
             }
         }
@@ -103,9 +105,9 @@ final class WatchModel: NSObject, ObservableObject {
     private func tellCaller() {
         guard let engine else { return }
         let r = engine.current
-        let words = r.map { ButtonWords.words($0.colour, in: engine.group) } ?? ""
-        let note = r?.colour == .amber ? ButtonWords.amberNote(in: engine.group) : nil
-        if let f = voiceTracker.update(r, words: words, note: note, name: engine.name(ofMember:)) { CallerVoice.shared.tell(f) }
+        let words = r.map { ButtonWords.words($0.colour, in: engine.profile) } ?? ""
+        let note = r?.colour == .amber ? ButtonWords.amberNote(in: engine.profile) : (r?.colour == .green ? okNote : nil)
+        if let f = voiceTracker.update(r, words: words, note: note, name: engine.name(ofMember:)) { CallerVoice.shared.tell(f, profile: engine.profile) }
     }
 
     /// Whether the owner has turned Help&I's notifications off on this watch.
@@ -224,14 +226,22 @@ final class WatchModel: NSObject, ObservableObject {
 
     // MARK: What the screen shows
 
-    func words(_ colour: Colour) -> String { ButtonWords.words(colour, in: engine?.group) }
+    /// The owner's settings, from their phone.
+    var profile: Profile { engine?.profile ?? .standard }
+
+    func words(_ colour: Colour) -> String { ButtonWords.words(colour, in: profile) }
+
+    /// Another's call, in the words they see on their own buttons.
+    func words(_ call: Open) -> String {
+        ButtonWords.words(call.colour, in: engine(forGroup: call.group)?.group?.profile(ofUnit: call.unit))
+    }
 
     /// Not set up and no phone to send through: the buttons could not reach anyone.
     var needsSetUp: Bool { engine?.me == nil && !phoneInReach }
 
     /// What is said after Need a hand, while that call has not failed.
     var amberNote: String? {
-        pressed == .amber && status?.cross == false ? ButtonWords.amberNote(in: engine?.group) : nil
+        pressed == .amber && status?.cross == false ? ButtonWords.amberNote(in: profile) : nil
     }
 
     var status: (text: String, cross: Bool)? {
@@ -257,7 +267,7 @@ final class WatchModel: NSObject, ObservableObject {
     /// Every group's open calls together, most urgent first, then the first five.
     var open: [Open] {
         if phoneInReach { return phoneOpen }
-        let all = allEngines.flatMap { e in e.activity.inbox.requests.values.filter { !$0.isAcknowledged }.map { (e, $0) } }
+        let all = allEngines.flatMap { e in e.activity.inbox.requests.values.filter(\.isOpen).map { (e, $0) } }
         return all.sorted { ResponderInbox.moreUrgent($0.1, $1.1) }.prefix(5).map { e, r in
             Open(unit: r.key.unit, request: r.key.request, colour: r.colour ?? .red, who: e.name(ofUnit: r.key.unit), group: e.group?.tag ?? "")
         }
@@ -276,6 +286,7 @@ final class WatchModel: NSObject, ObservableObject {
     func press(_ colour: Colour) {
         CallerVoice.shared.pressed()
         pressed = colour
+        okNote = colour == .green && !(engine?.settledByOK.isEmpty ?? true) ? profile.okSpoken : nil
         problem = nil
         lastAck = nil
         if let engine, engine.me?.canCall == true {
@@ -303,7 +314,7 @@ final class WatchModel: NSObject, ObservableObject {
     /// A call that could not even be handed on: shown, and heard as not sent.
     private func failed(_ why: String) {
         problem = why
-        CallerVoice.shared.tell(.init(sound: .notSent, spoken: why))
+        CallerVoice.shared.tell(.init(sound: .notSent, spoken: why), profile: profile)
     }
 
     #if DEBUG && targetEnvironment(simulator)
