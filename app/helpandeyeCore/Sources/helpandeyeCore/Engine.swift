@@ -106,14 +106,16 @@ public struct SavedState: Codable, Equatable, Sendable {
     public var invitedBy: UInt16?
     public var confirmed = true
     public var joinedAt: Date?
-    /// This person's own choices for the settings their profile lets them change.
+    /// This person's own choices for the settings their profile lets them change, and which
+    /// settings they have chosen for themselves.
     public var own: Profile?
+    public var ownChosen: Set<Profile.Setting> = []
 
     public init(group: GroupState, me: UInt16) { self.group = group; self.me = me }
 
     /// The settings that apply to this person now: their profile, with their own choices where
     /// it lets them choose.
-    public var profile: Profile { group.profile(of: me).applying(own) }
+    public var profile: Profile { group.profile(of: me).applying(own, chosen: ownChosen) }
 }
 
 /// What is happening now: open calls, the responder's list, the rota, radio use.
@@ -514,11 +516,16 @@ public final class HelpEngine: ObservableObject {
         settleCall(r.unit, r.number, Settled(state: .closedByCaller, by: n, at: now()))
     }
 
+    /// A reason for closing goes over the internet only, so needs it.
+    public var canSendReason: Bool { relay.isConfigured }
+
     /// A coordinator closes someone's call, recording the caller's consent or a reason.
     @discardableResult
     public func close(_ key: IncomingRequest.Key, consent: Bool, reason: String = "") -> Bool {
         let reason = MeshText.fit(reason.trimmingCharacters(in: .whitespacesAndNewlines), bytes: HelpFrame.maxReasonBytes)
-        guard me?.role == .coordinator, let n = saved?.me, activity.inbox.requests[key] != nil, consent || !reason.isEmpty else { return false }
+        // A reason goes over the internet only; without it, it would reach nobody else.
+        guard me?.role == .coordinator, let n = saved?.me, activity.inbox.requests[key] != nil,
+              consent || (!reason.isEmpty && relay.isConfigured) else { return false }
         settleCall(key.unit, key.request, Settled(state: consent ? .closedWithConsent : .closedWithReason, by: n, at: now(), reason: consent ? "" : reason))
         return true
     }
@@ -843,7 +850,10 @@ public final class HelpEngine: ObservableObject {
             // Only a current responder's own signature counts (decision 6, AGENTS.md).
             guard group?.acceptsAck(frame) == true else { return }
             let k = IncomingRequest.Key(unit: unit, request: request)
-            if activity.inbox.requests[k]?.acknowledgedBy.contains(who) != true,
+            let pressed = activity.inbox.requests[k]?.sentAt ?? activity.outgoing.first(where: { $0.unit == unit && $0.number == request })?.createdAt
+            // Logged only when it will count: for a call heard, and made after it was pressed.
+            if let pressed, TimeInterval(at) >= pressed.timeIntervalSince1970 - OutgoingRequest.clockAllowance,
+               activity.inbox.requests[k]?.acknowledgedBy.contains(who) != true,
                activity.outgoing.first(where: { $0.unit == unit && $0.number == request })?.acknowledgedBy.contains(who) != true {
                 log("\(name(ofMember: who)) acknowledged \(describe(unit, request, activity.inbox.requests[k]?.colour))")
             }
@@ -1169,8 +1179,10 @@ public final class HelpEngine: ObservableObject {
     /// Changes this person's own choices. Only the settings their profile lets them change count.
     public func setOwn(_ change: (inout Profile) -> Void) {
         guard var s = saved else { return }
-        var own = s.own ?? s.group.profile(of: s.me)
+        let before = s.profile
+        var own = before
         change(&own)
+        s.ownChosen.formUnion(own.differences(from: before))
         s.own = own
         setState(s)
     }
@@ -1275,6 +1287,7 @@ extension SavedState {
         confirmed = try c.value(.confirmed, or: true)
         joinedAt = try c.decodeIfPresent(Date.self, forKey: .joinedAt)
         own = try c.decodeIfPresent(Profile.self, forKey: .own)
+        ownChosen = try c.value(.ownChosen, or: [])
     }
 }
 

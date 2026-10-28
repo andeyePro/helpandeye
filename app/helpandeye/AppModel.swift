@@ -54,6 +54,7 @@ final class AppModel: ObservableObject {
                           relay.objectWillChange.eraseToAnyPublisher()] {
             publisher.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         }
+        carryOverOldChoices()
         voiceTracker = .init(engine.current)
         engine.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.tellCaller() }.store(in: &bag)
         for tag in Store.otherGroups { start(tag) }
@@ -77,6 +78,20 @@ final class AppModel: ObservableObject {
         let words = engine.current.map { ButtonWords.words($0.colour, in: profile) } ?? ""
         let note = engine.current?.colour == .amber ? ButtonWords.amberNote(in: profile) : (engine.current?.colour == .green ? okNote : nil)
         if let f = voiceTracker.update(engine.current, words: words, note: note, name: name(ofMember:)) { CallerVoice.shared.tell(f, profile: profile) }
+    }
+
+    /// Before profiles, a caller's sounds and sharing where they are were switches kept on this
+    /// phone. They become the caller's own choices once, so an update changes neither.
+    private func carryOverOldChoices() {
+        let d = UserDefaults.standard
+        let sounds = d.object(forKey: "callerSounds") as? Bool, share = d.object(forKey: "shareEveryCall") as? Bool
+        guard sounds != nil || share != nil else { return }
+        engine.setOwn { p in
+            if let sounds { p.soundsAndSpeech = sounds }
+            if let share { p.shareWhere = share }
+        }
+        d.removeObject(forKey: "callerSounds")
+        d.removeObject(forKey: "shareEveryCall")
     }
 
     var identity: DeviceIdentity { engine.identity }

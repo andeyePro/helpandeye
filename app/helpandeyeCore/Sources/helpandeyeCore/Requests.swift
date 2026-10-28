@@ -58,7 +58,12 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     public private(set) var acknowledgedBy: [UInt16] = []
     public private(set) var settled: Settled?
 
-    public mutating func settle(_ s: Settled) { settled = s.replacing(settled) }
+    /// Only a settlement made after this call was pressed counts, so an old one for the same
+    /// numbers (a missed check-in's, or a replayed one) can never close a live call.
+    public mutating func settle(_ s: Settled) {
+        guard s.at.timeIntervalSince1970 >= createdAt.timeIntervalSince1970 - Self.clockAllowance else { return }
+        settled = s.replacing(settled)
+    }
 
     /// A Help or Need a hand call nobody has closed, which I'm OK can settle.
     public var isUnsettled: Bool { unit != 0 && colour != .green && settled?.state.closes != true }
@@ -312,10 +317,15 @@ public struct ResponderInbox: Sendable, Codable {
         }
     }
 
-    /// A person settled a call (check who before calling this). It may overtake its call.
+    /// A person settled a call (check who before calling this). Only for a call already heard,
+    /// and only if made after it was pressed: an old close for the same numbers (a missed
+    /// check-in's, or a replayed one) must never silence a new call. One that overtakes its call
+    /// is dropped, so the call alerts as usual; the caller's phone sends "I'm OK" again with each
+    /// resend.
     @discardableResult
     public mutating func settle(_ key: IncomingRequest.Key, _ s: Settled, via route: Route? = nil, at now: Date) -> InboxEvent {
-        var r = requests[key] ?? IncomingRequest(key: key, colour: nil, firstHeardAt: now)
+        guard var r = requests[key], let pressed = r.sentAt,
+              s.at.timeIntervalSince1970 >= pressed.timeIntervalSince1970 - OutgoingRequest.clockAllowance else { return .ignored }
         let updated = s.replacing(r.settled)
         guard updated != r.settled else { return .duplicate }
         r.settled = updated
@@ -347,7 +357,8 @@ public struct ResponderInbox: Sendable, Codable {
         return reopened
     }
 
-    /// Forgets requests, for pruning old ones. Callers must never remove one nobody acknowledged.
+    /// Forgets requests, for pruning old ones. Callers must never remove one nobody acknowledged
+    /// or closed.
     public mutating func remove(_ keys: [IncomingRequest.Key]) { for k in keys { requests[k] = nil } }
 
     /// Requests, most urgent first: open before acknowledged or closed, red before amber before

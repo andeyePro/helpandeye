@@ -65,6 +65,17 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
     public var hidesSettings = false
     public var personMayChange: Set<Setting> = [.sounds, .shareWhere, .textFallback, .checkIns]
 
+    /// The settings in which `other` differs from this one.
+    public func differences(from other: Profile) -> Set<Setting> {
+        var out: Set<Setting> = []
+        if face != other.face || buttonWords != other.buttonWords || symbols != other.symbols { out.insert(.buttons) }
+        if soundsAndSpeech != other.soundsAndSpeech || notSent != other.notSent || seen != other.seen { out.insert(.sounds) }
+        if afterOK != other.afterOK || okWords != other.okWords { out.insert(.afterOK) }
+        if shareWhere != other.shareWhere { out.insert(.shareWhere) }
+        if textFallback != other.textFallback { out.insert(.textFallback) }
+        return out
+    }
+
     public init(id: UInt8, name: String) { self.id = id; self.name = name }
 
     public static let standard = Profile(id: 0, name: "Standard")
@@ -86,11 +97,14 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
 
     public func mayChange(_ setting: Setting) -> Bool { personMayChange.contains(setting) }
 
-    /// This profile with the person's own choices taken in, for each setting they may change.
-    /// Their check-ins are the engine's (`SavedState.checkIn`), so are not taken from `own`.
-    public func applying(_ own: Profile?) -> Profile {
+    /// This profile with the person's own choices taken in, for each setting they may change and
+    /// have chosen (`chosen`; every one when nil), so the coordinator's later edits to the rest
+    /// still reach them. Their check-ins are the engine's (`SavedState.checkIn`), so are not
+    /// taken from `own`.
+    public func applying(_ own: Profile?, chosen: Set<Setting>? = nil) -> Profile {
         guard let own else { return self }
         var p = self
+        let mayChange = { (s: Setting) in self.mayChange(s) && chosen?.contains(s) != false }
         if mayChange(.buttons) { p.face = own.face; p.buttonWords = own.buttonWords; p.symbols = own.symbols }
         if mayChange(.sounds) { p.soundsAndSpeech = own.soundsAndSpeech; p.notSent = own.notSent; p.seen = own.seen }
         if mayChange(.afterOK) { p.afterOK = own.afterOK; p.okWords = own.okWords }

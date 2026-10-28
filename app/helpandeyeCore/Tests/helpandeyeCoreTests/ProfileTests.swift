@@ -74,6 +74,32 @@ final class ProfileTests: XCTestCase {
         XCTAssertEqual(copy.policy, g.policy)
     }
 
+    func testSettingsFromAPhoneBeforeProfilesKeepTheGroupsProfiles() throws {
+        let coordinator = DeviceIdentity()
+        var g = GroupState(name: "Mill Lane", secrets: .random(), members: [
+            Member(number: 1, name: "Sam", role: .coordinator, publicKey: coordinator.publicKey, signingKey: coordinator.signingPublicKey),
+        ])
+        g.policy.profiles.append(Profile(id: 1, name: "Lone worker"))
+        g.policy.profileOf[2] = 1
+        let plain = Data(#"{"policy":{"useDistance":false,"redInterval":120,"amberInterval":900},"relayURL":"https://new.example"}"#.utf8)
+        let sig = try coordinator.signingKey.signature(for: GroupState.settingsInput(group: g.secrets.groupID, signer: 1, version: 1, settings: plain))
+        XCTAssertTrue(g.apply(settings: .groupSettings(signer: 1, version: 1, settings: plain, signature: sig)), "an older phone's change still counts")
+        XCTAssertEqual(g.relayURL, "https://new.example")
+        XCTAssertEqual(g.policy.profiles.map(\.name), ["Standard", "Lone worker"])
+        XCTAssertEqual(g.policy.profileOf[2], 1)
+    }
+
+    func testOwnChoicesCoverOnlyWhatThePersonChose() {
+        var coordinators = Profile.standard
+        coordinators.personMayChange = [.sounds, .buttons]
+        var own = coordinators
+        own.soundsAndSpeech = false
+        coordinators.buttonWords["red"] = "Come now"
+        let applied = coordinators.applying(own, chosen: own.differences(from: Profile.standard))
+        XCTAssertFalse(applied.soundsAndSpeech)
+        XCTAssertEqual(ButtonWords.words(.red, in: applied), "Come now", "the coordinator's later words, untouched by the person")
+    }
+
     func testHidingSettingsWithOneCoordinatorSuggestsASecond() {
         var g = GroupState(name: "Mill Lane", secrets: .random(), members: [
             Member(number: 1, name: "Sam", role: .coordinator, publicKey: Data(count: 32)),

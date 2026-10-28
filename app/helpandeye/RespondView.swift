@@ -109,11 +109,15 @@ struct CloseCallView: View {
                 Button("They agreed to close it") { close(consent: true) }.buttonStyle(.action)
             }
             Section(header: Header("Or write why")) {
-                LabeledField(label: "Reason, such as: spoke to them on the phone, all well", text: $reason)
-                Button("Close with this reason") { close(consent: false) }
-                    .buttonStyle(.action)
-                    .disabled(reason.trimmingCharacters(in: .whitespaces).isEmpty)
-                Text("The reason goes over the internet only, never the local radio.")
+                if engine.canSendReason {
+                    LabeledField(label: "Reason, such as: spoke to them on the phone, all well", text: $reason)
+                    Button("Close with this reason") { close(consent: false) }
+                        .buttonStyle(.action)
+                        .disabled(reason.trimmingCharacters(in: .whitespaces).isEmpty)
+                    Text("The reason goes over the internet only, never the local radio.")
+                } else {
+                    Text("A reason can only be sent over the internet, which this group has not set up, so close it only with the caller's agreement.")
+                }
             }
         }
         .navigationTitle("Close this call")

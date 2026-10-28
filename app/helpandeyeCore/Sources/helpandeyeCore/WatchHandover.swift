@@ -22,6 +22,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     public var others: [Part] = []
     /// The owner's own choices for their profile, so the watch looks and sounds as the phone does.
     public var own: Profile?
+    public var ownChosen: Set<Profile.Setting> = []
 
     public struct Part: Codable, Equatable, Sendable {
         public let group: GroupState
@@ -29,7 +30,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     }
 
     public init(saved: SavedState, identity: DeviceIdentity, others: [SavedState] = []) {
-        group = saved.group; me = saved.me; keys = identity.rawRepresentation; own = saved.own
+        group = saved.group; me = saved.me; keys = identity.rawRepresentation; own = saved.own; ownChosen = saved.ownChosen
         self.others = others.map { Part(group: $0.group, me: $0.me) }
     }
 
@@ -37,6 +38,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     public var each: [WatchHandover] {
         var first = WatchHandover(group: group, me: me, keys: keys)
         first.own = own
+        first.ownChosen = ownChosen
         return [first] + others.map { WatchHandover(group: $0.group, me: $0.me, keys: keys) }
     }
 
@@ -49,6 +51,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
         keys = try c.decode(Data.self, forKey: .keys)
         others = try c.decodeIfPresent([Part].self, forKey: .others) ?? []
         own = try c.decodeIfPresent(Profile.self, forKey: .own)
+        ownChosen = try c.decodeIfPresent(Set<Profile.Setting>.self, forKey: .ownChosen) ?? []
     }
 
     public var identity: DeviceIdentity? { try? DeviceIdentity(rawRepresentation: keys) }
@@ -58,6 +61,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     public func state(keeping current: SavedState?) -> SavedState {
         var s = SavedState(group: group, me: me)
         s.own = own
+        s.ownChosen = ownChosen
         if let current, current.me == me, current.group.secrets.groupID == group.secrets.groupID {
             s.lastRequest = current.lastRequest
         }

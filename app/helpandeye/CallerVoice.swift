@@ -24,7 +24,6 @@ final class CallerVoice {
         #endif
     }
 
-    /// `profile` says whether sounds and spoken words are on; touch stays on.
     /// The sound file the caller's profile chooses, or nil for none.
     static func file(_ sound: CallerFeedback.Sound, in profile: Profile) -> String? {
         switch sound {
@@ -43,6 +42,7 @@ final class CallerVoice {
         player?.play()
     }
 
+    /// `profile` says whether sounds and spoken words are on; touch stays on.
     func tell(_ feedback: CallerFeedback, profile: Profile) {
         #if os(watchOS)
         if let sound = feedback.sound { WKInterfaceDevice.current().play(sound == .seen ? .success : .failure) }

@@ -115,6 +115,40 @@ import XCTest
         XCTAssertTrue(responder.engine.activity.inbox.requests[key]!.isOpen, "a caller cannot close as a coordinator")
     }
 
+    func testAnOldCloseNeverClosesANewCall() async {
+        caller.engine.press(.red)
+        await t.air.run()
+        let key = t.key
+        let old = HelpFrame.signing(.callState(unit: key.unit, request: key.request, state: .closedWithConsent,
+                                               at: UInt32(t.clock.now.timeIntervalSince1970 - 86_400), reason: ""),
+                                    as: coordinator.engine.saved!.me, identity: coordinator.identity, group: t.gid)
+        responder.engine.receive(old, via: .internet)
+        caller.engine.receive(old, via: .internet)
+        XCTAssertTrue(responder.engine.activity.inbox.requests[key]!.isOpen, "made a day before the call was pressed")
+        XCTAssertEqual(caller.request?.status, .waitingForResponder)
+        XCTAssertNotNil(caller.request?.nextResend)
+    }
+
+    func testACloseHeardBeforeItsCallDoesNotSilenceIt() async {
+        let unit = caller.engine.me!.unit!
+        let close = HelpFrame.signing(.callState(unit: unit, request: 1, state: .closedWithConsent, at: UInt32(t.clock.now.timeIntervalSince1970), reason: ""),
+                                      as: coordinator.engine.saved!.me, identity: coordinator.identity, group: t.gid)
+        responder.engine.receive(close, via: .internet)
+        XCTAssertNil(responder.engine.activity.inbox.requests[IncomingRequest.Key(unit: unit, request: 1)])
+        caller.engine.press(.red)
+        await t.air.run()
+        XCTAssertTrue(responder.engine.activity.inbox.requests[t.key]!.isOpen)
+        XCTAssertNotNil(responder.alerts.scheduled[t.key])
+    }
+
+    func testAReasonNeedsTheInternet() async {
+        caller.engine.press(.red)
+        await t.air.run()
+        XCTAssertFalse(coordinator.engine.canSendReason)
+        XCTAssertFalse(coordinator.engine.close(t.key, consent: false, reason: "Spoke to them"), "it would reach nobody else")
+        XCTAssertTrue(responder.engine.activity.inbox.requests[t.key]!.isOpen)
+    }
+
     func testNothingClosesACallOnItsOwn() async {
         caller.engine.press(.red)
         await t.air.run()

@@ -335,6 +335,7 @@ final class WatchModel: NSObject, ObservableObject {
         secondsLeft = Int(HelpCountdown.length)
         CallerVoice.shared.pressed()
         let session = WKExtendedRuntimeSession()
+        session.delegate = self
         session.start()
         runtime = session
         countdownTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -461,6 +462,20 @@ extension WatchModel: WCSessionDelegate {
                 inner.schedule(alert.fromNow(Date()))
                 sounding.insert(key)
             }
+        }
+    }
+}
+
+/// Without its session the countdown stops whenever the screen goes off, so the wearer is told
+/// at once rather than left thinking it will call for them.
+extension WatchModel: WKExtendedRuntimeSessionDelegate {
+    nonisolated func extendedRuntimeSessionDidStart(_ session: WKExtendedRuntimeSession) {}
+    nonisolated func extendedRuntimeSessionWillExpire(_ session: WKExtendedRuntimeSession) {}
+    nonisolated func extendedRuntimeSession(_ session: WKExtendedRuntimeSession, didInvalidateWith reason: WKExtendedRuntimeSessionInvalidationReason,
+                                            error: Error?) {
+        Task { @MainActor in
+            guard self.countdown != nil, session === self.runtime else { return }
+            self.failed("The countdown may stop when the screen goes dark. Keep your wrist raised, or press \(self.words(.red)) now.")
         }
     }
 }

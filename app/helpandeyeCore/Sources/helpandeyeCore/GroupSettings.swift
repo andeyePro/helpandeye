@@ -34,17 +34,27 @@ extension GroupState {
               let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
               pub.isValidSignature(sig, for: Self.settingsInput(group: secrets.groupID, signer: signer, version: version, settings: data)),
               let s = Self.decodeSettings(data) else { return false }
-        policy = s.policy
+        // Settings from a phone made before profiles carry none: keep the group's own, so a second
+        // coordinator still on an older version cannot wipe them by changing the relay address.
+        if Self.isPlain(data) {
+            policy.useDistance = s.policy.useDistance
+        } else {
+            policy = s.policy
+        }
         relayURL = s.relayURL
         settingsVersion = version
         return true
     }
 
-    /// Compressed, or plain from a phone before profiles.
+    /// Compressed, or plain JSON from a phone before profiles (tried first: compressed bytes are
+    /// never valid JSON, but plain JSON can look like compressed data).
     static func decodeSettings(_ data: Data) -> GroupSettings? {
-        let json = (try? (data as NSData).decompressed(using: .zlib) as Data) ?? data
+        if let plain = try? JSONDecoder().decode(GroupSettings.self, from: data) { return plain }
+        guard let json = try? (data as NSData).decompressed(using: .zlib) as Data else { return nil }
         return try? JSONDecoder().decode(GroupSettings.self, from: json)
     }
+
+    static func isPlain(_ data: Data) -> Bool { (try? JSONSerialization.jsonObject(with: data)) != nil }
 
     static func settingsInput(group: Data, signer: UInt16, version: UInt32, settings: Data) -> Data {
         var d = Data("HELPA-SETTINGS-1".utf8) + group
