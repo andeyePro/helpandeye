@@ -322,7 +322,7 @@ Needs phone A (a caller), phone B (a responder) and phone C (the coordinator), a
 3. On phone C, set the buttons back to words and a symbol, turn on Show them only the three buttons, and save.
 4. On phone C, delete the profile.
 
-Pass: in step 1 phone C warns that SOS can sound like an emergency service. In step 2 phone A's buttons show only their symbols (VoiceOver still reads the words), the sounds switch cannot be changed, and the screen says settings it cannot change are set by the coordinator. In step 3 phone A shows only the Help screen, with the 999 notice, and phone C suggests making a second coordinator. In step 4 phone A is back on the first profile, with all its screens.
+Pass: in step 1 phone C warns that SOS can sound like an emergency service. In step 2 phone A's buttons show only their symbols (VoiceOver still reads the words), the sounds show as words with "Set by your coordinator." instead of switches, and the screen offers to ask the coordinator to change one. In step 3 phone A shows only the Help screen, with the 999 notice, and phone C suggests making a second coordinator. In step 4 phone A is back on the first profile, with all its screens.
 
 5. Give phone A the profile again, with its sounds locked. On phone A, under Group, Your settings, tap Ask the coordinator to change one, choose The sounds, write "Too loud at night" and send it. Look at phone A's Help screen.
 6. On phone C, under Group, For coordinators, read the request and tap Done.

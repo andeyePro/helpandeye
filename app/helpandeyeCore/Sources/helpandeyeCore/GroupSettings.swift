@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-/// What a coordinator can change for the whole group from Advanced settings: the profiles and who
+/// What a coordinator can change for the whole group, under Profiles, Log and Advanced settings: the profiles and who
 /// has which, the log, and the relay's address. It goes to every member at once, signed and
 /// compressed, over the internet and, when it fits, the group channel; the newest version wins.
 public struct GroupSettings: Codable, Equatable, Sendable {
