@@ -29,9 +29,9 @@ struct WelcomeView: View {
 struct CreateGroupView: View {
     @EnvironmentObject var model: AppModel
     @State private var name = ""
-    @State private var myName = ""
+    @AppStorage(MyDetails.nameKey) private var myName = ""
     @State private var call = false
-    @State private var phone = ""
+    @AppStorage(MyDetails.phoneKey) private var phone = ""
     @State private var missing = false
 
     var body: some View {
@@ -58,38 +58,41 @@ struct CreateGroupView: View {
     }
 }
 
-/// The new member's side of the three-scan join (Joining in helpandeyeCore).
+/// The new member's side of the three-scan join (Joining in helpandeyeCore). Where they have got
+/// to is kept, so leaving the screen (to fetch a code from Messages, say) does not start it again,
+/// and their name and number are kept for next time.
 struct JoinGroupView: View {
     @EnvironmentObject var model: AppModel
-    @State private var invite: Joining.Invitation?
-    @State private var name = ""
+    @AppStorage("join.invite") private var savedInvite = ""
+    @AppStorage("join.request") private var savedRequest = ""
+    @AppStorage(MyDetails.nameKey) private var name = ""
+    @AppStorage(MyDetails.phoneKey) private var phone = ""
     @State private var missing = false
-    @State private var phone = ""
-    @State private var call = true
-    @State private var respond = false
-    @State private var requestCode: String?
     @State private var error: String?
+
+    private var invite: Joining.Invitation? { try? Joining.decode(Joining.Invitation.self, from: savedInvite) }
+    private var requestCode: String? { savedRequest.isEmpty ? nil : savedRequest }
 
     var body: some View {
         Form {
             if invite == nil {
                 CodeReader(prompt: "Scan the code on the coordinator's phone") { code in
-                    do { invite = try Joining.decode(Joining.Invitation.self, from: code); error = nil } catch { self.error = "That is not a Help&I joining code." }
+                    if (try? Joining.decode(Joining.Invitation.self, from: code)) != nil { savedInvite = code; error = nil }
+                    else { error = codeProblem(code, expected: .invitation) }
                 }
             } else if requestCode == nil, let invite {
                 Section(header: Header("Joining \(invite.groupName)")) {
+                    if let role = invite.role { Text("You are invited to \(roleWords(role)).") }
                     LabeledField(label: "Your name, as the group will see it", text: $name)
                     LabeledField(label: "Mobile number (optional)", text: $phone, keyboard: .phonePad)
-                    Toggle(isOn: $call) { Text("I may call for help").font(.body) }
-                    Toggle(isOn: $respond) { Text("I can respond to others").font(.body) }
                     Button("Next") {
-                        missing = name.isEmpty || !(call || respond)
+                        missing = name.isEmpty
                         guard !missing else { return }
-                        let r = Joining.request(invite, name: name, call: call, respond: respond, phone: phone.isEmpty ? nil : phone, me: model.identity)
-                        requestCode = try? Joining.code(r)
+                        let r = Joining.request(invite, name: name, call: true, respond: true, phone: phone.isEmpty ? nil : phone, me: model.identity)
+                        savedRequest = (try? Joining.code(r)) ?? ""
                     }
                     .buttonStyle(.action)
-                    if missing { Text("Please enter your name, and choose calling for help, responding, or both.").foregroundStyle(Color.warning) }
+                    if missing { Text("Please enter your name.").foregroundStyle(Color.warning) }
                 }
             } else if let invite, let requestCode {
                 Section(header: Header("Show this to the coordinator")) {
@@ -101,15 +104,57 @@ struct JoinGroupView: View {
                     do {
                         let w = try Joining.decode(Joining.Welcome.self, from: code)
                         let group = try Joining.open(w, invite: invite, me: model.identity)
+                        savedInvite = ""; savedRequest = ""
                         model.joined(group, as: w.memberNumber, invitedBy: group.members.first { $0.publicKey == invite.coordinatorKey }?.number)
-                    } catch { self.error = "That welcome code could not be opened. Ask the coordinator to make a new one." }
+                    } catch {
+                        self.error = (try? Joining.decode(Joining.Welcome.self, from: code)) != nil
+                            ? "That welcome code was made for a different invitation. Ask the coordinator to start again with a new one."
+                            : codeProblem(code, expected: .welcome)
+                    }
                 }
             }
             if let error { Text(error).foregroundStyle(Color.warning) }
+            if invite != nil {
+                Section { Button("Start again") { savedInvite = ""; savedRequest = ""; error = nil }.buttonStyle(.secondaryAction) }
+            }
         }
         .navigationTitle("Join a group")
         .keyboardDismissable()
     }
+}
+
+/// This phone's owner's name and number, remembered between groups and attempts.
+enum MyDetails {
+    static let nameKey = "my.name"
+    static let phoneKey = "my.phone"
+}
+
+func roleWords(_ role: Member.Role) -> String {
+    switch role {
+    case .caller: "call for help"
+    case .responder: "respond to others"
+    case .both, .coordinator: "call for help and respond to others"
+    }
+}
+
+/// Says plainly what went wrong with a code, so nobody goes round the steps again guessing.
+func codeProblem(_ code: String, expected: Joining.Kind) -> String {
+    if case Joining.Failure.otherVersion? = (Result { try Joining.decode(Joining.Invitation.self, from: code) }).failureError {
+        return "That code was made by a different version of Help&I. Update the app on both phones, then start again."
+    }
+    switch (Joining.kind(of: code), expected) {
+    case (.invitation?, .request): return "That is your own invitation code. Scan the code on their phone."
+    case (.welcome?, .request): return "That is a welcome code. Scan the code on their phone."
+    case (.invitation?, .welcome): return "That is the coordinator's first code again. Scan the welcome code they show after adding you."
+    case (.request?, _): return "That is a joining code from a new member. It goes to the coordinator's phone."
+    case (.welcome?, .invitation): return "That is a welcome code. First scan the coordinator's invitation code."
+    case (.invitation?, _), (.welcome?, _): return "That code is not the one needed here."
+    case (nil, _): return "That is not a Help&I code. If you pasted it, copy the whole message and try again."
+    }
+}
+
+extension Result {
+    var failureError: Failure? { if case let .failure(e) = self { e } else { nil } }
 }
 
 struct GroupView: View {
@@ -163,7 +208,9 @@ struct GroupView: View {
                     }
                 }
                 if model.me?.role == .coordinator {
-                    RelaySection()
+                    Section(header: Header("For coordinators")) {
+                        NavigationLink("Advanced settings") { AdvancedSettingsView() }
+                    }
                 }
                 if model.engine.isPrimaryCoordinator {
                     if model.group?.previousSecrets != nil { KeyUpdatesSection() }
@@ -207,17 +254,28 @@ struct InviteView: View {
 
     var body: some View {
         Form {
+            if invite == nil, let g = model.group {
+                // The coordinator decides what each person does, not the person joining.
+                Section(header: Header("What will they do?")) {
+                    ForEach([Member.Role.caller, .responder, .both], id: \.self) { role in
+                        Button(roleWords(role).prefix(1).uppercased() + roleWords(role).dropFirst()) {
+                            invite = Joining.invitation(for: g, coordinator: model.identity, role: role)
+                        }
+                        .buttonStyle(.secondaryAction)
+                    }
+                }
+            }
             if let invite, let code = try? Joining.code(invite), request == nil {
                 Section(header: Header("Ask them to scan this")) {
                     QRCode(text: code).frame(maxWidth: 260).frame(maxWidth: .infinity)
                     ShareLink(item: code) { Label("Send it as a message instead", systemImage: "square.and.arrow.up") }
                 }
                 CodeReader(prompt: "Then scan the code on their phone") { c in
-                    do { request = try Joining.decode(Joining.JoinRequest.self, from: c); error = nil } catch { self.error = "That is not their joining code." }
+                    do { request = try Joining.decode(Joining.JoinRequest.self, from: c); error = nil } catch { self.error = codeProblem(c, expected: .request) }
                 }
             } else if let invite, let request, welcomeCode == nil {
                 Section(header: Header("Add \(request.name)?")) {
-                    Text(request.wantsToCall && request.wantsToRespond ? "Calls for help and responds" : (request.wantsToCall ? "Calls for help" : "Responds"))
+                    Text("They will \(roleWords(invite.role ?? (request.wantsToCall && request.wantsToRespond ? .both : request.wantsToCall ? .caller : .responder))).")
                     Text("If you are not together, the number on their phone must be \(Joining.safetyNumber(model.identity.publicKey, request.publicKey)).")
                     Button("Add them") {
                         var made: Joining.Welcome?
@@ -237,7 +295,6 @@ struct InviteView: View {
         }
         .navigationTitle("Invite someone")
         .keyboardDismissable()
-        .onAppear { if invite == nil, let g = model.group { invite = Joining.invitation(for: g, coordinator: model.identity) } }
     }
 }
 
@@ -291,7 +348,7 @@ struct ShareEveryCallSection: View {
 
     var body: some View {
         Section(header: Header("When you call")) {
-            Toggle("Send where I am with every Come now or Come when convenient", isOn: $on)
+            Toggle(isOn: $on) { Text("Send where I am with every \(Colour.red.label) or \(Colour.amber.label)").font(.body) }
             Text("It goes only to your responders, encrypted, after the call itself.")
         }
     }
@@ -326,6 +383,46 @@ struct RelaySection: View {
             Text("Members get the address the next time they join or scan a key update.")
         }
         .onAppear { url = model.group?.relayURL ?? "" }
+    }
+}
+
+/// Settings most groups never change: the internet route and the words on the buttons.
+struct AdvancedSettingsView: View {
+    var body: some View {
+        Form {
+            RelaySection()
+            ButtonWordsSection()
+        }
+        .navigationTitle("Advanced settings")
+        .keyboardDismissable()
+    }
+}
+
+/// The group's own words for each button (decision 15). Blank keeps the app's words.
+struct ButtonWordsSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var words: [String: String] = [:]
+    @State private var saved = false
+
+    private var buttons: [(key: String, standard: String)] {
+        Colour.allCases.map { (ButtonWords.key($0), ButtonWords.standard($0)) }
+            + CallCategory.choices.map { (ButtonWords.key($0), ButtonWords.standard($0)) }
+    }
+
+    var body: some View {
+        Section(header: Header("Words on the buttons")) {
+            ForEach(buttons, id: \.key) { b in
+                LabeledField(label: b.standard, text: Binding(get: { words[b.key] ?? "" }, set: { words[b.key] = $0 }))
+            }
+            Button("Save") {
+                model.updateGroup { g in for b in buttons { ButtonWords.set(words[b.key] ?? "", for: b.key, in: &g.policy) } }
+                saved = true
+            }
+            .buttonStyle(.action)
+            Text(saved ? "Saved. Members see the new words when they next join or scan a key update."
+                       : "Leave a box empty to keep the words shown above it. At most \(ButtonWords.longest) letters each.")
+        }
+        .onAppear { words = model.group?.policy.buttonWords ?? [:] }
     }
 }
 

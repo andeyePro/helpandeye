@@ -122,19 +122,12 @@ extension Colour {
         }
     }
 
-    var onColor: Color { self == .amber ? .black : .white
-    }
-    var label: String {
-        switch self { case .red: "Come now"; case .amber: "Come when convenient"; case .green: "I'm OK now" }
-    }
+    var onColor: Color { self == .amber ? .black : .white }
+
+    /// The group's own words for the button, if its coordinator set them.
+    @MainActor var label: String { ButtonWords.words(self, in: AppModel.shared.group) }
 }
 
 extension CallCategory {
-    var label: String {
-        switch self {
-        case .fallen: "I've fallen"; case .unwell: "I feel unwell"; case .lockedOut: "I'm locked out"
-        case .powerCut: "Power cut"; case .needCompany: "I'd like company"; case .missedCheckIn: "Missed a check-in"
-        case .other: "Something else"; case .withdrawn: ""
-        }
-    }
+    @MainActor var label: String { ButtonWords.words(self, in: AppModel.shared.group) }
 }

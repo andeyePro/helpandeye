@@ -31,6 +31,45 @@ final class GroupTests: XCTestCase {
         XCTAssertEqual(RelayProtocol.memberList(joined).generation, 2)
     }
 
+    func testTheCoordinatorChoosesTheRoleNotThePersonJoining() throws {
+        let coord = DeviceIdentity(), newcomer = DeviceIdentity()
+        var group = newGroup(coord)
+        let invite = Joining.invitation(for: group, coordinator: coord, role: .responder)
+        var request = Joining.request(try Joining.decode(Joining.Invitation.self, from: Joining.code(invite)),
+                                      name: "Alex", call: true, respond: false, me: newcomer)
+        XCTAssertFalse(request.wantsToCall)
+        request = Joining.JoinRequest(token: request.token, name: "Alex", wantsToCall: true, wantsToRespond: false,
+                                      publicKey: request.publicKey, signingKey: request.signingKey)
+        let welcome = try Joining.admit(request, to: &group, invite: invite, coordinator: coord)
+        XCTAssertEqual(group.member(welcome.memberNumber)?.role, .responder, "an edited request does not change the role")
+        XCTAssertNil(group.member(welcome.memberNumber)?.unit)
+    }
+
+    func testCodesAreReadFromAMessageAndWrongOnesAreNamed() throws {
+        let coord = DeviceIdentity()
+        let invite = Joining.invitation(for: newGroup(coord), coordinator: coord)
+        let code = try Joining.code(invite)
+        let mid = code.index(code.startIndex, offsetBy: 40)
+        let message = "Join my Help&I group: " + code[..<mid] + "\n" + code[mid...] + " Thanks!"
+        XCTAssertEqual(try Joining.decode(Joining.Invitation.self, from: message), invite)
+        XCTAssertEqual(Joining.kind(of: message), .invitation)
+        XCTAssertNil(Joining.kind(of: "hello"))
+        XCTAssertThrowsError(try Joining.decode(Joining.Invitation.self, from: "HELPANDI1:abcd")) { XCTAssertEqual($0 as? Joining.Failure, .otherVersion) }
+    }
+
+    func testButtonWordsDefaultAndCanBeChangedOrCleared() {
+        var g = newGroup(DeviceIdentity())
+        XCTAssertEqual(ButtonWords.words(.red, in: g), "Come now")
+        ButtonWords.set("  Please come  ", for: ButtonWords.key(.red), in: &g.policy)
+        ButtonWords.set(String(repeating: "x", count: 99), for: ButtonWords.key(.fallen), in: &g.policy)
+        XCTAssertEqual(ButtonWords.words(.red, in: g), "Please come")
+        XCTAssertEqual(ButtonWords.words(.fallen, in: g).count, ButtonWords.longest)
+        ButtonWords.set("", for: ButtonWords.key(.red), in: &g.policy)
+        XCTAssertEqual(ButtonWords.words(.red, in: g), "Come now")
+        let old = try! JSONDecoder().decode(GroupState.StoredPolicy.self, from: Data(#"{"useDistance":false,"redInterval":120,"amberInterval":900}"#.utf8))
+        XCTAssertNil(old.buttonWords, "a group saved before button words still loads")
+    }
+
     func testOnlyTheNewMemberCanOpenTheWelcome() throws {
         let coord = DeviceIdentity(), newcomer = DeviceIdentity(), eavesdropper = DeviceIdentity()
         var group = newGroup(coord)

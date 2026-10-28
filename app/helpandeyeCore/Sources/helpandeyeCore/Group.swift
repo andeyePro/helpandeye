@@ -116,6 +116,8 @@ public struct GroupState: Codable, Equatable, Sendable {
         public var useDistance = false
         public var redInterval: TimeInterval = 120
         public var amberInterval: TimeInterval = 900
+        /// The coordinator's own words for buttons, by `ButtonWords` key; the app's own otherwise.
+        public var buttonWords: [String: String]? = nil
         public init() {}
     }
 
@@ -327,6 +329,8 @@ public enum Joining {
         public let groupName: String
         public let coordinatorKey: Data
         public let token: Data
+        /// Chosen by the coordinator who invites, not by the person joining.
+        public var role: Member.Role? = nil
     }
 
     public struct JoinRequest: Codable, Equatable, Sendable {
@@ -345,28 +349,41 @@ public enum Joining {
         public let sealed: Data
     }
 
-    public enum Failure: Error, Equatable { case wrongToken, wrongGroup, cannotOpen, badCode, groupFull }
+    public enum Failure: Error, Equatable { case wrongToken, wrongGroup, cannotOpen, badCode, groupFull, otherVersion }
 
-    public static func invitation(for group: GroupState, coordinator: DeviceIdentity) -> Invitation {
-        Invitation(groupID: group.secrets.groupID, groupName: group.name, coordinatorKey: coordinator.publicKey, token: randomBytes(16))
+    /// Which of the codes a piece of text holds, so a wrong one can be named.
+    public enum Kind: Equatable, Sendable { case invitation, request, welcome }
+
+    public static func invitation(for group: GroupState, coordinator: DeviceIdentity, role: Member.Role? = nil) -> Invitation {
+        Invitation(groupID: group.secrets.groupID, groupName: group.name, coordinatorKey: coordinator.publicKey, token: randomBytes(16), role: role)
     }
 
     public static func request(_ invite: Invitation, name: String, call: Bool, respond: Bool, phone: String? = nil, me: DeviceIdentity) -> JoinRequest {
-        JoinRequest(token: invite.token, name: name, wantsToCall: call, wantsToRespond: respond, publicKey: me.publicKey,
-                    phone: phone, signingKey: me.signingPublicKey)
+        let call = invite.role.map { $0 == .caller || $0 == .both } ?? call
+        let respond = invite.role.map { $0 != .caller } ?? respond
+        return JoinRequest(token: invite.token, name: name, wantsToCall: call, wantsToRespond: respond, publicKey: me.publicKey,
+                           phone: phone, signingKey: me.signingPublicKey)
+    }
+
+    public static func kind(of code: String) -> Kind? {
+        if (try? decode(Welcome.self, from: code)) != nil { return .welcome }
+        if (try? decode(JoinRequest.self, from: code)) != nil { return .request }
+        if (try? decode(Invitation.self, from: code)) != nil { return .invitation }
+        return nil
     }
 
     /// Adds the member and seals the group for them. Run on the coordinator's phone.
     public static func admit(_ request: JoinRequest, to group: inout GroupState, invite: Invitation, coordinator: DeviceIdentity) throws -> Welcome {
         guard request.token == invite.token else { throw Failure.wrongToken }
         guard invite.groupID == group.secrets.groupID else { throw Failure.wrongGroup }
-        let role: Member.Role = request.wantsToCall && request.wantsToRespond ? .both : (request.wantsToCall ? .caller : .responder)
+        // The invitation's role stands, whatever the request says.
+        let role: Member.Role = invite.role ?? (request.wantsToCall && request.wantsToRespond ? .both : (request.wantsToCall ? .caller : .responder))
         let me = group.members.first { $0.publicKey == coordinator.publicKey }?.number
         guard let number = group.nextMemberNumber(by: me) else { throw Failure.groupFull }
         group.membershipVersion += 1
         group.highestMember = max(group.highestMember, number)
         group.members.append(Member(number: number, name: request.name, role: role, publicKey: request.publicKey,
-                                    unit: request.wantsToCall ? group.nextUnit(by: me) : nil, phone: request.phone,
+                                    unit: role == .caller || role == .both ? group.nextUnit(by: me) : nil, phone: request.phone,
                                     signingKey: request.signingKey))
         let box = try seal(JSONEncoder().encode(group), to: request.publicKey, from: coordinator, context: invite.token)
         return Welcome(groupID: group.secrets.groupID, memberNumber: number, sealed: box)
@@ -417,10 +434,27 @@ public enum Joining {
         prefix + (try JSONEncoder().encode(value)).base64EncodedString()
     }
 
+    /// Reads a code wherever it sits in the text, as a message app may add words around it or
+    /// break it across lines.
     public static func decode<T: Decodable>(_ type: T.Type, from code: String) throws -> T {
-        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix(prefix), let data = Data(base64Encoded: String(trimmed.dropFirst(prefix.count))) else { throw Failure.badCode }
-        return try JSONDecoder().decode(type, from: data)
+        guard let start = code.range(of: prefix) else {
+            throw code.contains(":") && code.uppercased().contains("HELPANDI") ? Failure.otherVersion : Failure.badCode
+        }
+        // The code may be broken across lines and followed by other words: try the longest run of
+        // pieces that reads as a code.
+        let isCode: (Character) -> Bool = { $0.isASCII && ($0.isLetter || $0.isNumber || "+/=".contains($0)) }
+        var pieces: [Substring] = []
+        for piece in code[start.upperBound...].split(whereSeparator: \.isWhitespace) {
+            let usable = piece.prefix(while: isCode)
+            if !usable.isEmpty { pieces.append(usable) }
+            if usable.count < piece.count { break }
+        }
+        for n in stride(from: pieces.count, through: 1, by: -1) {
+            if let data = Data(base64Encoded: pieces.prefix(n).joined()), let value = try? JSONDecoder().decode(type, from: data) {
+                return value
+            }
+        }
+        throw Failure.badCode
     }
 }
 

@@ -13,10 +13,14 @@ struct CallView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                content.padding()
-                    // A tap on any empty part of the screen puts the keyboard away.
-                    .background(Color.clear.contentShape(Rectangle()).onTapGesture { hideKeyboard() })
+            GeometryReader { screen in
+                ScrollView {
+                    // At least a screen tall, so the buttons sit at the bottom within thumb's reach;
+                    // taller when the text is large, and then it scrolls.
+                    content.padding().frame(minHeight: screen.size.height)
+                        // A tap on any empty part of the screen puts the keyboard away.
+                        .background(Color.clear.contentShape(Rectangle()).onTapGesture { hideKeyboard() })
+                }
             }
             .keyboardDismissable()
             .toolbar(.hidden, for: .navigationBar)
@@ -40,20 +44,21 @@ struct CallView: View {
     private var content: some View {
         VStack(spacing: 16) {
             if let r = model.current { StatusCard(request: r, composingSMS: $composingSMS) }
-            Button { press(.red) } label: {
-                // Scales with the reader's text size, shrinking only if it would not fit.
-                Text("Come now").font(.largeTitle.weight(.heavy)).minimumScaleFactor(0.5).frame(maxWidth: .infinity, minHeight: 220)
+            if let r = model.current, r.colour != .green, r.status != .notSent {
+                FollowUps(request: r)
             }
-            .buttonStyle(CallButtonStyle(colour: .red))
-            .accessibilityHint("Asks your responders to come now")
+            Spacer(minLength: 0)
             // Side by side when they fit; one above the other at large text sizes.
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 16) { amber; green }
                 VStack(spacing: 16) { amber; green }
             }
-            if let r = model.current, r.colour != .green, r.status != .notSent {
-                FollowUps(request: r)
+            // The most urgent button is the largest and the lowest, nearest the thumb.
+            Button { press(.red) } label: {
+                Text(Colour.red.label).font(.largeTitle.weight(.heavy)).frame(maxWidth: .infinity, minHeight: 180)
             }
+            .buttonStyle(CallButtonStyle(colour: .red))
+            .accessibilityHint("Asks your responders to come now")
             NotA999Notice()
         }
     }
@@ -71,7 +76,7 @@ func hideKeyboard() {
 extension CallView {
     private var amber: some View {
         Button { press(.amber) } label: {
-            Text("Come when convenient").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
+            Text(Colour.amber.label).font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
         }
         .buttonStyle(CallButtonStyle(colour: .amber))
         .accessibilityHint("Asks your responders to come when they can")
@@ -79,7 +84,7 @@ extension CallView {
 
     private var green: some View {
         Button { press(.green) } label: {
-            Text("I'm OK now").font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
+            Text(Colour.green.label).font(.title3.bold()).frame(maxWidth: .infinity, minHeight: 90)
         }
         .buttonStyle(CallButtonStyle(colour: .green))
         .accessibilityHint("Tells your responders you are all right")

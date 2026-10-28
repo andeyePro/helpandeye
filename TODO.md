@@ -19,5 +19,10 @@
 
 ## Open (work)
 
+- [ ] **Responders' own key, one message for all of them** - proposed 2026-10-28, wording of decision 12 awaiting Martin: personal content sealed once with a key only responders hold and sent as one binary channel message, instead of one text-encoded direct message per responder. Positions as a change from the last position each responder is known to have received.
+- [ ] **Responders in more than one group** - Martin, 2026-10-28: "It would be useful if responders at least could be members of multiple groups."
+- [ ] **Group settings reach members at once** - button words and the relay address now reach members only when they next join or scan a key update; every one of the 15 frame kinds is in use, so this needs an extended frame kind.
+- [ ] **A default relay** - once a relay is deployed, new groups could use it without the coordinator entering an address.
+- [ ] **Watch uses the group's button words** - the watch still shows the standard words.
 - [ ] Name callers in pushes: built (`app/helpandeyeNotify`), but needs signing with a shared keychain group. Set `HelpAKeychainGroup` in both Info.plist sections of `app/project.yml` to `$(AppIdentifierPrefix)com.andeye.help.shared`, and add the matching keychain-access-groups entitlement to both targets.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4).

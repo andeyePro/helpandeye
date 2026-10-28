@@ -2,6 +2,10 @@
 
 Done work, newest first. Open items live in the issue tracker.
 
+## 2026-10-28
+
+- [x] **Joining fixed up, coordinator chooses roles, button words editable, Come now at the bottom** - from Martin's tries at joining between his iPhone and Mac. The coordinator now picks what a new member will do (call for help, respond, or both) before the invitation is shown; the invitation carries it and the coordinator's phone enforces it, whatever the request says. Codes pasted from a message are read even with words around them or broken across lines, and a wrong code is named (the invitation again, a member's code, a welcome, or an older version's code) instead of a bare "not a code". The joiner's place in the three steps, and their name and number, are kept if they leave the screen, with a Start again button. Coordinators get Advanced settings with the internet route and the words on every button (decision 15; members get new words when they next join or scan a key update). The Help screen puts Come now at the bottom, below the other two, nearest the thumb. 174 core tests pass.
+
 ## 2026-10-27
 
 - [ ] **Accessibility audit in progress** - a UI test (`app/helpandeyeUITests`) now walks every screen a new coordinator sees, saves a screenshot of each and runs Apple's accessibility audit; `tests/screens.sh` runs it on a small and a large iPhone and an iPad, in light and dark mode, at the normal and the largest text size. Fixed from its first findings: buttons and headings were below contrast (new action blue at 6.5:1, links a lighter blue in dark mode, warnings in a darker red, call buttons darkened, amber with black words), greyed-out buttons replaced by ones that say what is missing, text boxes labelled above the box and for VoiceOver, the status card made solid. Still open: remaining contrast and Dynamic Type findings on the Help, Group and Box screens.
