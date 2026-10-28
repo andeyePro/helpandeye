@@ -227,7 +227,11 @@ struct GroupView: View {
                 if model.me?.role == .coordinator {
                     Section(header: Header("For coordinators")) {
                         NavigationLink("Profiles") { ProfilesView() }
+                        NavigationLink("Log") { LogView() }
                         NavigationLink("Advanced settings") { AdvancedSettingsView() }
+                        if let c = model.engine.activity.lastSettingsChange {
+                            Text("Latest settings change, \(c.at.formatted(date: .abbreviated, time: .shortened)): \(c.text).")
+                        }
                         if model.group?.needsSecondCoordinator == true {
                             Text("Someone here sees only the three buttons, and the group has one coordinator. Consider making a second coordinator, so their settings can still be changed if your phone is lost.")
                         }
@@ -477,4 +481,33 @@ struct CheckInSection: View {
     }
 
     private func date(_ m: Int) -> Date { Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date())! }
+}
+
+/// The group's log, on a coordinator's phone: newest first, and exportable as text.
+struct LogView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        let log = model.engine.activity.log
+        List {
+            Section {
+                Toggle("Keep a log for this group", isOn: Binding(get: { model.group?.policy.keepsLog ?? true },
+                                                                  set: { on in model.updateGroup { $0.policy.keepsLog = on } }))
+                Text("Each coordinator's phone keeps its own log of calls, acknowledgements, closes and settings changes, encrypted on the phone. Settings changes are always shown to coordinators.")
+                if !log.entries.isEmpty {
+                    ShareLink(item: log.text()) { WrappingLabel("Export the log", systemImage: "square.and.arrow.up") }
+                }
+            }
+            Section(header: Header("Newest first")) {
+                if log.entries.isEmpty { Text("Nothing logged yet.") }
+                ForEach(Array(log.entries.reversed().enumerated()), id: \.offset) { _, e in
+                    VStack(alignment: .leading) {
+                        Text(e.at.formatted(date: .abbreviated, time: .standard)).font(.callout)
+                        Text(e.text)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Log")
+    }
 }

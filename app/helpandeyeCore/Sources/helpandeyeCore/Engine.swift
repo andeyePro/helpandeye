@@ -132,6 +132,10 @@ public struct Activity: Codable, Sendable {
     public var notices: [Notice: CoordinatorAlert] = [:]
     /// "I'm OK" calls already alerted once; they are never alerted again.
     public var alertedGreens: Set<IncomingRequest.Key> = []
+    /// On a coordinator's phone: the group's log, and the latest settings change, which is shown
+    /// to them even with the log off.
+    public var log = GroupLog()
+    public var lastSettingsChange: GroupLog.Entry?
 
     public init() {}
 }
@@ -241,6 +245,7 @@ public final class HelpEngine: ObservableObject {
         setState(s)
         followProfileCheckIns()
         guard actsAsCoordinator else { return }
+        if settingsChanged { logSettings(by: s.me, s.group.settings.changes(from: old.settings), old: old.settings) }
         if settingsChanged, let f = s.group.settingsFrame(as: s.me, identity: identity) {
             spawn { _ = await self.sendOptional(f) }
         }
@@ -431,6 +436,7 @@ public final class HelpEngine: ObservableObject {
         for route in routes { r.update(route, .sending) }
         activity.outgoing.append(r)
         trimOutgoing()
+        log("\(describe(r.unit, r.number, colour)) pressed")
         if colour == .green { activity.greens.append(r.createdAt) }
         let frame = r.callFrame
         for route in routes {
@@ -455,7 +461,15 @@ public final class HelpEngine: ObservableObject {
 
     private func updateOutgoing(_ r: OutgoingRequest, _ route: Route, _ state: RouteState) {
         guard let i = activity.outgoing.firstIndex(where: { $0.number == r.number && $0.unit == r.unit }) else { return }
+        let before = activity.outgoing[i].routes[route]
         activity.outgoing[i].update(route, state)
+        guard before != state else { return }
+        let how = route == .internet ? "the internet" : "the local radio"
+        switch state {
+        case .sent: log("\(describe(r.unit, r.number, r.colour)) sent over \(how)")
+        case let .failed(why): log("\(describe(r.unit, r.number, r.colour)) not sent over \(how): \(why)")
+        case .sending: break
+        }
     }
 
     public func add(_ category: CallCategory) {
@@ -533,13 +547,46 @@ public final class HelpEngine: ObservableObject {
     /// Records a settled call on the caller's own list and on a responder's, where calm or
     /// closed it stops alerting urgently.
     private func settleCall(_ key: IncomingRequest.Key, _ s: Settled, via route: Route?) {
-        if let i = activity.outgoing.firstIndex(where: { $0.unit == key.unit && $0.number == key.request }) {
-            activity.outgoing[i].settle(s)
+        let mine = activity.outgoing.firstIndex { $0.unit == key.unit && $0.number == key.request }
+        let before = mine.map { activity.outgoing[$0].settled } ?? activity.inbox.requests[key]?.settled
+        if let i = mine { activity.outgoing[i].settle(s) }
+        if me?.canRespond == true, key.unit != me?.unit, case .updated = activity.inbox.settle(key, s, via: route, at: now()) {
+            alerts.cancel(key)
+            scheduleAlerts(for: key)
         }
-        guard me?.canRespond == true, key.unit != me?.unit,
-              case .updated = activity.inbox.settle(key, s, via: route, at: now()) else { return }
-        alerts.cancel(key)
-        scheduleAlerts(for: key)
+        let after = mine.map { activity.outgoing[$0].settled } ?? activity.inbox.requests[key]?.settled
+        guard let a = after, a != before else { return }
+        let call = describe(key.unit, key.request, mine.map { activity.outgoing[$0].colour } ?? activity.inbox.requests[key]?.colour)
+        let who = name(ofMember: a.by)
+        switch a.state {
+        case .callerOK: log("\(who) said they are OK after \(call)")
+        case .closedByCaller: log("\(who) closed \(call)")
+        case .closedWithConsent: log("\(who) closed \(call), with the caller's agreement")
+        case .closedWithReason: log("\(who) closed \(call)" + (a.reason.isEmpty ? ", with a reason heard over the internet only" : ": \(a.reason)"))
+        }
+    }
+
+    // MARK: The log
+
+    /// Adds to the group's log on a coordinator's phone, while the group keeps one.
+    private func log(_ text: String) {
+        guard actsAsCoordinator, group?.policy.keepsLog == true else { return }
+        activity.log.add(text, at: now())
+    }
+
+    /// A settings change is logged (also the one that switches the log off) and kept to show the
+    /// coordinators, even with the log off.
+    private func logSettings(by signer: UInt16, _ changes: [String], old: GroupSettings) {
+        guard actsAsCoordinator, !changes.isEmpty else { return }
+        let entry = GroupLog.Entry(at: now(), text: "\(name(ofMember: signer)) \(changes.joined(separator: ", "))")
+        activity.lastSettingsChange = entry
+        if old.policy.keepsLog || group?.policy.keepsLog == true { activity.log.add(entry.text, at: entry.at) }
+    }
+
+    /// "Pat's Help call 3", in the caller's own words for the button.
+    private func describe(_ unit: UInt32, _ request: UInt16, _ colour: Colour?) -> String {
+        let words = colour.map { ButtonWords.words($0, in: group?.profile(ofUnit: unit)) } ?? "call"
+        return "\(name(ofUnit: unit))'s \(words) call \(request)"
     }
 
     /// Typed text and position go only to responders (decision 12), sealed once for all of them;
@@ -793,6 +840,11 @@ public final class HelpEngine: ObservableObject {
         case let .ack(unit, request, who, at, _):
             // Only a current responder's own signature counts (decision 6, AGENTS.md).
             guard group?.acceptsAck(frame) == true else { return }
+            let k = IncomingRequest.Key(unit: unit, request: request)
+            if activity.inbox.requests[k]?.acknowledgedBy.contains(who) != true,
+               activity.outgoing.first(where: { $0.unit == unit && $0.number == request })?.acknowledgedBy.contains(who) != true {
+                log("\(name(ofMember: who)) acknowledged \(describe(unit, request, activity.inbox.requests[k]?.colour))")
+            }
             activity.lastAnswered[who] = max(activity.lastAnswered[who] ?? .distantPast, Date(timeIntervalSince1970: TimeInterval(at)))
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
@@ -851,8 +903,11 @@ public final class HelpEngine: ObservableObject {
             }
             return
         case .groupSettings:
-            guard var s = saved, s.group.apply(settings: frame) else { return }
+            guard var s = saved else { return }
+            let old = s.group.settings
+            guard s.group.apply(settings: frame) else { return }
             setState(s)
+            if case let .groupSettings(signer, _, _, _) = frame { logSettings(by: signer, s.group.settings.changes(from: old), old: old) }
             followProfileCheckIns()
             return
         case .forResponders:
@@ -885,7 +940,9 @@ public final class HelpEngine: ObservableObject {
         }
         guard me?.canRespond == true else { return }
         switch activity.inbox.receive(frame, via: route, at: now()) {
-        case let .new(key): scheduleAlerts(for: key)
+        case let .new(key):
+            log("\(describe(key.unit, key.request, activity.inbox.requests[key]?.colour)) heard over \(route == .internet ? "the internet" : "the local radio")")
+            scheduleAlerts(for: key)
         case let .updated(key) where activity.inbox.requests[key]?.isOpen == false: alerts.cancel(key)
         case .duplicate:
             // The caller is still sending, so it has not heard an acknowledgement. Pass on the
@@ -916,6 +973,7 @@ public final class HelpEngine: ObservableObject {
               let frame = activity.inbox.acknowledge(key, by: me, at: now(), identity: identity, group: groupID) else { return false }
         activity.lastAnswered[me] = now()
         alerts.cancel(key)
+        log("You acknowledged \(describe(key.unit, key.request, activity.inbox.requests[key]?.colour))")
         sendAck(frame, for: key)
         return true
     }
@@ -1176,6 +1234,7 @@ public final class HelpEngine: ObservableObject {
             let at = UInt32(missed.timeIntervalSince1970)
             if case let .new(key) = activity.inbox.receive(.call(unit: unit, request: 0, colour: .amber, sentAt: at), via: .internet, at: now()) {
                 activity.inbox.receive(.followUp(unit: unit, request: 0, part: 1, category: .missedCheckIn), via: .internet, at: now())
+                log("\(name(ofUnit: unit)) missed a check-in")
                 scheduleAlerts(for: key)
             }
         }
@@ -1212,5 +1271,7 @@ extension Activity {
         boardKeys = try c.value(.boardKeys, or: [:])
         notices = try c.value(.notices, or: [:])
         alertedGreens = try c.value(.alertedGreens, or: [])
+        log = try c.value(.log, or: GroupLog())
+        lastSettingsChange = try c.decodeIfPresent(GroupLog.Entry.self, forKey: .lastSettingsChange)
     }
 }

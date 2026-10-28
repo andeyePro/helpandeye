@@ -347,3 +347,13 @@ Needs phone A (a caller) and phone C (the coordinator). Ringer on phone A switch
 4. On phone A, under Group, Your settings, tap each Hear button.
 
 Pass: in step 1 each choice is heard as named: a soft eeh-ooh, high then low; a buzzer; a chime; nothing for No sound. In step 2 phone A plays the buzzer, then says the words. In step 3 no sound is played, but the words are still spoken and the taps still felt. In step 4 phone A plays its own profile's sounds, with the ringer on silent.
+
+## 39. The log
+
+Needs phone A (a caller), phone B (a responder), and phones C and D (two coordinators), with the internet.
+
+1. On phone A press Help; on phone B acknowledge it; on phone C close it with a reason.
+2. On phone C, under Group, Log, read the entries, then tap Export the log and save it to Files.
+3. On phone D, under Profiles, change a profile's name. Then on phone C, under Log, switch Keep a log for this group off, and press Help again on phone A.
+
+Pass: in step 2 the log lists the call heard, phone B's acknowledgement and phone C's close with its reason, each with the time, newest first, and the exported file has the same lines. In step 3 phone C shows under For coordinators that phone D changed the profile, and the log records it and the log being switched off, but nothing after.
