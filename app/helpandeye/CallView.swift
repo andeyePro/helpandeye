@@ -176,6 +176,8 @@ struct FollowUps: View {
     @State private var problem: String?
     @FocusState private var typing: Bool
     @StateObject private var location = OneShotLocation()
+    /// Whether a route took where the caller is; nil while it is still going.
+    @State private var positionSent: Bool?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -208,14 +210,21 @@ struct FollowUps: View {
                     Button("Send", action: sendNote).buttonStyle(.action)
                 }
                 Button {
-                    location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) }
+                    positionSent = nil
+                    location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) { ok in positionSent = ok } }
                 } label: {
                     Label(location.state == .finding ? "Finding where you are…" : "Share where I am", systemImage: "location.fill")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.secondaryAction)
                 .disabled(location.state == .finding)
-                if location.state == .shared { Text("Where you are was sent.") }
+                if location.state == .shared {
+                    switch positionSent {
+                    case nil: Text("Sending where you are…")
+                    case true?: Text("Where you are was sent.")
+                    case false?: Text("Where you are could not be sent. Try again, or call 999.")
+                    }
+                }
                 if location.state == .denied { Text("Help&I is not allowed to use your location. You can allow it in Settings.") }
                 ForEach(request.notes, id: \.self) { Text("You said: \($0)") }
             } else {

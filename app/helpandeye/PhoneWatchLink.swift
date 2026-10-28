@@ -67,7 +67,11 @@ extension PhoneWatchLink: WCSessionDelegate {
         Task { @MainActor in self.pushStatus() }
     }
     nonisolated func sessionDidBecomeInactive(_ s: WCSession) {}
-    nonisolated func sessionDidDeactivate(_ s: WCSession) { s.activate() }
+    /// Another watch was paired: it has none of what the old one was given, so it gets it all.
+    nonisolated func sessionDidDeactivate(_ s: WCSession) {
+        Task { @MainActor in self.handedOver = nil }
+        s.activate()
+    }
 
     nonisolated func session(_ s: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
         if let unit = message["ackUnit"] as? Int, let request = message["ackRequest"] as? Int {

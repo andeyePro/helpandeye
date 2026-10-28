@@ -46,7 +46,8 @@ export function payload(kind, sealed) {
   return { aps: { "content-available": 1 } };
 }
 
-/// Sends one push. Returns the HTTP status, or 0 if it could not be sent.
+/// Sends one push. Returns the HTTP status, or 0 if it could not be sent. A 400 that says the token
+/// itself is wrong is returned as 410, so callers need one test for "this token is dead".
 export async function push(env, token, kind, { fetchImpl = fetch, now = Date.now(), sealed } = {}) {
   if (!configured(env) || !/^[0-9a-f]{64,200}$/i.test(token.token)) return 0;
   const host = token.sandbox ? "api.sandbox.push.apple.com" : "api.push.apple.com";
@@ -66,6 +67,10 @@ export async function push(env, token, kind, { fetchImpl = fetch, now = Date.now
       },
       body: JSON.stringify(payload(watch ? "quiet" : kind, sealed)),
     });
+    if (res.status === 400) {
+      const reason = (await res.json().catch(() => ({}))).reason;
+      if (reason === "BadDeviceToken" || reason === "DeviceTokenNotForTopic") return 410;
+    }
     return res.status;
   } catch {
     return 0;

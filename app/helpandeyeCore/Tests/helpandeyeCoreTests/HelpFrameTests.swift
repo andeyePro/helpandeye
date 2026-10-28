@@ -87,6 +87,11 @@ final class PersonalContentTests: XCTestCase {
         var d = HelpFrame.position(unit: 1, request: 1, latitudeE7: 0, longitudeE7: 0, accuracy: 1).encoded()
         d.replaceSubrange(7..<11, with: withUnsafeBytes(of: Int32(950_000_000).littleEndian) { Data($0) })
         XCTAssertNil(HelpFrame(d))
+        // The most negative 32-bit value is rejected, not a crash.
+        d.replaceSubrange(7..<11, with: withUnsafeBytes(of: Int32.min.littleEndian) { Data($0) })
+        XCTAssertNil(HelpFrame(d))
+        d.replaceSubrange(7..<11, with: withUnsafeBytes(of: Int32(-900_000_000).littleEndian) { Data($0) })
+        XCTAssertNotNil(HelpFrame(d))
     }
 
     func testResponderSeesNotesAndPosition() {

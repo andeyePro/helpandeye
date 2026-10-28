@@ -26,6 +26,10 @@ not push. The relay cannot read who called, so the push cannot say; the app work
 once awake. Because the push goes to everyone at once, a responder whose turn would come later is
 told early over the internet route: the escalation order still decides the repeated alerts.
 
+The reply to a post is `{"seq": n}`. If a wake was asked for and every push failed in a way that
+trying again could fix, it is `{"seq": n, "woke": false}`; a post with the same `wake` then pushes
+again. Push tokens APNs reports as dead are deleted.
+
 The group's first coordinator owns the group on the relay. The group's ID is made from their key
 (8 random bytes, then the first 8 bytes of SHA-256 over `HELPA-GROUP-1`, those bytes and the
 key), so the group can be registered only by a list naming them as `primary`, whoever sends it.

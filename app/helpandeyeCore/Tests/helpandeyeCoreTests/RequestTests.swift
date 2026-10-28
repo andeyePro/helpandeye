@@ -148,4 +148,14 @@ final class WithdrawnCategoryTests: XCTestCase {
         _ = inbox.receive(locked, via: .internet, at: Date())
         XCTAssertEqual(inbox.requests.values.first?.orderedCategories, [.fallen], "a late copy does not bring it back")
     }
+
+    func testOneHugeCharacterIsCutBetweenCodePoints() {
+        var r = OutgoingRequest(unit: 5, number: 1, colour: .red, createdAt: Date())
+        let huge = "e" + String(repeating: "\u{301}", count: 30)
+        let pieces = r.addNotes("hi " + huge + " there", pieceBytes: 56).compactMap { f -> String? in
+            if case let .note(_, _, _, text) = f { return text } else { return nil }
+        }
+        XCTAssertTrue(pieces.allSatisfy { $0.utf8.count <= 56 })
+        XCTAssertEqual(pieces.joined().unicodeScalars.filter { $0 != " " }.count, ("hi" + huge + "there").unicodeScalars.count)
+    }
 }

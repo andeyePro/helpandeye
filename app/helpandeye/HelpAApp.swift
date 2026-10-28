@@ -58,6 +58,13 @@ struct RootView: View {
                 // A profile can leave a caller only the three buttons (app spec, Profiles).
                 if me.role == .caller && model.profile.hidesSettings { CallView() } else { tabs(me) }
             }
+        } else if !model.others.isEmpty {
+            // Removed from the first group but still in others: still respond in those.
+            TabView {
+                RespondView().tabItem { Label("Respond", systemImage: "bell.fill") }
+                    .badge(model.engines.reduce(0) { $0 + $1.activity.inbox.requests.values.filter(\.isOpen).count })
+                WelcomeView().tabItem { Label("Group", systemImage: "person.3.fill") }
+            }
         } else {
             WelcomeView()
         }

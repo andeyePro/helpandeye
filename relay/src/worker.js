@@ -1,4 +1,4 @@
-import { push } from "./apns.js";
+import { configured, push } from "./apns.js";
 import { GroupRelay, Meter as MeterLogic, RelayError, unb64 } from "./relay.js";
 
 // Routes:
@@ -55,14 +55,20 @@ export class Group {
       }
       if (kind === "messages" && request.method === "POST") {
         const msg = JSON.parse(body);
+        if (!msg || typeof msg !== "object") throw new RelayError(400, "bad message");
         const wakes = msg.wake === "call" || msg.wake === "quiet";
         const mayWake = await this.relay.limit(key, wakes);
         const seq = await this.relay.post(key, msg.sealed);
-        if (wakes && mayWake) {
+        let woke;
+        if (wakes && mayWake && configured(this.env)) {
           const targets = await this.relay.pushTargets(key);
-          this.state.waitUntil(Promise.all(targets.map((t) => push(this.env, t, msg.wake, { sealed: msg.sealed }))));
+          const results = await Promise.all(targets.map((t) => push(this.env, t, msg.wake, { sealed: msg.sealed })));
+          const dead = targets.filter((_, i) => results[i] === 410).map((t) => t.token);
+          if (dead.length) await this.relay.dropPushTokens(dead);
+          // Told only when it failed and trying again could help; a client resend wakes again.
+          if (results.some((s) => s === 0 || s === 429 || s >= 500) && !results.some((s) => s >= 200 && s < 300)) woke = false;
         }
-        return json(200, { seq });
+        return json(200, woke === false ? { seq, woke } : { seq });
       }
       if (kind === "push" && request.method === "PUT") {
         await this.relay.setPushToken(key, JSON.parse(body));

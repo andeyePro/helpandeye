@@ -53,8 +53,9 @@ Every PR description must state:
   replace 999 or telecare. Do not remove or soften that wording.
 - **No stored personal data on air.** Red, amber, green and anything on the group channel carry
   a unit number only: never a name, address or medical detail. The only personal content allowed
-  on air is short text the caller typed and their position, sent after the red or amber has gone,
-  as encrypted direct messages to each responder, and only when there is airtime to spare.
+  on air is what the caller chose to send (short text they typed, a choice such as Fallen, and
+  their position), sent after the red or amber has gone, sealed once for all responders with a
+  key only responders hold (decision 12), and only when there is airtime to spare.
 - **Stay within licence-exempt limits.** 868 MHz use must stay within Ofcom IR 2030 power and
   duty-cycle limits. No change may raise transmit power or duty cycle beyond them.
 - **No shared secrets.** Never bake a password, key or token into firmware or an app build.

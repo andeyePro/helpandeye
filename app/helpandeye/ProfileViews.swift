@@ -145,6 +145,7 @@ struct ProfilesView: View {
 
     var body: some View {
         Form {
+            if let problem = model.engine.settingsProblem { Label(problem, systemImage: "exclamationmark.triangle.fill") }
             Section(header: Header("Profiles")) {
                 ForEach(model.group?.policy.profiles ?? []) { p in
                     NavigationLink { ProfileEditor(id: p.id) } label: {
@@ -191,6 +192,7 @@ struct ProfileEditor: View {
 
     var body: some View {
         Form {
+            if let problem = model.engine.settingsProblem { Label(problem, systemImage: "exclamationmark.triangle.fill") }
             Section(header: Header("Name")) {
                 LabeledField(label: "Profile name, such as Living alone", text: $p.name)
             }

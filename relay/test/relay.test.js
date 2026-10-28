@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { b64, GroupRelay, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS } from "../src/relay.js";
+import { b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS } from "../src/relay.js";
 
 // Behaves like Durable Object storage for the calls the relay makes.
 class MapStorage {
@@ -26,6 +26,7 @@ async function phone() {
   };
 }
 
+const b64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const rejects = (p, status) => assert.rejects(p, (e) => e instanceof RelayError && e.status === status);
 
 test("a signed request authenticates; tampering, replay and stale clocks do not", async () => {
@@ -136,6 +137,15 @@ test("a first read can ask for the last few messages, and the cursor moves past 
   assert.equal(page.next, 5, "past the expired ones");
 });
 
+test("a signed stranger leaves no rate record", async () => {
+  const storage = new MapStorage();
+  const relay = new GroupRelay(storage);
+  const coord = await phone(), stranger = await phone();
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }], primary: coord.key });
+  await rejects(relay.limit(stranger.key, true), 403);
+  assert.equal(storage.m.has("r:" + stranger.key), false);
+});
+
 test("posts and pushes are limited per phone per minute, and old push tokens are deleted", async () => {
   let now = 0;
   const storage = new MapStorage();
@@ -173,11 +183,6 @@ test("lists add people; only the owner's named removals take anyone off, for goo
   await relay.setMembers(second.key, { generation: 4, members: [c(owner), c(second), m(x), m(y)] });
   assert.equal((await keys()).includes(x.key), false, "a removed key listed again stays off");
   await rejects(relay.since(x.key, 0), 403);
-  // A second coordinator registering first does not become the owner: the list names the first.
-  const fresh = new GroupRelay(new MapStorage());
-  await fresh.setMembers(second.key, { generation: 1, members: [c(owner), c(second), m(x)], primary: owner.key });
-  await fresh.setMembers(owner.key, { generation: 2, members: [c(owner), c(second)], removed: [x.key] });
-  assert.equal((await fresh.members()).members.some((e) => e.key === x.key), false);
   // Only the owner sets roles; nobody else can make someone a coordinator.
   await relay.setMembers(second.key, { generation: 5, members: [c(owner), c(second), c(y)] });
   assert.equal((await relay.members()).members.find((e) => e.key === y.key).role, "member");
@@ -196,10 +201,13 @@ test("only the first coordinator, whose key the group ID is made from, can regis
   assert.equal(await ownsGroup(id, member.key), false);
   // A member who knows the ID cannot register it naming themselves.
   await rejects(new GroupRelay(new MapStorage()).setMembers(member.key, { generation: 1, members: [c(member)], primary: member.key }, id), 403);
-  // The second coordinator can register it, but only naming the real first coordinator.
+  // Nor can someone who lists themselves as a coordinator beside the real first one, with or without the ID.
+  const first = new GroupRelay(new MapStorage());
+  await rejects(first.setMembers(second.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key }, id), 403);
+  await rejects(first.setMembers(second.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key }), 403);
+  assert.equal(await first.members(), null);
   const relay = new GroupRelay(new MapStorage());
-  await relay.setMembers(second.key, { generation: 1, members: [c(owner), c(second), c(member)], primary: owner.key }, id);
-  assert.equal((await relay.members()).members.find((e) => e.key === member.key).role, "member", "only the owner and signer keep listed roles");
+  await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second), c(member)], primary: owner.key }, id);
   await rejects(relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second)], primary: second.key }, id), 409);
 });
 
@@ -216,6 +224,47 @@ test("removing a coordinator takes off people only they added, and owner roles n
   await relay.setMembers(owner.key, { generation: 5, members: [c(owner), m(z)] });
   await relay.setMembers(owner.key, { generation: 4, members: [c(owner), c(z)] });
   assert.equal((await relay.members()).members.find((e) => e.key === z.key).role, "member", "a delayed older list does not promote");
+});
+
+test("people a removed coordinator alone added stay off a stale list; only the owner brings them back", async () => {
+  const relay = new GroupRelay(new MapStorage());
+  const owner = await phone(), second = await phone(), third = await phone(), y = await phone();
+  const c = (k) => ({ key: k.key, role: "coordinator" }), m = (k) => ({ key: k.key, role: "member" });
+  const has = async (k) => (await relay.members()).members.some((e) => e.key === k.key);
+  await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second), c(third)], primary: owner.key });
+  await relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second), c(third), m(y)] });
+  await relay.setMembers(owner.key, { generation: 3, members: [c(owner), c(third)], removed: [second.key] });
+  assert.equal(await has(y), false, "went with the coordinator who added them");
+  await relay.setMembers(third.key, { generation: 4, members: [c(owner), c(third), m(y)] });
+  assert.equal(await has(y), false, "another coordinator's stale list does not bring them back");
+  await relay.setMembers(owner.key, { generation: 5, members: [c(owner), c(third), m(y)] });
+  assert.equal(await has(y), true, "the owner can");
+  await relay.setMembers(owner.key, { generation: 6, members: [c(owner), c(third)], removed: [y.key] });
+  await relay.setMembers(owner.key, { generation: 7, members: [c(owner), c(third), m(y)] });
+  assert.equal(await has(y), false, "an explicit removal is still for good");
+});
+
+test("malformed lists and base64 are refused with 400, not thrown", async () => {
+  const relay = new GroupRelay(new MapStorage());
+  const owner = await phone();
+  const c = (k) => ({ key: k.key, role: "coordinator" });
+  await rejects(relay.setMembers(owner.key, { generation: 1, members: [c(owner), null], primary: owner.key }), 400);
+  await rejects(relay.setMembers(owner.key, { generation: 1, members: [c(owner), 7], primary: owner.key }), 400);
+  await rejects(relay.setMembers(owner.key, { generation: 1, members: [c(owner)], removed: [null], primary: owner.key }), 400);
+  await rejects(relay.setMembers(owner.key, "x"), 400);
+  await relay.setMembers(owner.key, { generation: 1, members: [c(owner)], primary: owner.key });
+  await rejects(relay.post(owner.key, "A"), 400);
+  assert.equal(await verify(owner.key, "A", new Uint8Array(1)), false);
+});
+
+test("a public key has one spelling: aliases that differ only in unused bits are refused", async () => {
+  const owner = await phone();
+  assert.equal(isKey(owner.key), true);
+  const alias = owner.key.slice(0, 42) + b64Alphabet[b64Alphabet.indexOf(owner.key[42]) ^ 1] + "=";
+  assert.notEqual(alias, owner.key);
+  assert.equal(b64(Uint8Array.from(atob(alias), (ch) => ch.charCodeAt(0))), owner.key, "decodes to the same bytes");
+  assert.equal(isKey(alias), false);
+  await rejects(new GroupRelay(new MapStorage()).setMembers(owner.key, { generation: 1, members: [{ key: alias, role: "coordinator" }], primary: alias }), 400);
 });
 
 test("keys must be keys, and the list has a size limit", async () => {

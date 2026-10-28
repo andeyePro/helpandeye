@@ -18,8 +18,9 @@ struct HelpAWatchApp: App {
 
 /// Lets the relay wake the watch when its phone is out of reach, so calls are heard with the app
 /// closed.
-final class WatchDelegate: NSObject, WKApplicationDelegate {
+final class WatchDelegate: NSObject, WKApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching() {
+        UNUserNotificationCenter.current().delegate = self
         WKApplication.shared().registerForRemoteNotifications()
         Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) }
     }
@@ -31,6 +32,11 @@ final class WatchDelegate: NSObject, WKApplicationDelegate {
     func didReceiveRemoteNotification(_ info: [AnyHashable: Any]) async -> WKBackgroundFetchResult {
         await WatchModel.shared.wake()
         return .newData
+    }
+
+    /// An alert still sounds and shows with Help&I open, as it does with it closed.
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
     }
 }
 

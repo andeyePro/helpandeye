@@ -135,6 +135,8 @@ final class RelayModel {
     var isConfigured = false
     var lastProblem: String?
     var sent: [(HelpFrame, RelayWake?)] = []
+    /// The relay address this phone was using when it sent each frame.
+    var sentVia: [String?] = []
     var configured = 0
     private var group: GroupState?
     private var identity: DeviceIdentity?
@@ -157,6 +159,7 @@ final class RelayModel {
         guard isConfigured, let air, let me = phone, let key else { return "No internet" }
         guard air.relay.isMember(key) else { return "Relay refused it (403)" }
         sent.append((frame, wake))
+        sentVia.append(group?.relayURL)
         for p in air.phones where p !== me && p.relay.isConfigured && p.relay.key.map(air.relay.isMember) == true {
             air.queue.append((me, p, { p.engine.receive(frame, via: .internet) }))
         }
@@ -413,15 +416,21 @@ final class RelayModel {
         caller.engine.press(.red)
         await air.run()
         XCTAssertNil(caller.engine.addNote("Back door is open"))
-        caller.engine.sharePosition(latitude: 55.4, longitude: -4.5, accuracy: 10)
+        caller.engine.add(.fallen)
+        var sent: Bool?
+        caller.engine.sharePosition(latitude: 55.4, longitude: -4.5, accuracy: 10) { sent = $0 }
         await air.run()
+        XCTAssertEqual(sent, true, "the caller is told only once a route took it")
         XCTAssertFalse(air.groupSends.contains { !$0.mayGoOnGroupChannel })
         let sealed = air.groupSends.filter { if case .forResponders = $0 { return true }; return false }
-        XCTAssertEqual(sealed.count, 2, "each went once for all responders, sealed")
+        XCTAssertEqual(sealed.count, 3, "each went once for all responders, sealed: what was typed, what was chosen, where")
+        XCTAssertFalse(air.groupSends.contains { if case .followUp(_, _, _, .fallen) = $0 { return true }; return false },
+                       "a caller in the group cannot read that someone has fallen")
         XCTAssertTrue(air.directSends.isEmpty, "not one copy per responder")
         XCTAssertFalse(air.groupSends.contains { $0.encoded().range(of: Data("Back door".utf8)) != nil })
         XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.orderedNotes, ["Back door is open"])
         XCTAssertNotNil(responder.engine.activity.inbox.requests[key]?.position)
+        XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.orderedCategories, [.fallen])
         XCTAssertEqual(coordinator.engine.activity.inbox.requests[key]?.orderedNotes, ["Back door is open"], "every responder reads it")
         XCTAssertNil(caller.engine.group?.secrets.responderPrivateKey, "a caller holds no responders' key")
         for f in sealed { XCTAssertNil(ForResponders.open(f, in: caller.engine.group!, at: clock.now), "so another caller cannot read it") }
@@ -455,7 +464,8 @@ final class RelayModel {
         XCTAssertNil(ForResponders.open(claimed, in: coordinator.engine.group!, at: clock.now), "nor by naming the caller")
     }
 
-    func testDuringAChangeoverRespondersNotYetUpdatedStillRead() throws {
+    func testDuringAChangeoverOnlyTheNewKeyReadsWhatIsTyped() throws {
+        // A removed responder keeps the old key, so nothing new is sealed with it.
         let old = responder.engine.group!
         var updated = caller.engine.group!
         updated.previousSecrets = updated.secrets
@@ -463,10 +473,9 @@ final class RelayModel {
         updated.secrets = updated.secrets.rotated()
         let note = HelpFrame.note(unit: caller.engine.me!.unit!, request: 1, part: 1, typed: "Back door")
         let sealed = ForResponders.seal(note, from: caller.identity, as: caller.engine.saved!.me, in: updated.copy(for: .caller), at: clock.now)
-        XCTAssertEqual(sealed.count, 2, "once with each responders' key in use")
-        XCTAssertEqual(sealed.compactMap { ForResponders.open($0, in: old, at: self.clock.now) }, [note], "the old key still reads it")
-        let after = ForResponders.seal(note, from: caller.identity, as: caller.engine.saved!.me, in: updated, at: clock.now.addingTimeInterval(2 * 86_400))
-        XCTAssertEqual(after.count, 1, "and only the new key once the changeover is over")
+        XCTAssertEqual(sealed.count, 1)
+        XCTAssertTrue(sealed.compactMap { ForResponders.open($0, in: old, at: self.clock.now) }.isEmpty, "the old key reads nothing")
+        XCTAssertEqual(sealed.compactMap { ForResponders.open($0, in: updated, at: self.clock.now) }, [note], "an updated responder does")
     }
 
     func testACoordinatorsSettingsReachEveryoneAtOnce() async {
@@ -483,6 +492,35 @@ final class RelayModel {
         await air.run()
         caller.engine.receive(old, via: .internet)
         XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.profile), "Help")
+    }
+
+    func testSettingsTooBigToSendAreNotKept() {
+        let before = coordinator.engine.group!.settingsVersion
+        coordinator.engine.updateGroup { g in
+            for i in 1...40 {
+                var p = Profile(id: UInt8(i), name: UUID().uuidString)
+                p.okWords = (0..<6).map { _ in UUID().uuidString }.joined()
+                g.policy.profiles.append(p)
+            }
+        }
+        XCTAssertEqual(coordinator.engine.group!.policy.profiles.count, 1)
+        XCTAssertEqual(coordinator.engine.group!.settingsVersion, before)
+        XCTAssertNotNil(coordinator.engine.settingsProblem)
+        coordinator.engine.updateGroup { ButtonWords.set("Please come", for: ButtonWords.key(.red), in: &$0.policy.profiles[0]) }
+        XCTAssertNil(coordinator.engine.settingsProblem)
+    }
+
+    func testANewRelayAddressGoesOverTheOldOneFirst() async {
+        for p in air.phones { p.relay.isConfigured = true }
+        await relaySetUp()
+        coordinator.engine.setRelay("https://old.example")
+        await air.run()
+        let publishes = coordinator.relay.publishes, before = coordinator.relay.sent.count
+        coordinator.engine.setRelay("https://new.example")
+        await air.run()
+        XCTAssertEqual(coordinator.relay.sentVia.dropFirst(before).first, "https://old.example", "members still looking there hear of the move")
+        XCTAssertEqual(caller.engine.group?.relayURL, "https://new.example")
+        XCTAssertGreaterThan(coordinator.relay.publishes, publishes, "the group is registered afresh at the new address")
     }
 
     func testAProfilesLockedSettingsReachTheCaller() async {
@@ -605,6 +643,15 @@ final class RelayModel {
         // A forged removal signed by the second coordinator is refused by other phones too.
         caller.engine.receive(.signing(.memberRemoved(member: r, version: 999), as: n2, identity: second.identity, group: gid), via: .mesh)
         XCTAssertNotNil(caller.engine.group?.member(r))
+        // Nor can the second coordinator add a coordinator numbered below the first, or anyone
+        // outside their own block, to become or choose the first coordinator.
+        for (n, role) in [(UInt16(0), Member.Role.coordinator), (UInt16(5), .responder)] {
+            let forged = HelpFrame.memberAdded(member: n, role: role, unit: 0, signingKey: Data(repeating: 7, count: 32),
+                                               sealKey: Data(repeating: 8, count: 32), version: 999)
+            caller.engine.receive(.signing(forged, as: n2, identity: second.identity, group: gid), via: .mesh)
+            XCTAssertNil(caller.engine.group?.member(n))
+        }
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1)
         coordinator.engine.removeMember(r)
         await air.run()
         XCTAssertNil(caller.engine.group?.member(r), "the first coordinator's removal is followed")

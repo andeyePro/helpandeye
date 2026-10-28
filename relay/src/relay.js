@@ -25,7 +25,8 @@ export const MAX_REMOVED = 1024;
 
 /// An Ed25519 public key: 32 bytes of base64.
 export function isKey(k) {
-  return typeof k === "string" && /^[A-Za-z0-9+/]{43}=$/.test(k);
+  // Re-encoding rejects aliases whose unused final bits differ, which decode to the same bytes.
+  return typeof k === "string" && /^[A-Za-z0-9+/]{43}=$/.test(k) && b64(unb64(k)) === k;
 }
 
 /// A group's ID is 8 random bytes and the first 8 bytes of SHA-256 over a label, those bytes and
@@ -46,7 +47,11 @@ export function b64(bytes) {
 
 export function unb64(s) {
   if (typeof s !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(s)) throw new RelayError(400, "bad base64");
-  return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  try {
+    return Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  } catch {
+    throw new RelayError(400, "bad base64");
+  }
 }
 
 export class RelayError extends Error {
@@ -97,16 +102,17 @@ export class GroupRelay {
 
   /// Membership on the relay. The group's first coordinator owns it: the group's ID is made from
   /// their key (see `ownsGroup`), so only a list naming them as `primary` can register the group,
-  /// whoever sends it. After that a list from any coordinator adds people, as members; only the
-  /// owner sets roles and removes people, and nobody removed is ever listed again. When the owner
-  /// removes a coordinator, people only that coordinator added, and the owner does not list, go too.
+  /// and only the owner can send it. After that a list from any coordinator adds people, as members;
+  /// only the owner sets roles and removes people, and nobody removed is ever listed again. When the
+  /// owner removes a coordinator, people only that coordinator added, and the owner does not list,
+  /// go too, and only the owner listing them again brings them back.
   async setMembers(signer, list, groupId = null) {
-    if (!list || !Array.isArray(list.members) || !Number.isInteger(list.generation) || list.generation < 0) throw new RelayError(400, "bad member list");
+    if (!list || typeof list !== "object" || !Array.isArray(list.members) || !Number.isInteger(list.generation) || list.generation < 0) throw new RelayError(400, "bad member list");
     const named = list.removed ?? [];
     if (!Array.isArray(named)) throw new RelayError(400, "bad removed list");
     for (const k of named) if (!isKey(k)) throw new RelayError(400, "bad removed key");
     for (const m of list.members) {
-      if (!isKey(m.key) || !["coordinator", "member"].includes(m.role)) throw new RelayError(400, "bad member");
+      if (!m || typeof m !== "object" || !isKey(m.key) || !["coordinator", "member"].includes(m.role)) throw new RelayError(400, "bad member");
     }
     if (list.members.length > MAX_MEMBERS || named.length > MAX_REMOVED) throw new RelayError(413, "too many members");
     if (new Set(list.members.map((m) => m.key)).size !== list.members.length) throw new RelayError(400, "a key listed twice");
@@ -115,7 +121,7 @@ export class GroupRelay {
     if (!current) {
       if (!list.members.some((m) => m.key === list.primary && m.role === "coordinator")) throw new RelayError(400, "the list must name its first coordinator");
       if (groupId && !(await ownsGroup(groupId, list.primary))) throw new RelayError(403, "not this group's first coordinator");
-      if (!list.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(400, "the signer must be a coordinator");
+      if (signer !== list.primary) throw new RelayError(403, "the group's first coordinator registers it");
       owner = list.primary;
     } else {
       if (!current.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(403, "only a coordinator can change members");
@@ -129,10 +135,12 @@ export class GroupRelay {
     const ownerFresh = signer === owner && list.generation >= ownerGeneration;
     const roles = new Map((current?.members ?? []).map((m) => [m.key, m.role]));
     const addedBy = new Map((await this.storage.get("addedBy")) ?? []);
+    const dropped = new Set((await this.storage.get("dropped")) ?? []);
+    if (ownerFresh) for (const m of list.members) dropped.delete(m.key);
     for (const m of list.members) {
-      if (removed.has(m.key)) continue;
+      if (removed.has(m.key) || dropped.has(m.key)) continue;
       if (!roles.has(m.key)) {
-        const asListed = ownerFresh || (!current && (m.key === owner || m.key === signer));
+        const asListed = ownerFresh || (!current && m.key === owner);
         roles.set(m.key, asListed ? m.role : "member");
         addedBy.set(m.key, signer);
       } else if (ownerFresh) {
@@ -145,15 +153,16 @@ export class GroupRelay {
         if (removed.has(k)) continue;
         removed.add(k);
         if (current?.members.some((m) => m.key === k && m.role === "coordinator")) {
-          for (const [key, by] of addedBy) if (by === k && !listed.has(key)) roles.delete(key);
+          for (const [key, by] of addedBy) if (by === k && !listed.has(key) && roles.delete(key)) dropped.add(key);
         }
       }
     }
-    for (const k of removed) { roles.delete(k); addedBy.delete(k); }
-    if (roles.size > MAX_MEMBERS || removed.size > MAX_REMOVED) throw new RelayError(413, "too many members");
+    for (const k of removed) { roles.delete(k); addedBy.delete(k); dropped.delete(k); }
+    if (roles.size > MAX_MEMBERS || removed.size > MAX_REMOVED || dropped.size > MAX_REMOVED) throw new RelayError(413, "too many members");
     const members = [...roles].map(([key, role]) => ({ key, role }));
     await this.storage.put("owner", owner);
     await this.storage.put("removed", [...removed]);
+    await this.storage.put("dropped", [...dropped]);
     await this.storage.put("addedBy", [...addedBy].filter(([k]) => roles.has(k)));
     if (ownerFresh) await this.storage.put("ownerGeneration", list.generation);
     await this.storage.put("members", { generation: Math.max(current?.generation ?? 0, list.generation), members });
@@ -178,6 +187,13 @@ export class GroupRelay {
     await this.storage.put((watch ? "w:" : "p:") + member, watch ? { ...token, device: "watch" } : token);
   }
 
+  /// Forgets push tokens APNs says are dead, so they are not tried on every call.
+  async dropPushTokens(dead) {
+    const all = [...(await this.storage.list({ prefix: "p:" })).entries(), ...(await this.storage.list({ prefix: "w:" })).entries()];
+    const keys = all.filter(([, t]) => dead.includes(t.token)).map(([k]) => k);
+    if (keys.length) await this.storage.delete(keys);
+  }
+
   /// Push tokens of every current member except the sender, phones and watches.
   async pushTargets(sender) {
     const current = await this.members();
@@ -195,6 +211,7 @@ export class GroupRelay {
   /// Counts a member's posts (and pushes asked for) in the current minute, refusing past the limit,
   /// so one phone cannot use up the group's free allowance or flood everyone with pushes.
   async limit(sender, wake) {
+    await this.requireMember(sender);
     const minute = Math.floor(this.now() / 60000);
     const key = "r:" + sender;
     const cur = (await this.storage.get(key)) ?? { minute, posts: 0, wakes: 0 };

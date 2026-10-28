@@ -138,7 +138,7 @@ Needs the relay set up (Group, Internet route) on both phones, with internet on.
 1. On phone A, press Help, type "Back door is open" and tap Send, then tap Share where I am and allow location.
 2. Turn phone A's internet off and try to send another message.
 
-Pass: phone B shows the message in quotes and an Open their location in Maps link that opens near phone A. In step 2, with both boxes connected, the second message reaches phone B as a direct message between the boxes, cut to 96 bytes if longer. A third board on the same group channel, logging what it hears, never shows the text: it is encrypted to phone B's box alone.
+Pass: phone B shows the message in quotes and an Open their location in Maps link that opens near phone A. In step 2, with both boxes connected, the second message reaches phone B over the group channel, sealed for responders, in pieces of up to 56 bytes if longer. A third board on the same group channel, logging what it hears, never shows the text, and a caller's phone in the same group cannot read it either: only responders hold the key.
 
 ## 15. Calls keep going until someone acknowledges
 
@@ -186,7 +186,7 @@ Needs phone B paired with an Apple Watch with Help&I on it.
 1. On phone A, press Help.
 2. On phone B's watch, open Help&I.
 
-Pass: the watch lists the caller's name and "Help" with an Acknowledge button. Tapping it acknowledges exactly as on the phone: phone A shows "<name> has seen your call", and the entry leaves the watch. With phone B out of the watch's range, tapping it shows "Not acknowledged" and nothing is sent.
+Pass: the watch lists the caller's name and "Help" with an Acknowledge button. Tapping it acknowledges exactly as on the phone: phone A shows "<name> has seen your call", and the entry leaves the watch. With phone B out of the watch's range, the watch acknowledges over its own internet; with no internet on the watch either, tapping it shows "Not acknowledged: this watch cannot reach the internet. Use your phone." and phone A still shows no acknowledgement.
 
 ## 21. A missed check-in noticed with no internet at all
 

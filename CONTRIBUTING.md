@@ -27,8 +27,8 @@ not replace them, and its copy must say so.
 ### Privacy
 
 Units are identified by number. Names, addresses and medical details are never sent over the
-air. The one exception is what the caller chooses to send: short text they typed and their
-position, sent as encrypted direct messages to each responder after the call for help itself.
+air. The one exception is what the caller chooses to send: short text they typed, a choice such
+as Fallen, and their position, sealed for the responders alone after the call for help itself.
 
 ### Radio
 
@@ -51,6 +51,8 @@ and can answer questions about it in review. Agents: see `AGENTS.md`.
 |---|---|
 | Firmware logic (message format, alerts, escalation) | Unit tests alongside the code |
 | Anything needing eyes, ears or hands (buttons, buzzers, range, battery) | `tests/MANUAL-TESTS.md` |
+| The website (`site/`): copy, layout, contrast, animation | Check it in a browser at 320 px wide with a large default font; give contrast ratios for any colour you change |
+| The workflows (`.github/`) | Run the shell and `jq` steps against a fixture of the payload, including the boundary case (for example the 101st comment), and say so in the pull request |
 
 A test that passes because it does not know about your change is not coverage. If something
 genuinely cannot be tested, add it to `MANUAL-TESTS.md` and say so in the pull request.

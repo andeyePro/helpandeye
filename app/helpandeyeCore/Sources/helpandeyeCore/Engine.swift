@@ -153,6 +153,8 @@ public final class HelpEngine: ObservableObject {
     public var notices: [Notice: CoordinatorAlert] { activity.notices }
     /// Whether this responder's own acknowledgements went out.
     @Published public private(set) var ackSends: [IncomingRequest.Key: [Route: RouteState]] = [:]
+    /// Why a coordinator's last change to the group's settings was not made.
+    @Published public private(set) var settingsProblem: String?
 
     public let identity: DeviceIdentity
     public let mesh: MeshLink
@@ -248,12 +250,36 @@ public final class HelpEngine: ObservableObject {
         // Changed settings go to every member at once, under a newer version.
         let settingsChanged = actsAsCoordinator && s.group.settings != old.settings
         if settingsChanged { s.group.settingsVersion = old.settingsVersion + 1 }
-        setState(s)
+        if settingsChanged {
+            // Settings that cannot go to every member are not kept, so no one is told they went.
+            guard s.group.settingsFrame(as: s.me, identity: identity) != nil else {
+                settingsProblem = "That is too much to send to everyone. Use shorter words, or fewer profiles."
+                return
+            }
+            settingsProblem = nil
+        }
+        let relayMoved = settingsChanged && s.group.relayURL != old.relayURL
+        if relayMoved {
+            // Members still look at the old relay address, so the new one goes there first; only
+            // then does this phone move, and register the group afresh at the new address.
+            saved = s
+            store.save(s)
+            publishedList = nil; publishedAt = nil; refusedList = nil; lastTriedList = nil; publishBackoff = 60
+        } else {
+            setState(s)
+        }
         followProfileCheckIns()
         guard actsAsCoordinator else { return }
         if settingsChanged { logSettings(by: s.me, s.group.settings.changes(from: old.settings), old: old.settings) }
-        if settingsChanged, let f = s.group.settingsFrame(as: s.me, identity: identity) {
-            spawn { _ = await self.sendOptional(f) }
+        let frame = settingsChanged ? s.group.settingsFrame(as: s.me, identity: identity) : nil
+        if relayMoved {
+            spawn {
+                if let frame, self.relay.isConfigured { _ = await self.relay.send(frame, wake: nil) }
+                self.applyGroup()
+                if let frame { _ = await self.sendOptional(frame) }
+            }
+        } else if let frame {
+            spawn { _ = await self.sendOptional(frame) }
         }
         let roleChanged = s.group.members.filter { m in old.member(m.number).map { $0.role != m.role } ?? false }.map(\.number)
         announce(membershipOf: s.group, added: Set(s.group.members.map(\.number)).subtracting(before),
@@ -485,7 +511,8 @@ public final class HelpEngine: ObservableObject {
         guard var r = activity.outgoing.popLast() else { return }
         let frame = r.add(category)
         activity.outgoing.append(r)
-        spawn { _ = await self.sendOptional(frame) }
+        let groupID = group?.secrets.groupID
+        spawn { await self.sendPersonal(frame, in: groupID) }
     }
 
     /// Takes back a category pressed by mistake.
@@ -493,7 +520,8 @@ public final class HelpEngine: ObservableObject {
         guard var r = activity.outgoing.popLast() else { return }
         let frame = r.withdraw(category)
         activity.outgoing.append(r)
-        if let frame { spawn { _ = await self.sendOptional(frame) } }
+        let groupID = group?.secrets.groupID
+        if let frame { spawn { await self.sendPersonal(frame, in: groupID) } }
     }
 
     // MARK: Settling a call (decision 6)
@@ -614,32 +642,44 @@ public final class HelpEngine: ObservableObject {
         // Sealed and signed for responders, long text goes as several notes that each fit the radio.
         let frames = group?.secrets.responderPublicKey == nil ? [r.addNote(text)] : r.addNotes(text, pieceBytes: ForResponders.maxNoteBytes)
         activity.outgoing.append(r)
-        spawn { for f in frames { await self.sendPersonal(f) } }
+        let groupID = group?.secrets.groupID
+        spawn { for f in frames { await self.sendPersonal(f, in: groupID) } }
         return nil
     }
 
-    public func sharePosition(latitude: Double, longitude: Double, accuracy: Double) {
-        guard canSendPersonal, let r = current else { return }
+    /// `sent` hears whether any route took it: not whether anyone has read it.
+    public func sharePosition(latitude: Double, longitude: Double, accuracy: Double, sent: ((Bool) -> Void)? = nil) {
+        guard canSendPersonal, let r = current else { sent?(false); return }
         let frame = HelpFrame.position(unit: r.unit, request: r.number, latitudeE7: Int32(latitude * 1e7),
                                        longitudeE7: Int32(longitude * 1e7), accuracy: UInt16(clamping: Int(accuracy)))
-        spawn { await self.sendPersonal(frame) }
+        let groupID = group?.secrets.groupID
+        spawn { let ok = await self.sendPersonal(frame, in: groupID); sent?(ok) }
     }
 
     /// Sealed once for all responders (decision 12) and sent once, over the internet or else on the
     /// group channel. A group made before responders had their own key falls back to a direct
-    /// message to each responder's box.
-    private func sendPersonal(_ frame: HelpFrame) async {
-        if let g = group, let me = saved?.me, g.secrets.responderPublicKey != nil {
+    /// message to each responder's box. Only into the group it was typed in: never one this phone
+    /// joined while an earlier piece was still going. True if any route took it.
+    @discardableResult private func sendPersonal(_ frame: HelpFrame, in groupID: Data?) async -> Bool {
+        guard let g = group, g.secrets.groupID == groupID else { return false }
+        if let me = saved?.me, g.secrets.responderPublicKey != nil {
+            var took = false
             for sealed in ForResponders.seal(frame, from: identity, as: me, in: g, at: now()) {
-                if homeWiFi.hasPeers { _ = await homeWiFi.send(sealed) }
-                if relay.isConfigured, await relay.send(sealed, wake: nil) == nil { continue }
-                _ = await sendOnMesh(sealed, kind: .optional)
+                if homeWiFi.hasPeers, await homeWiFi.send(sealed) == nil { took = true }
+                guard group?.secrets.groupID == groupID else { return took }
+                if relay.isConfigured, await relay.send(sealed, wake: nil) == nil { took = true; continue }
+                guard group?.secrets.groupID == groupID else { return took }
+                if await sendOnMesh(sealed, kind: .optional) == nil { took = true }
             }
-            return
+            return took
         }
-        if homeWiFi.hasPeers { _ = await homeWiFi.send(frame) }
-        if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return }
+        var took = false
+        if homeWiFi.hasPeers, await homeWiFi.send(frame) == nil { took = true }
+        guard group?.secrets.groupID == groupID else { return took }
+        if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return true }
+        guard group?.secrets.groupID == groupID else { return took }
         await sendDirect(frame, to: nil)
+        return took || mesh.isReady
     }
 
     /// Personal content as MeshCore direct messages to each responder's box (or one member's),
@@ -925,6 +965,11 @@ public final class HelpEngine: ObservableObject {
                 case .memberRemoved, .memberRole: allowed = signer == group?.primaryCoordinator
                 // Members keep their own number up to date.
                 case let .memberPhone(n, _, _): allowed = signer == n || sender.role == .coordinator
+                // Another coordinator adds only callers and responders, from their own block of
+                // numbers, so they cannot make someone else the first coordinator.
+                case let .memberAdded(n, role, _, _, _, _):
+                    let base = group?.block(of: signer) ?? 0
+                    allowed = sender.role == .coordinator && (signer == group?.primaryCoordinator || (role != .coordinator && n > base && n <= base + 999))
                 default: allowed = sender.role == .coordinator
                 }
                 // Nothing changes, nothing is redone.

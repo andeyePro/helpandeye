@@ -72,6 +72,7 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+        UNUserNotificationCenter.current().delegate = ShowAlertsWhileOpen.shared
         Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
     }
 
@@ -133,15 +134,16 @@ final class AppModel: ObservableObject {
     func add(_ category: CallCategory) { engine.add(category) }
     func withdraw(_ category: CallCategory) { engine.withdraw(category) }
     func addNote(_ text: String) -> String? { engine.addNote(text) }
-    func sharePosition(latitude: Double, longitude: Double, accuracy: Double) {
-        engine.sharePosition(latitude: latitude, longitude: longitude, accuracy: accuracy)
+    func sharePosition(latitude: Double, longitude: Double, accuracy: Double, sent: ((Bool) -> Void)? = nil) {
+        engine.sharePosition(latitude: latitude, longitude: longitude, accuracy: accuracy, sent: sent)
     }
 
     @discardableResult func acknowledge(_ key: IncomingRequest.Key) -> Bool { engine.acknowledge(key) }
     func retryAck(_ key: IncomingRequest.Key) { engine.retryAck(key) }
     func ackSendStatus(_ key: IncomingRequest.Key) -> CallerStatus? { engine.ackSendStatus(key) }
 
-    func setAvailable(_ available: Bool) { engine.setAvailable(available) }
+    /// Away is away in every group this person responds in.
+    func setAvailable(_ available: Bool) { for e in engines where e.me?.canRespond == true { e.setAvailable(available) } }
     func showing(_ notice: Notice) -> Bool { engine.showing(notice) }
     func acknowledge(_ notice: Notice) { engine.acknowledge(notice) }
     func setCheckIn(_ schedule: CheckInSchedule?) { engine.setCheckIn(schedule) }

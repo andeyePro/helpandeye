@@ -1,4 +1,7 @@
-// Events&I – Copyright (C) 2026 andeye Ltd. AGPL-3.0, see ../../LICENSE.
+// Help&I – Copyright (C) 2026 andeye Ltd. AGPL-3.0, see ../LICENSE.
+// Adapted from the shared andeye engine (andeye.com, public/andeye-eye.js). Changes here: blinking
+// is timed from the first frame, waits for the draw-on, ends within five seconds and stops if the
+// reader switches to reduced motion while the page is open. The upstream revision is not recorded.
 // The andeye mark, drawn live from the brand geometry (viewBox 0 0 365 235,
 // stroke 17, translate 18.0915,17.9436) with an eyelid wink: only the two
 // lid cubics' control points move; the corners and the left flourish stay
@@ -13,7 +16,7 @@
 //   colour : stroke colour (default the brand blue #56C1FF)
 //   iris   : 'none' | 'fill' | 'stroke'   (stroke = same 17px line width)
 //   glyph  : null | 'clock' | 'code' | 'tick' | 'people' | 'calendar'   (drawn inside the iris)
-//   blink  : true = a few natural blinks, then still (respects prefers-reduced-motion)
+//   blink  : true = two natural blinks, then still (respects prefers-reduced-motion)
 (function (global) {
   'use strict';
   var T = { x: 18.0915, y: 17.9436 };
@@ -235,31 +238,45 @@
     }
     function setWink(w) { setPose(w, null); }
 
-    var reduced = global.matchMedia
-      && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var motionQuery = global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)');
+    var reduced = motionQuery && motionQuery.matches;
+    var stopped = false, drawing = false;
+    if (motionQuery && motionQuery.addEventListener) {
+      motionQuery.addEventListener('change', function (e) {
+        if (!e.matches) return;
+        stopped = true;
+        setPose(0, null);
+      });
+    }
     // Page-load draw-on: the pen draws the mark from the tail (~1.2s), and
     // the iris fades in as the stroke completes.
     if (opts.drawOn && !reduced) {
       var drawStart = null;
+      drawing = true;
       function drawFrame(ts) {
-        if (!drawStart) drawStart = ts;
+        if (stopped) return;
+        if (drawStart === null) drawStart = ts;
         var t = Math.min((ts - drawStart) / 1200, 1);
         setPose(0, t * t * (3 - 2 * t));
         if (t < 1) global.requestAnimationFrame(drawFrame);
+        else drawing = false;
       }
       setPose(0, 0);
       global.requestAnimationFrame(drawFrame);
     }
     if (opts.blink !== false && !reduced) {
       // A natural blink: quick close, brief hold, slightly slower open,
-      // then quiet for a few seconds. Ease with smoothstep. It stops after
-      // a few blinks, so the page does not move indefinitely.
-      var next = 1800 + Math.random() * 2500;
-      var start = null, phase = 'idle', blinksLeft = 6;
+      // then quiet for a moment. Ease with smoothstep. Two blinks, timed from
+      // this eye's first frame and never during the draw-on, so all automatic
+      // movement is over within five seconds of the page showing it.
+      var next = null;
+      var start = null, phase = 'idle', blinksLeft = 2;
       function smooth(t) { return t * t * (3 - 2 * t); }
       function frame(ts) {
+        if (stopped) return;
+        if (next === null) next = ts + 1500 + Math.random() * 1000;
         if (phase === 'idle') {
-          if (ts >= next) { phase = 'blink'; start = ts; }
+          if (!drawing && ts >= next) { phase = 'blink'; start = ts; }
         } else {
           var t = ts - start;
           var w = t < 130 ? smooth(t / 130)
@@ -269,7 +286,7 @@
           setWink(w);
           if (t >= 360) {
             if (--blinksLeft === 0) return;
-            phase = 'idle'; next = ts + 2600 + Math.random() * 3200;
+            phase = 'idle'; next = ts + 1000 + Math.random() * 600;
           }
         }
         global.requestAnimationFrame(frame);

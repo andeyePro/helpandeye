@@ -274,11 +274,15 @@ final class WatchModel: NSObject, ObservableObject {
 
     /// Every group's open calls together, most urgent first, then the first five.
     var open: [Open] {
-        if phoneInReach { return phoneOpen }
         let all = allEngines.flatMap { e in e.activity.inbox.requests.values.filter(\.isOpen).map { (e, $0) } }
-        return all.sorted { ResponderInbox.moreUrgent($0.1, $1.1) }.prefix(5).map { e, r in
+        let own = all.sorted { ResponderInbox.moreUrgent($0.1, $1.1) }.map { e, r in
             Open(unit: r.key.unit, request: r.key.request, colour: r.colour ?? .red, who: e.name(ofUnit: r.key.unit), group: e.group?.tag ?? "")
         }
+        guard phoneInReach else { return Array(own.prefix(5)) }
+        // Calls only the watch has heard are shown too, as their alerts ring here.
+        let first = engine?.group?.tag ?? ""
+        let watchOnly = own.filter { o in !phoneOpen.contains { $0.key == o.key && ($0.group.isEmpty ? first : $0.group) == o.group } }
+        return Array((phoneOpen + watchOnly).prefix(5))
     }
 
     /// The engine for a group's tag; an empty tag (from a phone before several groups) is the first.
@@ -306,7 +310,9 @@ final class WatchModel: NSObject, ObservableObject {
             sentByWatch = true
             engine.press(colour)
             if phoneInReach, let call = engine.current?.callFrame {
-                WCSession.default.sendMessage(["call": call.encoded()], replyHandler: nil, errorHandler: nil)
+                // With a reply handler, so the phone's reply-taking delegate gets it; the watch
+                // sends the call itself either way.
+                WCSession.default.sendMessage(["call": call.encoded()], replyHandler: { _ in }, errorHandler: nil)
             }
             return
         }

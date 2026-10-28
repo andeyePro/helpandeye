@@ -56,7 +56,10 @@ final class WatchScreensTests: XCTestCase {
     /// Saves a screenshot and records what the audit finds, without stopping at the first problem.
     private func look(_ name: String) {
         Thread.sleep(forTimeInterval: 1.5)
-        if let shots { try? XCUIScreen.main.screenshot().pngRepresentation.write(to: shots.appendingPathComponent("\(name).png")) }
+        if let shots {
+            do { try XCUIScreen.main.screenshot().pngRepresentation.write(to: shots.appendingPathComponent("\(name).png")) }
+            catch { problems.append("\(name): screenshot not saved: \(error)") }
+        }
         // As on the phone: Apple's clipped-text and partial Dynamic Type checks flag SwiftUI text that
         // does fit and grow, so they are advice, checked by eye on the screenshots. The page dots
         // beside the crown are watchOS's own, and the crown turns the page.

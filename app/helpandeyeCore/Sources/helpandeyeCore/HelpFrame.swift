@@ -131,6 +131,7 @@ public enum HelpFrame: Equatable, Sendable {
     public var mayGoOnGroupChannel: Bool {
         switch self {
         case .note, .position, .checkIns, .memberName, .memberPhone: false
+        case .followUp: personalPart == nil
         case let .callState(_, _, _, _, reason): reason.isEmpty
         case .changeRequest: false
         // A signed frame may go only if what it wraps may.
@@ -139,12 +140,14 @@ public enum HelpFrame: Equatable, Sendable {
         }
     }
 
-    /// The unit, request and part of a note (parts from 1) or position (part 0), the personal
-    /// content that goes sealed for responders.
+    /// The unit, request and part of a note or follow-up (parts from 1) or position (part 0), the
+    /// personal content that goes sealed for responders. What a caller chose, such as Fallen, is
+    /// personal too; a missed check-in is raised by another member's phone, so goes plainly.
     public var personalPart: (UInt32, UInt16, UInt8)? {
         switch self {
         case let .note(unit, request, part, _): (unit, request, part)
         case let .position(unit, request, _, _, _): (unit, request, 0)
+        case let .followUp(unit, request, part, category) where category != .missedCheckIn: (unit, request, part)
         default: nil
         }
     }
@@ -264,7 +267,7 @@ public enum HelpFrame: Equatable, Sendable {
             self = .note(unit: unit, request: req, part: part, text: text)
         case .position:
             guard let unit = r.u32(), let req = r.u16(), let lat = r.i32(), let lon = r.i32(), let acc = r.u16(),
-                  abs(lat) <= 900_000_000, abs(lon) <= 1_800_000_000 else { return nil }
+                  (-900_000_000...900_000_000).contains(lat), (-1_800_000_000...1_800_000_000).contains(lon) else { return nil }
             self = .position(unit: unit, request: req, latitudeE7: lat, longitudeE7: lon, accuracy: acc)
         case .checkIns:
             guard let unit = r.u32(), let since = r.u32(), let grace = r.u16(), let n = r.u8(), n <= 8 else { return nil }
@@ -363,7 +366,7 @@ public enum HelpFrame: Equatable, Sendable {
         // The caller of this checks that the signer is the member or a coordinator.
         case .memberPhone: return frame
         // The caller of this checks that the signer owns the unit.
-        case .checkIns, .note, .position: return frame
+        case .checkIns, .note, .position, .followUp: return frame
         // The caller of this checks that the signer owns the unit or is a coordinator.
         case .callState: return frame
         case let .changeRequest(member, _, _, _) where member == signer: return frame

@@ -15,13 +15,14 @@ public enum ForResponders {
     /// 165-byte MeshCore channel datagram; longer text goes as several notes.
     public static let maxNoteBytes = 56
 
-    /// `frame` must be a note or a position from `me`, member `signer`, the caller. One message
-    /// for each responders' key in use: during a changeover after a removal, the old key too, so
-    /// responders who have not scanned their update yet can still read it.
+    /// `frame` must be a note or a position from `me`, member `signer`, the caller. Sealed with
+    /// the current responders' key only, never the old one kept during a changeover: a removed
+    /// responder still holds that, so a responder who has not scanned their update sees the call
+    /// but not what was typed until they do.
     public static func seal(_ frame: HelpFrame, from me: DeviceIdentity, as signer: UInt16, in group: GroupState, at now: Date) -> [HelpFrame] {
         guard let (unit, request, part) = frame.personalPart else { return [] }
         let signed = HelpFrame.signing(frame, as: signer, identity: me, group: group.secrets.groupID).encoded()
-        return group.listening(at: now).compactMap { secrets in
+        return [group.secrets].compactMap { secrets in
             guard let responders = secrets.responderPublicKey,
                   let key = try? key(mine: me.privateKey, theirs: responders, group: group.secrets.groupID) else { return nil }
             let salt = randomBytes(5)

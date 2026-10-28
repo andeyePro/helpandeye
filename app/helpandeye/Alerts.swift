@@ -75,3 +75,13 @@ import UserNotifications
         }
     }
 }
+
+/// An alert still sounds and shows with Help&I open, as it does with it closed: iOS keeps them
+/// quiet for the open app unless asked.
+final class ShowAlertsWhileOpen: NSObject, UNUserNotificationCenterDelegate {
+    static let shared = ShowAlertsWhileOpen()
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound, .list]
+    }
+}

@@ -105,9 +105,10 @@ def mark(bg='#131826', colour=GREEN, uid='m'):
 CANVAS = 1024
 MARK_W = 0.90        # the mark's share of the icon's width — as wide as Apple's
                      # widest first-party marks sit in theirs
+WHATSAPP_W = 0.74    # narrower, so WhatsApp's circular crop keeps the whole mark
 MAC_PLATE = 824      # Apple's macOS icon grid: the rounded square inside 1024
 
-def icon(appearance='any', platform='ios', canvas=CANVAS):
+def icon(appearance='any', platform='ios', canvas=CANVAS, mark_w=MARK_W, uid=None):
     """appearance: any (white ground) | dark (black) | tinted (grayscale,
     transparent — the system supplies ground and tint).
     platform: ios (full bleed, the system masks it) | mac (draws its own
@@ -116,7 +117,7 @@ def icon(appearance='any', platform='ios', canvas=CANVAS):
     colour = GREEN if bg is not None else '#FFFFFF'
     plate = canvas if platform == 'ios' else round(canvas * MAC_PLATE / 1024.0)
     off = (canvas - plate) / 2.0
-    mw = plate * MARK_W
+    mw = plate * mark_w
     x = off + (plate - mw) / 2.0
     y = off + (plate - mw * 235 / 365.0) / 2.0
     o = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" '
@@ -128,7 +129,7 @@ def icon(appearance='any', platform='ios', canvas=CANVAS):
             o.append('<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" rx="%.2f" fill="%s"/>'
                      % (off, off, plate, plate, plate * 0.2247, bg))
     o.append('<g transform="translate(%.3f,%.3f) scale(%.6f)">' % (x, y, mw / 365.0))
-    o += mark_body(bg, colour, appearance[0] + platform[0])
+    o += mark_body(bg, colour, uid or appearance[0] + platform[0])
     o.append('</g></svg>')
     return '\n'.join(o) + '\n'
 
@@ -142,4 +143,5 @@ if __name__ == '__main__':
         open(os.path.join(svg, 'icon-ios-%s.svg' % ap), 'w').write(icon(ap, 'ios'))
     for ap in ('any', 'dark'):
         open(os.path.join(svg, 'icon-mac-%s.svg' % ap), 'w').write(icon(ap, 'mac'))
+    open(os.path.join(svg, 'icon-whatsapp.svg'), 'w').write(icon('any', 'ios', mark_w=WHATSAPP_W, uid='w'))
     print('iris %.2f,%.2f r%.2f | cross reach %.2fr, arm %.2f' % (CX, CY, R, A / R, ARM))

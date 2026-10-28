@@ -5,7 +5,7 @@ open work and decisions, `TODO.md`.
 
 ## What works, as far as a machine can check
 
-- **The app's rules** (`app/helpandeyeCore`), with 237 tests including a fuzz test that runs groups of
+- **The app's rules** (`app/helpandeyeCore`), with 242 tests including a fuzz test that runs groups of
   phones through random presses, acknowledgements, removals, lost packets, links going down and
   clock jumps, checking the safety rules after every step:
   - a red press goes out at once on every route and is sent again until a person acknowledges it;
@@ -18,7 +18,7 @@ open work and decisions, `TODO.md`.
 - **The iPhone app, watch app and notification extension** build, unsigned, with no warnings.
 - **The Bluetooth command queue** that puts a call on the radio, the choice of the box's channel
   slots, reading the relay, and what the caller is told, are in the core package and tested.
-- **The internet relay** (`relay/`), with 22 tests, including checks that it verifies what the app
+- **The internet relay** (`relay/`), with 30 tests, including checks that it verifies what the app
   signs and follows the same membership rules the app's tests assume.
 - **Home Wi-Fi** (decision 19): within one Wi-Fi network the group's phones call each other
   directly, with no box, server or internet; only another proven member counts, and only once

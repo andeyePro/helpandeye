@@ -109,7 +109,9 @@ final class ScreensTests: XCTestCase {
         // Let sheets and pushes finish moving: a screen caught mid-animation is half transparent.
         Thread.sleep(forTimeInterval: 1.5)
         let png = XCUIScreen.main.screenshot().pngRepresentation
-        if let shots { try? png.write(to: shots.appendingPathComponent("\(name).png")) }
+        if let shots {
+            do { try png.write(to: shots.appendingPathComponent("\(name).png")) } catch { problems.append("\(name): screenshot not saved: \(error)") }
+        }
     }
 
     /// Saves a screenshot and records what the audit finds, without stopping at the first problem.
@@ -123,7 +125,7 @@ final class ScreensTests: XCTestCase {
         // nothing anyone can see; those are logged as advice and checked by eye on the
         // screenshots, the largest-text ones above all.
         let bars = (app.navigationBars.allElementsBoundByIndex + app.tabBars.allElementsBoundByIndex).map { $0.frame.insetBy(dx: 0, dy: -60) }
-        try? app.performAccessibilityAudit { issue in
+        do { try app.performAccessibilityAudit { issue in
             let frame = issue.element?.frame ?? .zero
             let detail = "\(name): \(issue.compactDescription) – \(issue.element?.label ?? "") \(frame)"
             let screen = self.app.windows.firstMatch.frame
@@ -139,6 +141,8 @@ final class ScreensTests: XCTestCase {
                 print("AUDIT " + detail)
             }
             return true
+        } } catch {
+            problems.append("\(name): the audit could not run: \(error)")
         }
     }
 

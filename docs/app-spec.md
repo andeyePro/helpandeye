@@ -75,10 +75,11 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
 - Any follow-up (a category such as "fallen", or free text) goes as a separate message carrying
   the same request number. The responder app assembles them into one request.
 - Over the internet route, follow-ups are end-to-end encrypted. Over the mesh, the call for help
-  and the group channel carry only the unit number, colour, category code and request number.
-  Short free text and the caller's position follow as encrypted direct messages to each
-  responder, after the call for help, and only when there is airtime to spare
-  ([decision 12](design-decisions.md#d12)).
+  carries only the unit number, colour and request number. What the caller chose (such as
+  "fallen"), short free text and the caller's position follow sealed once for all responders,
+  with a key callers do not hold, after the call for help, and only when there is airtime to
+  spare ([decision 12](design-decisions.md#d12)). A missed check-in is raised by another
+  member's phone, not the caller, so it goes plainly: it says only that a check-in was missed.
 - Red and amber are sent at once over every route that works without the caller's help, not
   just the first, and the responder app removes duplicates by request and message number. This
   replaces the "first route that works" order in [decision 8](design-decisions.md#d8). Mesh sends
@@ -194,7 +195,9 @@ Decided for now, following common practice for end-to-end encrypted apps (Martin
   an update code, shown as a QR code or sent as a message, encrypted to that phone's key. Each app writes the new channel secret into its board the next
   time it connects. For seven days, phones listen and send on both the old and the new
   channel and keys, so members who have not scanned their update still hear calls and
-  acknowledgements. The relay refuses the removed phone at once, so nothing personal reaches it.
+  acknowledgements. What a caller types and where they are go with the new responders' key
+  only, because the removed phone still has the old one: a responder who has not scanned their
+  update sees the call but not those until they do. The relay refuses the removed phone at once.
 - A removed phone's unit number is never reused.
 
 ## Who is in the group

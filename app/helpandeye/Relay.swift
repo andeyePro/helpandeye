@@ -64,6 +64,10 @@ final class Relay: ObservableObject, RelayLink {
             guard let body = try? JSONEncoder().encode(fields) else { return "Could not seal the message" }
             let result: String?
             switch await request("POST", RelayProtocol.path(for: group.secrets, "messages"), body: body) {
+            // Kept on the relay, but Apple could not wake anyone yet: not counted as sent, so the
+            // next resend asks for the wake again.
+            case let .some((200, data)) where (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["woke"] as? Bool == false:
+                result = "On the relay, but no phone could be woken yet"
             case .some((200, _)): result = nil
             case let .some((status, _)): result = "Relay refused it (\(status))"
             case .none: result = lastProblem ?? "No internet"
@@ -79,7 +83,7 @@ final class Relay: ObservableObject, RelayLink {
     /// wakes a watch quietly.
     var device = "phone"
 
-    func publishPushToken() async {
+    func publishPushToken(attempt: Int = 0) async {
         guard let group, let pushToken else { return }
         #if DEBUG
         let sandbox = true
@@ -88,7 +92,11 @@ final class Relay: ObservableObject, RelayLink {
         #endif
         let hex = pushToken.map { String(format: "%02x", $0) }.joined()
         guard let body = try? JSONSerialization.data(withJSONObject: ["token": hex, "sandbox": sandbox, "device": device] as [String: Any]) else { return }
-        _ = await request("PUT", RelayProtocol.path(for: group.secrets, "push"), body: body)
+        // Refused until a coordinator's phone has listed this one on the relay: try again shortly.
+        if case .some((403, _)) = await request("PUT", RelayProtocol.path(for: group.secrets, "push"), body: body), attempt < 5 {
+            try? await Task.sleep(for: .seconds(60))
+            if self.group?.secrets.groupID == group.secrets.groupID { await publishPushToken(attempt: attempt + 1) }
+        }
     }
 
     /// This phone's place in the group's message log, kept per group and relay address, so
@@ -107,6 +115,8 @@ final class Relay: ObservableObject, RelayLink {
             let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(RelayPoll.after(stored))", body: Data())
             if case .some((403, _)) = response { lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return }
             guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(RelayPoll.Page.self, from: data) else { return }
+            // The group or relay changed while waiting: this page belongs to the old one.
+            guard self.group?.secrets.groupID == group.secrets.groupID, self.positionKey == positionKey else { return }
             let outcome = RelayPoll.read(page, from: stored, at: Date(), keys: group.listening(at: Date()))
             for f in outcome.frames { onFrame?(f) }
             UserDefaults.standard.set(try? JSONEncoder().encode(outcome.position), forKey: positionKey)

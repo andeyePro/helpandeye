@@ -126,9 +126,19 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
             // A word too long for one piece is cut at a character boundary.
             var rest = word
             while rest.utf8.count > pieceBytes {
-                let head = MeshText.fit(rest, bytes: pieceBytes)
+                var head = MeshText.fit(rest, bytes: pieceBytes)
+                // One character bigger than a piece, such as a letter with many accents, is cut
+                // between its code points instead.
+                if head.isEmpty {
+                    var scalars = String.UnicodeScalarView()
+                    for s in rest.unicodeScalars {
+                        if String(scalars).utf8.count + String(s).utf8.count > pieceBytes { break }
+                        scalars.append(s)
+                    }
+                    head = String(scalars)
+                }
                 pieces.append(head)
-                rest = String(rest.dropFirst(head.count))
+                rest = String(decoding: rest.utf8.dropFirst(head.utf8.count), as: UTF8.self)
             }
             piece = rest
         }

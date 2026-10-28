@@ -21,7 +21,7 @@
 <style>
   :root {
     --bg: #0c0f16; --bg-deep: #090b11; --panel: #131826; --panel-2: #161c2c;
-    --line: #232b40; --line-soft: #1b2233; --text: #eef1f6; --muted: #98a0b3; --faint: #6a7382;
+    --line: #232b40; --line-soft: #1b2233; --text: #eef1f6; --muted: #98a0b3; --faint: #8a93a5;
     --radius: 14px; --measure: 720px;
     --accent: #009A44; --accent-soft: rgba(0, 154, 68, 0.14);
     --red: #c8102e; --amber: #e8a200;
@@ -29,8 +29,8 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif; line-height: 1.55;
-         overflow-x: hidden; -webkit-font-smoothing: antialiased; }
-  ::selection { background: var(--accent); color: #fff; }
+         overflow-x: hidden; overflow-wrap: break-word; -webkit-font-smoothing: antialiased; }
+  ::selection { background: var(--accent); color: var(--bg); }
   a { color: var(--text); }
   a:hover { color: var(--accent); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
@@ -59,11 +59,11 @@
   .hero .lede { margin-bottom: 1.9rem; }
   .ctas { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem; }
   .btn { display: inline-flex; align-items: center; font: inherit; font-size: 1rem; font-weight: 700; text-decoration: none;
-          padding: 0.85rem 1.6rem; border-radius: 999px; border: 1px solid transparent;
+          padding: 0.85rem 1.6rem; max-width: 100%; justify-content: center; text-align: center; border-radius: 999px; border: 1px solid transparent;
           transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease; }
   .btn .gh { width: 1.1em; height: 1.1em; margin-right: 0.5em; }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-primary:hover { background: #00b04e; color: #fff; }
+  .btn-primary { background: var(--accent); color: var(--bg); }
+  .btn-primary:hover { background: #00b04e; color: var(--bg); }
   .btn-ghost { background: transparent; color: var(--text); border-color: var(--line); }
   .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
   .fineprint { font-size: 0.85rem; color: var(--faint); margin: 0; }
@@ -75,11 +75,13 @@
   .notice p { margin: 0; }
   .prose p { font-size: clamp(1.25rem, 2.4vw, 1.7rem); line-height: 1.5; letter-spacing: -0.01em; color: var(--muted); }
   .prose strong { color: var(--text); font-weight: 800; }
-  .grid, .two { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 2rem; align-items: start; }
-  .grid.three { grid-template-columns: repeat(3, 1fr); }
+  .grid, .two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 2rem; align-items: start; }
+  .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .card { background: var(--panel); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: 20px 22px;
            transition: border-color 0.25s ease; }
-  .card p { color: var(--muted); font-size: 0.95rem; margin: 0; }
+  .card p, .more .teaser { color: var(--muted); font-size: 0.95rem; margin: 0; }
+  .more .teaser { display: block; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .more summary { list-style: none; cursor: pointer; }
   .more summary::-webkit-details-marker { display: none; }
   .more:hover { border-color: var(--accent); }
@@ -91,13 +93,14 @@
   .detail { margin-top: 0.9rem; padding-top: 0.9rem; border-top: 1px solid var(--line-soft); }
 
   .buttons { display: grid; gap: 12px; margin: 2rem 0 1.5rem; }
-  .press { display: flex; align-items: center; gap: 18px; background: var(--panel); border: 1px solid var(--line-soft);
+  .press { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; background: var(--panel); border: 1px solid var(--line-soft);
             border-radius: var(--radius); padding: 16px 20px; }
   .dot { flex: none; border-radius: 50%; box-shadow: inset 0 -5px 0 rgba(0, 0, 0, 0.3); }
   .big { width: 4rem; height: 4rem; background: var(--red); }
   .small { width: 2.4rem; height: 2.4rem; margin: 0 0.8rem; }
   .amber { background: var(--amber); }
   .green { background: var(--accent); }
+  .press > div:last-child { flex: 1 1 10rem; min-width: 0; }
   .press strong { display: block; font-size: 1.15rem; }
   .press span { color: var(--muted); }
   ol.route { padding-left: 1.4rem; margin: 1.5rem 0 0; }
@@ -110,7 +113,7 @@
   footer a:hover { color: var(--accent); }
   footer p { margin: 0; }
 
-  @media (max-width: 860px) { .grid, .two, .grid.three { grid-template-columns: 1fr; } }
+  @media (max-width: 860px) { .grid, .two, .grid.three { grid-template-columns: minmax(0, 1fr); } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }
 </style>
 </head>
@@ -150,13 +153,13 @@
     <p class="lede measure">You choose who answers: family, neighbours, a volunteer rota or your own team.
     Choose a situation to read more.</p>
     <div class="grid">
-      <details class="card more"><summary><h3>Neighbours</h3><p>Someone nearby knows when you need them, even if your telecare alarm has stopped working in a power cut.<a class="star" href="#clear" aria-label="needs a local radio network">*</a></p><span class="open-hint">More</span></summary>
+      <details class="card more"><summary><h3>Neighbours</h3><span class="teaser">Someone nearby knows when you need them, even if your telecare alarm has stopped working in a power cut.<span class="star" aria-hidden="true">*</span><span class="sr"> (needs a local radio network)</span></span><span class="open-hint">More</span></summary>
         <div class="detail"><p>A household chooses a few people to answer: family, neighbours or a local volunteer rota. If the first person does not reply, the request goes to the next. It sits alongside a telecare alarm, not instead of it.</p></div></details>
-      <details class="card more"><summary><h3>People out on their own</h3><p>Farmers, walkers and lone workers can check in and call for help.</p><span class="open-hint">More</span></summary>
+      <details class="card more"><summary><h3>People out on their own</h3><span class="teaser">Farmers, walkers and lone workers can check in and call for help.</span><span class="open-hint">More</span></summary>
         <div class="detail"><p>Set check-in times and choose who is told if you miss one. Help&amp;I needs a mobile signal, or a local radio network within range<a class="star" href="#clear" aria-label="needs a local radio network">*</a>, to get a message out. In remote country with neither, it cannot get through, and we are looking at satellite messaging for those places.</p></div></details>
-      <details class="card more"><summary><h3>Communities</h3><p>A street, village or valley can keep in touch and look after each other through an outage.<a class="star" href="#clear" aria-label="needs a local radio network">*</a></p><span class="open-hint">More</span></summary>
+      <details class="card more"><summary><h3>Communities</h3><span class="teaser">A street, village or valley can keep in touch and look after each other through an outage.<span class="star" aria-hidden="true">*</span><span class="sr"> (needs a local radio network)</span></span><span class="open-hint">More</span></summary>
         <div class="detail"><p>A community can set up its own radio relays, mains powered with battery and optional solar backup, and a rota of volunteers to answer. In a long outage, responders see one summary of who is on battery and who has asked for help, not a flood of alarms.</p></div></details>
-      <details class="card more"><summary><h3>Teams</h3><p>A simple way to call for a hand at a site or an event.</p><span class="open-hint">More</span></summary>
+      <details class="card more"><summary><h3>Teams</h3><span class="teaser">A simple way to call for a hand at a site or an event.</span><span class="open-hint">More</span></summary>
         <div class="detail"><p>A site, farm or event can give each person the app or a pendant and make the team the responders. Button labels can change, so green might mean &ldquo;checked in&rdquo;. It is not a certified lone-worker service.</p></div></details>
     </div>
   </div>
@@ -168,7 +171,7 @@
     <h2>One press says what you need.</h2>
     <div class="buttons measure">
       <div class="press"><div class="dot big"></div><div><strong>Red: help</strong>
-        <span>Someone is alerted straight away.</span></div></div>
+        <span>Starts a call for help to the people you chose.</span></div></div>
       <div class="press"><div class="dot small amber"></div><div><strong>Amber: need a hand</strong>
         <span>For things that can wait a little while.</span></div></div>
       <div class="press"><div class="dot small green"></div><div><strong>Green: I'm OK</strong>
@@ -183,7 +186,7 @@
 <section id="count-on">
   <div class="wrap">
     <div class="eyebrow-row"><svg class="eye row-eye" data-bg="#0c0f16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true"><defs><clipPath id="ape3"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath></defs><g clip-path="url(#ape3)"><circle cx="234.59" cy="149.83" r="49.15" fill="#009A44"/><path d="M224.43,119.36 L244.75,119.36 L244.75,139.68 L265.07,139.68 L265.07,159.99 L244.75,159.99 L244.75,180.31 L224.43,180.31 L224.43,159.99 L204.12,159.99 L204.12,139.68 L224.43,139.68Z" fill="#0c0f16"/></g><g stroke="#009A44" stroke-width="17" stroke-linecap="round" fill="none"><path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/><path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/><path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/></g></svg><p class="eyebrow">What you can count on</p></div>
-    <h2>A person always answers.</h2>
+    <h2>A person confirms help.</h2>
     <div class="grid">
       <div class="card"><h3>Help is confirmed by a person</h3><p>You are only told help is coming when
         someone has read your message and said so.</p></div>
@@ -215,8 +218,8 @@
     <ol class="route measure">
       <li>Over your home Wi-Fi, straight to the others of your group at home, with no internet.</li>
       <li>Over the internet, while it works.</li>
-      <li>Over your mobile phone network.</li>
-      <li>Over other mobile phone networks.</li>
+      <li>Over your mobile phone network. An iPhone cannot send a text by itself, so if the other ways have failed it offers you one to tap Send on.</li>
+      <li>Over other mobile phone networks, if your phone has a SIM that can use them.</li>
       <li>Over a local radio network<a class="star" href="#clear" aria-label="needs a local radio network">*</a>, where your community has set one up. It runs on mains power,
         with battery and optional solar backup, and needs no licence.</li>
     </ol>
@@ -283,7 +286,7 @@
   </div>
 </footer>
 <script>
-// Each eye is drawn and animated by the shared andeye engine, copied verbatim from the kit.
+// Each eye is drawn and animated by the shared andeye engine, adapted from the kit.
 // The engine has no first-aid cross yet, so the cross is added to its iris group here: it is
 // clipped by the lids and fades in with the iris. Without JavaScript the static mark stays.
 (function () {
