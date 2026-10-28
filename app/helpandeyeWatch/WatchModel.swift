@@ -77,6 +77,7 @@ final class WatchModel: NSObject, ObservableObject {
         if Self.isScreensTest {
             phoneInReach = true
             phoneOpen = [Open(unit: 70001, request: 1, colour: .red, who: "Sam")]
+            if ProcessInfo.processInfo.arguments.contains("-HelpACountdown") { startCountdown() }
             return
         }
         #endif

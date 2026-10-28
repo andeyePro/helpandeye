@@ -15,6 +15,7 @@ final class WatchScreensTests: XCTestCase {
         if let size = ProcessInfo.processInfo.environment["TEXT_SIZE"] {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", size]
         }
+        app.launchArguments += ["-HelpAQuiet"]
     }
 
     func testEveryScreen() throws {
@@ -31,9 +32,12 @@ final class WatchScreensTests: XCTestCase {
         look("call-not-sent")
         app.swipeUp(); app.swipeUp()
         look("call-lower")
-        // The Help complication's countdown, opened as the complication opens it.
-        app.open(URL(string: "helpandeye://countdown")!)
-        app.swipeDown(); app.swipeDown()
+        // The Help complication's countdown. The watch simulator cannot open the complication's
+        // link from a test, so the app is told to start it.
+        app.terminate()
+        app.launchArguments += ["-HelpACountdown"]
+        app.launch()
+        settle(app.buttons["I'm OK"])
         look("countdown")
         app.buttons["I'm OK"].tap()
 

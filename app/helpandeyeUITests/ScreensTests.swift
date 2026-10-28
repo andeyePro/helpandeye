@@ -10,6 +10,7 @@ final class ScreensTests: XCTestCase {
 
     override func setUp() {
         continueAfterFailure = true
+        app.launchArguments += ["-HelpAQuiet"]
         app.launch()
         allowSystemAlerts()
     }
@@ -26,7 +27,8 @@ final class ScreensTests: XCTestCase {
         shoot("start-group-typing")
         tapKeyboardDone()
         // The switch itself sits at the right-hand end of the row.
-        reveal(app.switches["I may also call for help"]).coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        // The switch itself, wherever large text puts it.
+        reveal(app.switches["I may also call for help"]).switches.firstMatch.tap()
         reveal(app.buttons["Start the group"]).tap()
         allowSystemAlerts()
 

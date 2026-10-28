@@ -24,6 +24,14 @@ final class CallerVoice {
         #endif
     }
 
+    /// The screen tests run silently, so a simulator never sounds through the test Mac's speakers.
+    /// Only a debug build on a simulator, launched by a test, takes it.
+    #if DEBUG && targetEnvironment(simulator)
+    static let quiet = ProcessInfo.processInfo.arguments.contains("-HelpAQuiet")
+    #else
+    static let quiet = false
+    #endif
+
     /// The sound file the caller's profile chooses, or nil for none.
     static func file(_ sound: CallerFeedback.Sound, in profile: Profile) -> String? {
         switch sound {
@@ -35,6 +43,7 @@ final class CallerVoice {
 
     /// Plays one of the caller's sounds, also so a choice can be heard before it is made.
     func play(_ file: String?) {
+        guard !Self.quiet else { player = nil; return }
         // Heard with the ringer off: someone who pressed for help is waiting to know.
         try? AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
         guard let file, let url = Bundle.main.url(forResource: file, withExtension: "wav") else { player = nil; return }
@@ -54,7 +63,7 @@ final class CallerVoice {
         if voiceOver {
             AccessibilityNotification.Announcement(feedback.spoken).post()
         }
-        guard profile.soundsAndSpeech else { return }
+        guard profile.soundsAndSpeech, !Self.quiet else { return }
         let file = feedback.sound.flatMap { Self.file($0, in: profile) }
         play(file)
         guard !voiceOver else { return }
