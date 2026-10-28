@@ -101,16 +101,18 @@ final class ScreensTests: XCTestCase {
     /// Saves a screenshot and records what the audit finds, without stopping at the first problem.
     private func look(_ name: String) {
         shoot(name)
-        // Text scrolled under the see-through title and tab bars is read through their blur: not
-        // what anyone reads, so not counted. Apple's clipped-text and partial Dynamic Type checks
+        // Text scrolled under the see-through title and tab bars, or partly off the screen, is
+        // read through a blur or not at all: not what anyone reads, so not counted. Apple's clipped-text and partial Dynamic Type checks
         // are known to flag SwiftUI text that does fit and does grow; those are logged as advice
         // and checked by eye on the screenshots, the largest-text ones above all.
         let bars = (app.navigationBars.allElementsBoundByIndex + app.tabBars.allElementsBoundByIndex).map(\.frame)
         try? app.performAccessibilityAudit { issue in
             let frame = issue.element?.frame ?? .zero
             let detail = "\(name): \(issue.compactDescription) – \(issue.element?.label ?? "") \(frame)"
-            if issue.auditType == .contrast, bars.contains(where: { $0.intersects(frame) }) {
-                print("ADVICE under a bar: " + detail)
+            let screen = self.app.windows.firstMatch.frame
+            if issue.auditType == .contrast, bars.contains(where: { $0.intersects(frame) }) || !screen.contains(frame) {
+                // Read through a bar's blur, or partly scrolled off the screen or out of a sheet.
+                print("ADVICE under a bar or off the screen: " + detail)
             } else if issue.auditType == .textClipped || issue.compactDescription.contains("partially unsupported") {
                 print("ADVICE " + detail)
             } else {

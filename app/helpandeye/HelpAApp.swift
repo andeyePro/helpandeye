@@ -22,15 +22,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 
     func application(_ app: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken token: Data) {
-        MainActor.assumeIsolated { AppModel.shared.relay.pushToken = token }
+        MainActor.assumeIsolated { AppModel.shared.setPushToken(token) }
     }
 
     /// A push from the relay: fetch what is waiting, which schedules this phone's own alerts.
     func application(_ app: UIApplication, didReceiveRemoteNotification info: [AnyHashable: Any],
                      fetchCompletionHandler done: @escaping (UIBackgroundFetchResult) -> Void) {
         Task { @MainActor in
-            await AppModel.shared.relay.poll()
-            AppModel.shared.tick()
+            await AppModel.shared.wake()
             done(.newData)
         }
     }
@@ -64,9 +63,9 @@ struct RootView: View {
                 if me.canCall {
                     CallView().tabItem { Label("Help", systemImage: "cross.fill") }
                 }
-                if me.canRespond {
+                if me.canRespond || !model.others.isEmpty {
                     RespondView().tabItem { Label("Respond", systemImage: "bell.fill") }
-                        .badge(model.inbox.requests.values.filter { !$0.isAcknowledged }.count)
+                        .badge(model.engines.reduce(0) { $0 + $1.activity.inbox.requests.values.filter { !$0.isAcknowledged }.count })
                 }
                 GroupView().tabItem { Label("Group", systemImage: "person.3.fill") }
                 BoxView().tabItem { Label("Box", systemImage: "antenna.radiowaves.left.and.right") }

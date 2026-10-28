@@ -287,3 +287,14 @@ Pass: during the changeover phone B's Box tab says there is no free channel; aft
 5. Turn on VoiceOver and go through the Help tab.
 
 Pass: the keyboard always goes away and never hides the tabs for good. Text gets bigger on every tab and nothing is cut off; nothing is grey-on-grey. I'm locked out shows ticked, then unticked, and phone B shows it, then stops showing it. Something else opens the message box with the keyboard, and its microphone takes speech. VoiceOver reads every button, says which choices are selected, and reads the call's status when it changes.
+
+## 34. A responder in two groups, with one box
+
+Needs two coordinators' phones (A and C) with their own groups, and phone B with one box.
+
+1. Phone B joins phone A's group (section 1). Then, under Group, Other groups you respond in, phone B taps Join another group as a responder and joins phone C's group, invited by phone C to respond.
+2. Press Come now on a caller in phone A's group, then on a caller in phone C's group.
+3. On phone B, acknowledge each.
+4. Try joining a third group invited to call for help.
+
+Pass: phone B's box holds both groups' channels (the Box tab stays Connected) and phone B alerts for both calls, listed under each group's name. Each acknowledgement shows only on its own group's caller. A call in one group never appears on the other group's phones. In step 4 phone B says it can only respond in a further group.

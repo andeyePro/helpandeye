@@ -110,6 +110,19 @@ final class ChannelPlanTests: XCTestCase {
         XCTAssertEqual(after.current, 1)
     }
 
+    func testSeveralGroupsShareTheBoxsChannelsCurrentOnesFirst() {
+        let a = Data(repeating: 1, count: 16), aOld = Data(repeating: 2, count: 16), b = Data(repeating: 3, count: 16)
+        let theirs = Data(repeating: 9, count: 16), stale = Data(repeating: 8, count: 16)
+        let slots: [ChannelPlan.Slot] = [.init(index: 0, name: "Public", secret: theirs), .init(index: 1, name: "Help&I", secret: stale),
+                                         .init(index: 2, name: "", secret: Data(count: 16))]
+        let plan = ChannelPlan.plan(slots: slots, groups: [[a, aOld], [b]])
+        XCTAssertEqual(plan.channels[a], 1, "a Help&I channel no group uses is reused")
+        XCTAssertEqual(plan.channels[b], 2, "the second group's current channel comes before the first's old one")
+        XCTAssertNil(plan.channels[aOld], "no room left for the old channel")
+        XCTAssertEqual(plan.writes.map(\.name), ["Help&I", "Help&I 2"])
+        XCTAssertFalse(plan.writes.contains { $0.index == 0 }, "someone else's channel is never overwritten")
+    }
+
     func testOtherChannelsAreNeverOverwritten() {
         let p = ChannelPlan.plan(slots: [slot(0, "Public", other), slot(1, "Family", Data(repeating: 5, count: 16))], secrets: [new])
         XCTAssertTrue(p.writes.isEmpty)

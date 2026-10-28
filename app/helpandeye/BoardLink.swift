@@ -6,8 +6,8 @@ import UIKit
 /// The Bluetooth link to a Heltec board running MeshCore's standard companion firmware.
 ///
 /// Commands go one at a time and wait for their reply, as the companion protocol requires
-/// (`CommandQueue` in helpandeyeCore). Incoming Help&I datagrams on the group's channel are handed
-/// to `onFrame`.
+/// (`CommandQueue` in helpandeyeCore). It can serve several groups (MeshHub): incoming Help&I
+/// datagrams are handed to `onFrame` with the secret of the channel they came on.
 @MainActor
 final class BoardLink: NSObject, ObservableObject {
     enum State: Equatable { case off, unauthorised, connecting, ready, failed(String) }
@@ -19,17 +19,19 @@ final class BoardLink: NSObject, ObservableObject {
     @Published private(set) var found: [CBPeripheral] = []
     @Published private(set) var selfInfo: MeshCore.SelfInfo?
     @Published private(set) var batteryMillivolts: Int?
-    @Published private(set) var helpChannel: UInt8?
-    /// The previous channel during a changeover after a removal. Sends go on both, so members who
-    /// have not scanned their update yet still hear calls and acknowledgements.
-    private var previousChannel: UInt8?
+    /// Where each group's channels are on the box, by secret: each group's current one, and its
+    /// previous one during a changeover after a removal (sends go on both, so members who have not
+    /// scanned their update yet still hear calls and acknowledgements).
+    @Published private(set) var channels: [Data: UInt8] = [:]
+    /// The first group's channel, for the Box screen.
+    var helpChannel: UInt8? { channelGroups.first?.first.flatMap { channels[$0] } }
 
-    var onFrame: ((HelpFrame) -> Void)?
+    var onFrame: ((HelpFrame, Data) -> Void)?
     /// A direct text message: the sender's key prefix (6 bytes) and the text.
     var onText: ((Data, String) -> Void)?
-    /// The channel secrets to listen on: the current one first, then the previous one while boards
-    /// move to new secrets. Whenever they change with the link up, the box is set up again.
-    var secrets: [Data] = [] { didSet { if secrets != oldValue, commands.isUp { Task { await setUpChannels() } } } }
+    /// Each group's channel secrets, current first. Whenever they change with the link up, the box
+    /// is set up again.
+    var channelGroups: [[Data]] = [] { didSet { if channelGroups != oldValue, commands.isUp { Task { await setUpChannels() } } } }
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -111,7 +113,7 @@ final class BoardLink: NSObject, ObservableObject {
 
     /// The link is gone: nothing in flight will be answered, and nothing is listened to.
     private func tearDown() {
-        rx = nil; helpChannel = nil; previousChannel = nil; listenChannels = []
+        rx = nil; channels = [:]; listenChannels = []
         commands.linkDown()
     }
 
@@ -132,18 +134,19 @@ final class BoardLink: NSObject, ObservableObject {
     /// Sends a Help&I frame as a datagram on the group's channel, and on the previous one during a
     /// changeover. The channels are taken once, before anything is awaited, so the packets sent
     /// are exactly the ones the engine counted (`channelsPerSend`).
-    func send(_ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
-        guard state == .ready, let ch = helpChannel else { return .refused("Box not connected") }
-        let old = previousChannel.flatMap { $0 == ch ? nil : $0 }
-        let result = await sendOn(ch, frame, urgent: urgent)
-        guard let old else { return result }
-        let second = await sendOn(old, frame, urgent: urgent)
-        // Sent if either channel took it, so airtime is never given back for a packet on air.
-        return result == .sent || second == .sent ? .sent : result
+    /// Sends on the channels of one group's secrets only, never another group's.
+    func send(_ frame: HelpFrame, urgent: Bool, on secrets: [Data]) async -> MeshSendResult {
+        guard state == .ready else { return .refused("Box not connected") }
+        let chosen = secrets.compactMap { channels[$0] }
+        guard !chosen.isEmpty else { return .refused("No free channel on the box for this group") }
+        var sent = false, last = MeshSendResult.refused("Box not connected")
+        for ch in Set(chosen).sorted() {
+            let r = await sendOn(ch, frame, urgent: urgent)
+            if r == .sent { sent = true } else { last = r }
+        }
+        // Sent if any channel took it, so airtime is never given back for a packet on air.
+        return sent ? .sent : last
     }
-
-    /// How many packets a send puts on air, for the airtime budget.
-    var channelsPerSend: Int { previousChannel == nil || previousChannel == helpChannel ? 1 : 2 }
 
     private func sendOn(_ ch: UInt8, _ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
         let cmd = MeshCore.Command.sendChannelData(index: ch, dataType: HelpFrame.meshDataType, payload: frame.encoded())
@@ -195,7 +198,7 @@ final class BoardLink: NSObject, ObservableObject {
             await setUpOnce()
         } while setUpAgain
         guard commands.isUp else { return }
-        if helpChannel != nil || secrets.isEmpty {
+        if helpChannel != nil || channelGroups.isEmpty {
             if state != .ready { state = .ready; await drainMessages() }
         } else {
             state = .failed("No free channel on the box")
@@ -223,8 +226,8 @@ final class BoardLink: NSObject, ObservableObject {
                 slots.append(.init(index: i, name: name, secret: secret))
             }
         }
-        let want = secrets
-        let plan = ChannelPlan.plan(slots: slots, secrets: want)
+        let want = channelGroups.flatMap { $0.prefix(2) }
+        let plan = ChannelPlan.plan(slots: slots, groups: channelGroups)
         // Listen on what is already there straight away, and on each slot as soon as it is written,
         // so a drain running meanwhile never throws away a frame on a channel just set up.
         let existing = Set(slots.filter { want.contains($0.secret) }.map(\.index))
@@ -236,11 +239,9 @@ final class BoardLink: NSObject, ObservableObject {
                 listenChannels.insert(w.index)
             }
         }
-        let ok = { (i: UInt8?) in i.map { existing.contains($0) || written.contains($0) } ?? false }
-        helpChannel = ok(plan.current) ? plan.current : nil
-        previousChannel = ok(plan.previous) ? plan.previous : nil
-        // Stop listening on slots that no longer hold the group's channels, last.
-        listenChannels = Set([helpChannel, previousChannel].compactMap { $0 })
+        channels = plan.channels.filter { existing.contains($0.value) || written.contains($0.value) }
+        // Stop listening on slots that no longer hold a group's channels, last.
+        listenChannels = Set(channels.values)
     }
 
     func refreshBattery() async {
@@ -269,7 +270,7 @@ final class BoardLink: NSObject, ObservableObject {
             })
             switch r {
             case let .channelData(ch, type, payload, _)?:
-                if listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload) { onFrame?(f) }
+                if listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload), let secret = secret(of: ch) { onFrame?(f, secret) }
             case let .contactText(prefix, text, _)?: onText?(prefix, text)
             case .channelText?: continue
             default: return
@@ -283,8 +284,9 @@ final class BoardLink: NSObject, ObservableObject {
         // now would take them off the board and throw them away.
         if case .messagesWaiting = r { if state == .ready { Task { await drainMessages() } }; return }
         if commands.receive(r) { return }
-        if case let .channelData(ch, type, payload, _) = r, listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload) {
-            onFrame?(f)
+        if case let .channelData(ch, type, payload, _) = r, listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload),
+           let secret = secret(of: ch) {
+            onFrame?(f, secret)
         }
         if case let .contactText(prefix, text, _) = r { onText?(prefix, text) }
     }
@@ -387,8 +389,11 @@ extension BoardLink: @preconcurrency CBPeripheralDelegate {
     }
 }
 
-extension BoardLink: MeshLink {
+extension BoardLink: SharedBox {
     var isReady: Bool { state == .ready }
+
+    /// Which group's channel a slot holds.
+    fileprivate func secret(of channel: UInt8) -> Data? { channels.first { $0.value == channel }?.key }
     var boxPublicKey: Data? { selfInfo?.publicKey }
 
     var unavailableReason: String {

@@ -6,8 +6,22 @@ import UserNotifications
 /// the background.
 @MainActor final class NotificationAlerts: AlertScheduler {
     private let center = UNUserNotificationCenter.current()
+    /// Empty for the group this person calls in; a short tag for each other group they respond
+    /// in, so the same unit and request numbers in two groups never share an alert.
+    private let prefix: String
+    private let ownsCheckIns: Bool
 
-    private func ids(_ key: IncomingRequest.Key) -> [String] { (0..<64).map { "req-\(key.unit)-\(key.request)-\($0)" } }
+    init(prefix: String = "", ownsCheckIns: Bool = true) { self.prefix = prefix; self.ownsCheckIns = ownsCheckIns }
+
+    private func ids(_ key: IncomingRequest.Key) -> [String] { (0..<64).map { "req-\(prefix)\(key.unit)-\(key.request)-\($0)" } }
+
+    /// Whether an alert is this group's: another group's tag starts with a letter, this one's
+    /// numbers straight away when it has none.
+    private func isMine(_ id: String) -> Bool {
+        let head = "req-" + prefix
+        guard id.hasPrefix(head) else { return ownsCheckIns && id.hasPrefix("checkin-") }
+        return !prefix.isEmpty || id.dropFirst(head.count).first?.isNumber == true
+    }
 
     func schedule(_ alert: Alert) {
         center.removePendingNotificationRequests(withIdentifiers: ids(alert.key))
@@ -28,7 +42,12 @@ import UserNotifications
         center.removeDeliveredNotifications(withIdentifiers: ids(key))
     }
 
-    func cancelAll() { center.removeAllPendingNotificationRequests() }
+    func cancelAll() {
+        center.getPendingNotificationRequests { [isMine = self.isMine] pending in
+            let mine = pending.map(\.identifier).filter(isMine)
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: mine)
+        }
+    }
 
     func tellCaller(title: String, body: String) {
         let content = UNMutableNotificationContent()
@@ -40,6 +59,8 @@ import UserNotifications
     }
 
     func setCheckInReminders(_ minutes: [Int]) {
+        // A group this person only responds in has no check-ins of theirs.
+        guard ownsCheckIns else { return }
         center.removePendingNotificationRequests(withIdentifiers: (0..<1440).map { "checkin-\($0)" })
         for t in minutes {
             let content = UNMutableNotificationContent()

@@ -66,6 +66,9 @@ struct CreateGroupView: View {
 /// and their name and number are kept for next time.
 struct JoinGroupView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    /// Joining a further group, as a responder only, while already in one.
+    var another = false
     @AppStorage("join.invite") private var savedInvite = ""
     @AppStorage("join.request") private var savedRequest = ""
     @AppStorage(MyDetails.nameKey) private var name = ""
@@ -80,8 +83,11 @@ struct JoinGroupView: View {
         Form {
             if invite == nil {
                 CodeReader(prompt: "Scan the code on the coordinator's phone") { code in
-                    if (try? Joining.decode(Joining.Invitation.self, from: code)) != nil { savedInvite = code; error = nil }
-                    else { error = codeProblem(code, expected: .invitation) }
+                    if let i = try? Joining.decode(Joining.Invitation.self, from: code) {
+                        if another, i.role != .responder {
+                            error = "In a further group you can only respond. Ask its coordinator to invite you to respond to others."
+                        } else { savedInvite = code; error = nil }
+                    } else { error = codeProblem(code, expected: .invitation) }
                 }
             } else if requestCode == nil, let invite {
                 Section(header: Header("Joining \(invite.groupName)")) {
@@ -108,7 +114,13 @@ struct JoinGroupView: View {
                         let w = try Joining.decode(Joining.Welcome.self, from: code)
                         let group = try Joining.open(w, invite: invite, me: model.identity)
                         savedInvite = ""; savedRequest = ""
-                        model.joined(group, as: w.memberNumber, invitedBy: group.members.first { $0.publicKey == invite.coordinatorKey }?.number)
+                        let by = group.members.first { $0.publicKey == invite.coordinatorKey }?.number
+                        if another {
+                            if model.joinedAnother(group, as: w.memberNumber, invitedBy: by) { dismiss() }
+                            else { self.error = "You are in that group already, or were not invited to respond in it." }
+                        } else {
+                            model.joined(group, as: w.memberNumber, invitedBy: by)
+                        }
                     } catch {
                         self.error = (try? Joining.decode(Joining.Welcome.self, from: code)) != nil
                             ? "That welcome code was made for a different invitation. Ask the coordinator to start again with a new one."
@@ -210,6 +222,7 @@ struct GroupView: View {
                         Button("Invite someone") { inviting = true }
                     }
                 }
+                OtherGroupsSection()
                 if model.me?.role == .coordinator {
                     Section(header: Header("For coordinators")) {
                         NavigationLink("Advanced settings") { AdvancedSettingsView() }
@@ -388,6 +401,30 @@ struct RelaySection: View {
             Text("Members get the new address at once, over the old address or the local radio, or when they next join.")
         }
         .onAppear { url = model.group?.relayURL ?? "" }
+    }
+}
+
+/// The other groups this person responds in, and joining one more.
+struct OtherGroupsSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var joining = false
+
+    var body: some View {
+        Section(header: Header("Other groups you respond in")) {
+            ForEach(model.others) { o in
+                Text(o.engine.group?.name ?? "A group")
+                    .swipeActions { Button("Leave", role: .destructive) { model.leave(o) } }
+                    .accessibilityAction(named: "Leave this group") { model.leave(o) }
+            }
+            Button("Join another group as a responder") { joining = true }
+            Text("You call for help in one group only. In others you can respond, with the same box.")
+        }
+        .sheet(isPresented: $joining) {
+            NavigationStack {
+                JoinGroupView(another: true)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { joining = false } } }
+            }
+        }
     }
 }
 

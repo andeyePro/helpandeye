@@ -48,4 +48,33 @@ public enum ChannelPlan {
         }
         return Result(writes: writes, current: placed.first ?? nil, previous: placed.count > 1 ? placed[1] : nil)
     }
+
+    /// For one box serving several groups (MeshHub): `groups` is each group's current secret, then
+    /// its previous one during a changeover, in order of group. Current channels are placed before
+    /// any previous one, so a full box keeps every group able to call. Returns the slots to write
+    /// and where each secret will be.
+    public static func plan(slots: [Slot], groups: [[Data]]) -> (writes: [Write], channels: [Data: UInt8]) {
+        let wanted = Set(groups.flatMap { $0.prefix(2) })
+        var free = slots.filter { s in
+            let empty = s.name.isEmpty && !s.secret.contains(where: { $0 != 0 })
+            let stale = s.name.hasPrefix("Help&I") && !wanted.contains(s.secret)
+            return empty || stale
+        }.map(\.index).sorted()
+        var writes: [Write] = []
+        var channels: [Data: UInt8] = [:]
+        // Every group's current channel first, then the old ones.
+        let order = groups.enumerated().compactMap { g in g.element.first.map { (g.offset, 0, $0) } }
+            + groups.enumerated().compactMap { g in g.element.count > 1 ? (g.offset, 1, g.element[1]) : nil }
+        for (group, n, secret) in order where channels[secret] == nil {
+            if let found = slots.first(where: { $0.secret == secret })?.index {
+                channels[secret] = found
+            } else if !free.isEmpty {
+                let i = free.removeFirst()
+                let base = group == 0 ? "Help&I" : "Help&I \(group + 1)"
+                writes.append(Write(index: i, name: n == 0 ? base : base + " old", secret: secret))
+                channels[secret] = i
+            }
+        }
+        return (writes, channels)
+    }
 }

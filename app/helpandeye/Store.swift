@@ -7,8 +7,10 @@ import Security
 /// request numbers must never restart while the unit number stays the same; the activity in a
 /// protected file, so a request still open when the app is closed is still there when it reopens.
 @MainActor final class AppStore: EngineStore {
-    func save(_ state: SavedState?) { Store.save(state) }
-    func save(_ activity: Activity) { Store.save(activity) }
+    private let group: String
+    init(group: String = "") { self.group = group }
+    func save(_ state: SavedState?) { Store.save(state, group: group) }
+    func save(_ activity: Activity) { Store.save(activity, group: group) }
 }
 
 enum Store {
@@ -47,30 +49,53 @@ enum Store {
         save(Activity())
     }
 
-    static func loadState() -> SavedState? {
-        guard case let .success(data) = read("state") else { return nil }
+    /// `group` is empty for the group this person calls in (kept where it always was), or a tag for
+    /// each other group they respond in.
+    static func loadState(_ group: String = "") -> SavedState? {
+        guard case let .success(data) = read("state" + group) else { return nil }
         return try? JSONDecoder().decode(SavedState.self, from: data)
     }
 
     @discardableResult
-    static func save(_ state: SavedState?) -> Bool {
-        guard let state else { SecItemDelete(query("state") as CFDictionary); return true }
+    static func save(_ state: SavedState?, group: String = "") -> Bool {
+        guard let state else { SecItemDelete(query("state" + group) as CFDictionary); return true }
         guard let data = try? JSONEncoder().encode(state) else { return false }
-        return write("state", data)
+        return write("state" + group, data)
     }
 
-    private static var activityURL: URL {
+    private static func file(_ name: String) -> URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("activity.json")
+        return dir.appendingPathComponent(name)
     }
 
-    static func loadActivity() -> Activity {
-        (try? Data(contentsOf: activityURL)).flatMap { try? JSONDecoder().decode(Activity.self, from: $0) } ?? Activity()
+    static func loadActivity(_ group: String = "") -> Activity {
+        (try? Data(contentsOf: file("activity\(group).json"))).flatMap { try? JSONDecoder().decode(Activity.self, from: $0) } ?? Activity()
     }
 
-    static func save(_ activity: Activity) {
-        try? JSONEncoder().encode(activity).write(to: activityURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    static func save(_ activity: Activity, group: String = "") {
+        try? JSONEncoder().encode(activity).write(to: file("activity\(group).json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    static func forget(group: String) {
+        save(nil as SavedState?, group: group)
+        try? FileManager.default.removeItem(at: file("activity\(group).json"))
+    }
+
+    /// The box's radio use in the last hour, shared by every group (MeshHub).
+    static func loadAirtime() -> AirtimeBudget? {
+        (try? Data(contentsOf: file("airtime.json"))).flatMap { try? JSONDecoder().decode(AirtimeBudget.self, from: $0) }
+    }
+
+    static func save(airtime: AirtimeBudget?) {
+        guard let airtime else { return }
+        try? JSONEncoder().encode(airtime).write(to: file("airtime.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    /// The other groups this person responds in, by tag.
+    static var otherGroups: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "groups.other") ?? [] }
+        set { UserDefaults.standard.set(newValue, forKey: "groups.other") }
     }
 
     /// The Bluetooth code this app set on a box, by the box's Bluetooth identifier.
