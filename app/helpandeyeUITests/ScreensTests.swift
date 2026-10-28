@@ -49,7 +49,7 @@ final class ScreensTests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
         reveal(app.buttons["Profiles"]).tap()
         look("profiles")
-        app.buttons["Standard"].firstMatch.tap()
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Standard")).firstMatch.tap()
         look("profile")
         app.swipeUp(); app.swipeUp()
         look("profile-lower")

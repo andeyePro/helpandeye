@@ -48,12 +48,14 @@ struct YourSettingsSection: View {
         let given = model.group?.profile(of: model.saved?.me) ?? .standard
         Section(header: Header("Your settings")) {
             Text("Your profile: \(given.name)")
-            Group {
+            if given.mayChange(.buttons) {
                 Picker("Your buttons show", selection: own(\.face)) {
                     ForEach(Profile.Face.allCases, id: \.self) { Text($0.label) }
                 }
-            }.disabled(!given.mayChange(.buttons))
-            Group {
+            } else {
+                fixed("Your buttons show", model.profile.face.label)
+            }
+            if given.mayChange(.sounds) {
                 Toggle("Sounds and spoken words", isOn: own(\.soundsAndSpeech))
                     .accessibilityHint("Says out loud whether your call went, and when someone has seen it")
                 Picker("When a call has not gone", selection: own(\.notSent)) {
@@ -62,15 +64,23 @@ struct YourSettingsSection: View {
                 Picker("When someone has seen it", selection: own(\.seen)) {
                     ForEach(Profile.SeenSound.allCases, id: \.self) { Text($0.label) }
                 }
-            }.disabled(!given.mayChange(.sounds))
+            } else {
+                fixed("Sounds and spoken words", model.profile.soundsAndSpeech ? "On" : "Off")
+                fixed("When a call has not gone", model.profile.notSent.label)
+                fixed("When someone has seen it", model.profile.seen.label)
+            }
             HearSounds(profile: model.profile)
-            Picker("I'm OK after Help or Need a hand", selection: own(\.afterOK)) {
-                ForEach(Profile.AfterOK.allCases, id: \.self) { Text($0.label) }
-            }.disabled(!given.mayChange(.afterOK))
-            Toggle("Send where I am with every \(Colour.red.label) or \(Colour.amber.label)", isOn: own(\.shareWhere))
-                .disabled(!given.mayChange(.shareWhere))
-            Toggle("Offer a text to my responders if nothing else got through", isOn: own(\.textFallback))
-                .disabled(!given.mayChange(.textFallback))
+            if given.mayChange(.afterOK) {
+                Picker("I'm OK after Help or Need a hand", selection: own(\.afterOK)) {
+                    ForEach(Profile.AfterOK.allCases, id: \.self) { Text($0.label) }
+                }
+            } else {
+                fixed("I'm OK after Help or Need a hand", model.profile.afterOK.label)
+            }
+            let share = "Send where I am with every \(Colour.red.label) or \(Colour.amber.label)"
+            if given.mayChange(.shareWhere) { Toggle(share, isOn: own(\.shareWhere)) } else { fixed(share, model.profile.shareWhere ? "On" : "Off") }
+            let text = "Offer a text to my responders if nothing else got through"
+            if given.mayChange(.textFallback) { Toggle(text, isOn: own(\.textFallback)) } else { fixed(text, model.profile.textFallback ? "On" : "Off") }
             Text("Where you are goes only to your responders, encrypted, after the call itself.")
             if Profile.Setting.allCases.contains(where: { !given.mayChange($0) }) {
                 Text("Settings you cannot change are set by your coordinator.")
@@ -82,6 +92,15 @@ struct YourSettingsSection: View {
 
     private func own<T>(_ path: WritableKeyPath<Profile, T>) -> Binding<T> {
         Binding(get: { model.profile[keyPath: path] }, set: { v in model.setOwn { $0[keyPath: path] = v } })
+    }
+
+    /// A setting the coordinator has set: shown in words, not as a control that does nothing.
+    private func fixed(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+            Text("\(value). \(SetByCoordinator.text)").font(.callout)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
