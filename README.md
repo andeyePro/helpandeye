@@ -1,8 +1,9 @@
 # Help&I
 
 **Resilient call-for-help system.** Press a button and reach people who know you, over whatever
-still works: the internet, your mobile network, another mobile network, or a local radio mesh
-that needs no mains electricity, no internet and no licence.
+still works: your home Wi-Fi, phone to phone with nothing else, the internet, your mobile network,
+another mobile network, or a local radio mesh that needs no mains electricity, no internet and no
+licence.
 
 Status: **pre-alpha.** A first prototype of the app and the internet relay is in `app/` and
 `relay/`. It has not yet been tested on real phones and radios. Nothing here is ready to rely on.
@@ -79,10 +80,12 @@ repeaters on mains power with battery and optional solar backup. It reaches the 
 mobile networks only through the phone app, over Bluetooth, because the phone goes out with the user
 and the box stays at home. A call for help goes out at once over every route that works:
 
-1. Internet, through the phone
-2. The phone's own mobile network
-3. Other mobile networks, if the phone has a multi-network SIM
-4. The MeshCore mesh, where the community has built one
+1. Home Wi-Fi, straight to the group's other phones on the same network, with no server or
+   internet: a household, a granny flat or a small lab needs nothing but its phones
+2. Internet, through the phone
+3. The phone's own mobile network
+4. Other mobile networks, if the phone has a multi-network SIM
+5. The MeshCore mesh, where the community has built one
 
 ## Privacy
 
