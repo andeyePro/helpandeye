@@ -80,10 +80,12 @@ Pass: phone B alerts as in section 3, and the watch shows "Sent. Waiting for a r
 Then, with the internet route set up (section 5) and the watch on Wi-Fi or its own mobile service:
 
 2. Open Help&I on phone A once with the watch nearby, so the phone hands the watch the group. Then put phone A out of the watch's range (or switch phone A off).
-3. On the watch, press Come now. On phone B, acknowledge.
-4. Make phone B a responder's own watch test too: put phone B out of range of its watch, press Come now on phone A, and acknowledge on phone B's watch.
+3. On phone A's watch, press Come now. On phone B, acknowledge.
+4. Bring phone A back in reach of its watch and press Come now on the watch again.
+5. Now test a responder's watch: give phone B a paired watch, open Help&I on phone B once with it nearby, then switch phone B off. Press Come now on phone A and acknowledge on phone B's watch.
+6. On phone A, leave the group.
 
-Pass: with phone A out of reach the watch says calls go over its own internet, the call reaches phone B, and the watch shows the acknowledgement only after phone B's person pressed it. Phone B's watch buzzes for the call only while phone B is out of reach, and its acknowledgement shows on phone A as phone B's. With no internet on the watch either, it shows a cross and tells the wearer to use their phone or call 999.
+Pass: in step 3 the watch says calls go over its own internet, phone B alerts, and the watch shows the acknowledgement only after phone B's person pressed it. In step 4 phone B shows one call, not two. In step 5 phone B's watch buzzes for the call (it does not buzz while phone B is on and alerting), and phone A shows the acknowledgement as phone B's. After step 6 phone A's watch no longer calls or alerts for the group. With no internet on the watch and its phone out of reach, the watch shows a cross and tells the wearer to use their phone or call 999.
 
 ## 8. Removing a lost phone
 

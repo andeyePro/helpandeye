@@ -58,6 +58,13 @@ public struct Alert: Equatable, Sendable {
     /// "I'm OK now": an ordinary notification, not a time-sensitive one with an urgent sound.
     public let calm: Bool
     public let times: [Date]
+
+    /// The same alert, let go late (a watch's, held while the phone was in reach): times already
+    /// past become one alert now, never a burst of them.
+    public func fromNow(_ now: Date) -> Alert {
+        let future = times.filter { $0 > now }
+        return Alert(key: key, title: title, body: body, calm: calm, times: (times.count > future.count ? [now] : []) + future)
+    }
 }
 
 @MainActor public protocol AlertScheduler: AnyObject {
@@ -372,7 +379,23 @@ public final class HelpEngine: ObservableObject {
             activity.outgoing.append(r)
             return
         }
-        var r = OutgoingRequest(unit: unit, number: nextRequestNumber(), colour: colour, createdAt: now())
+        launch(OutgoingRequest(unit: unit, number: nextRequestNumber(), colour: colour, createdAt: now()))
+    }
+
+    /// On the phone: sends a call its watch made, under the watch's number, on the phone's own
+    /// routes too. Responders hear one call however many ways it comes, and both devices hear its
+    /// acknowledgement. Returns false if it is not this phone's caller's call.
+    @discardableResult
+    public func adopt(_ call: HelpFrame) -> Bool {
+        guard !companion, case let .call(unit, number, colour, sentAt) = call, unit == me?.unit, number >= 0x8000 else { return false }
+        if activity.outgoing.contains(where: { $0.unit == unit && $0.number == number }) { return true }
+        launch(OutgoingRequest(unit: unit, number: number, colour: colour, createdAt: Date(timeIntervalSince1970: TimeInterval(sentAt))))
+        return true
+    }
+
+    private func launch(_ request: OutgoingRequest) {
+        var r = request
+        let colour = r.colour
         let routes = RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false)
         if !routes.contains(.mesh) { r.update(.mesh, .failed(mesh.unavailableReason)) }
         if !routes.contains(.internet) { r.update(.internet, .failed(relay.lastProblem ?? "Internet route not set up")) }
@@ -708,7 +731,8 @@ public final class HelpEngine: ObservableObject {
             }
             return
         case let .board(member, key, _):
-            guard member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey, group: groupID),
+            // A watch has no box: other members' boxes are the phone's business.
+            guard !companion, member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey, group: groupID),
                   activity.boardKeys[member] != key else { return }
             activity.boardKeys[member] = key
             spawn {

@@ -40,6 +40,13 @@ enum Store {
     @discardableResult
     static func keep(handedOver identity: DeviceIdentity) -> Bool { write("handover.identity", identity.rawRepresentation) }
 
+    /// On a watch whose owner left the group: nothing of theirs is kept.
+    static func forgetHandedOver() {
+        SecItemDelete(query("handover.identity") as CFDictionary)
+        save(nil as SavedState?)
+        save(Activity())
+    }
+
     static func loadState() -> SavedState? {
         guard case let .success(data) = read("state") else { return nil }
         return try? JSONDecoder().decode(SavedState.self, from: data)

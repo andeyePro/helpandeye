@@ -75,6 +75,31 @@ import XCTest
         XCTAssertEqual(watch.engine.saved!.lastRequest, before)
     }
 
+    func testAWatchCallSentByBothWatchAndPhoneIsOneCall() async {
+        watch.engine.press(.red)
+        XCTAssertTrue(caller.engine.adopt(watch.request!.callFrame), "the phone takes its watch's call")
+        XCTAssertTrue(caller.engine.adopt(watch.request!.callFrame), "and taking it twice changes nothing")
+        await air.run()
+        let key = IncomingRequest.Key(unit: watch.request!.unit, request: watch.request!.number)
+        XCTAssertEqual(caller.request?.number, key.request, "under the watch's number, not a second call")
+        XCTAssertEqual(caller.engine.activity.outgoing.filter { $0.number == key.request }.count, 1)
+        XCTAssertEqual(responder.engine.activity.inbox.requests.count, 1, "responders hear one call")
+        responder.engine.acknowledge(key)
+        await air.run()
+        XCTAssertEqual(watch.request?.status, .seen(responder: responder.engine.saved!.me))
+        XCTAssertEqual(caller.request?.status, .seen(responder: responder.engine.saved!.me))
+        XCTAssertFalse(responder.engine.adopt(watch.request!.callFrame), "only the caller's own phone takes it")
+        XCTAssertFalse(caller.engine.adopt(.call(unit: key.unit, request: 5, colour: .red, sentAt: 0)), "only watch-numbered calls")
+    }
+
+    func testHeldAlertsLetGoLateBuzzOnceNotInABurst() {
+        let t = clock.now
+        let a = Alert(key: .init(unit: 1, request: 1), title: "t", body: "b", calm: false,
+                      times: [t.addingTimeInterval(-300), t.addingTimeInterval(-120), t.addingTimeInterval(60)])
+        XCTAssertEqual(a.fromNow(t).times, [t, t.addingTimeInterval(60)])
+        XCTAssertEqual(Alert(key: a.key, title: "t", body: "b", calm: false, times: [t.addingTimeInterval(60)]).fromNow(t).times, [t.addingTimeInterval(60)])
+    }
+
     func testAHandoverWithOtherKeysIsRefused() {
         XCTAssertFalse(watch.engine.take(WatchHandover(saved: caller.engine.saved!, identity: DeviceIdentity())))
         XCTAssertFalse(responder.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity)),
