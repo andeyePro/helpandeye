@@ -273,7 +273,7 @@ struct ProfileEditor: View {
             ForEach(Colour.allCases, id: \.self) { c in
                 LabeledField(label: ButtonWords.standard(c), text: words(ButtonWords.key(c)))
                 Picker("Symbol for \(ButtonWords.words(c, in: p))", selection: symbol(c)) {
-                    ForEach(Profile.symbolChoices, id: \.self) { name in Label(name, systemImage: name).labelStyle(.iconOnly).tag(name) }
+                    ForEach(Profile.symbolChoices, id: \.self) { name in Label(symbolWords(name), systemImage: name).tag(name) }
                 }
             }
             if Colour.allCases.contains(where: { ButtonWords.soundsLikeEmergencyService(ButtonWords.words($0, in: p)) }) {
@@ -300,6 +300,24 @@ struct ProfileEditor: View {
                 if s.times.count > 1 { DatePicker("Second check-in", selection: time(1, s), displayedComponents: .hourAndMinute) }
             }
             Toggle("They may set their own check-ins instead", isOn: allowed(.checkIns))
+        }
+    }
+
+    /// What each symbol is, for the picker and VoiceOver.
+    private func symbolWords(_ name: String) -> String {
+        switch name {
+        case "hand.raised.fill": "Raised hand"
+        case "hands.and.sparkles.fill": "Hands"
+        case "checkmark": "Tick"
+        case "sos": "SOS"
+        case "exclamationmark.triangle.fill": "Warning sign"
+        case "bell.fill": "Bell"
+        case "phone.fill": "Phone"
+        case "house.fill": "House"
+        case "heart.fill": "Heart"
+        case "hand.thumbsup.fill": "Thumbs up"
+        case "figure.wave": "Waving figure"
+        default: name
         }
     }
 
