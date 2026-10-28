@@ -33,6 +33,27 @@ lists what is still open. Items marked **Proposed** are not yet agreed.
   that nobody has seen their call now, it goes out again, and responders are alerted again.
 - Groups are on a free or a Pro tier. See [Tiers and cost](#tiers-and-cost).
 
+## Profiles
+
+Agreed with Martin, 2026-10-28.
+
+- A coordinator makes named sets of settings, called profiles, such as "Living alone" or "Lone
+  worker", and gives one to each person who calls for help. Everyone starts on the group's
+  standard profile.
+- A profile covers what each button shows (words, an Apple symbol, or both; both by default:
+  a raised hand, a helping hand and a tick), the sounds and spoken words, what I'm OK does after
+  Help or Need a hand, sharing where they are, offering a text when nothing else got through,
+  check-ins, and how often responders are alerted again. SOS is allowed as a button's words, with
+  a warning to make doubly clear to the people on that profile that it does not replace 999.
+- For each setting the coordinator chooses whether the person may change it. Settings they may
+  not change are shown, but cannot be changed; beside them the person can ask the coordinator
+  to change one. The request goes signed, over the internet only, and is shown under Group for
+  coordinators. It is never on the call screen, so it cannot confuse anyone in an emergency.
+- A profile can hide the settings page, so a caller sees only the three buttons. When a group
+  with only one coordinator does that, the app suggests adding a second.
+- Nobody can change the safety rules: nothing closes a call on its own, the cross shows when a
+  call did not go, and the notice that Help&I does not replace 999 stays.
+
 ## Who is alerted
 
 The app shares requests out fairly and prioritises the closest responder:
@@ -65,6 +86,19 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
   stay within the duty-cycle limit, so follow-ups go over the mesh only if no other route worked.
 - A responder's acknowledgement goes back the same way. The caller sees "Seen by a responder"
   only after a human pressed acknowledge, and a cross if nothing could be sent at all.
+
+## Closing a call, and I'm OK after a call
+
+Agreed with Martin, 2026-10-28 ([decision 6](design-decisions.md#d6)).
+
+- A call stays open until a person closes it: the caller, where their profile allows it, or a
+  coordinator, who records either that the caller agreed or a reason, such as "spoke to them on
+  the phone, all well". Nothing closes a call on its own. A close is signed by whoever made it.
+- I'm OK pressed while Help or Need a hand is open does one of two things, set per profile:
+  it closes the call (A), or it stops the urgent repeats while the call stays open until a
+  responder has checked (B). New groups start on B. The words the caller hears are editable.
+- A coordinator's reason is personal, so it goes over the internet only; the mesh carries the
+  close without it.
 
 ## Routes
 
@@ -112,6 +146,11 @@ Escalation comes after 2 minutes for red and 15 minutes for amber, adjustable pe
 - Red, amber and green buttons, and the state of the last request.
 - Sends through the phone, or directly over the watch's own mobile data if it has it.
 - Does not replace the watch's own fall detection or emergency calling.
+- A Help complication in every shape, and ready-made Apple faces (easy-read analogue and digital)
+  with it large, added in one tap from the phone.
+- Tapping the complication starts a 60-second countdown shown in the red button, vibrating every
+  10 seconds. At 30 seconds with no touch it says "Calling for help in 30 seconds. Press I'm OK to
+  stop, or Help to ask for help now." At 0 it sends Help.
 
 ## Keys and setting up a group
 
@@ -152,6 +191,15 @@ Decided for now, following common practice for end-to-end encrypted apps (Martin
   follows over the internet only; with no internet they show as "Member" and their number.
 - Member numbers are never reused, and a removed member can never be added back under the same
   number, so an old signed message replayed by a removed phone cannot let it back in.
+
+## The log
+
+Agreed with Martin, 2026-10-28.
+
+- On by default; a coordinator can switch it off for the group. Each coordinator's phone keeps
+  its own log of every press, delivery, acknowledgement, close and settings change it learns of,
+  with who and when, encrypted on that phone. It is readable under Group and can be exported.
+- Every settings change is logged and shown to the other coordinators.
 
 ## Rota gaps without internet
 

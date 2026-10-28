@@ -41,10 +41,12 @@ Every PR description must state:
 
 ## Rules that are easy to break
 
-- **Help is confirmed by a human.** Nothing may tell a user that help is coming unless a responder
-  pressed acknowledge. Never auto-acknowledge, auto-close or time out a red-button request.
-- **No false reassurance.** The unit shows a cross when delivery fails. Do not add a
-  "delivered" tick or any state a user could read as "someone is on their way".
+- **Help is confirmed by a human.** Only a person closes a call: the caller where their
+  coordinator allows it, or a coordinator who records why (decision 6). Nothing acknowledges,
+  closes or times out a call on its own.
+- **No false reassurance.** Nothing may tell a user that help is coming unless a responder
+  pressed acknowledge. The unit shows a cross when delivery fails. Do not add a "delivered" tick
+  or any state a user could read as "someone is on their way".
 - **The buttons work alone.** No core function may depend on the phone app, Bluetooth, Wi-Fi or
   the internet.
 - **Supplement, never replace.** Copy, packaging and the unit itself must say that Help&I does not
