@@ -31,7 +31,6 @@ lists what is still open. Items marked **Proposed** are not yet agreed.
   not know they are in the group, and to ask another coordinator.
 - If someone is removed after their acknowledgement reached a caller, the caller is told plainly
   that nobody has seen their call now, it goes out again, and responders are alerted again.
-- Groups are on a free or a Pro tier. See [Tiers and cost](#tiers-and-cost).
 
 ## Profiles
 
@@ -112,7 +111,7 @@ Agreed with Martin, 2026-10-28 ([decision 6](design-decisions.md#d6)).
 
 ## How the internet route works
 
-- Requests go end-to-end encrypted to a relay, which is a Cloudflare Worker. Pro groups also
+- Requests go end-to-end encrypted to a relay, which is a Cloudflare Worker. A group can also
   use a second, independent relay on a different provider, so that no single server or provider
   is needed.
 - Each relay wakes responders' phones through Apple's and Google's push services, which is the
@@ -123,15 +122,12 @@ Agreed with Martin, 2026-10-28 ([decision 6](design-decisions.md#d6)).
 - Responders' apps poll the relays when opened, in case a push was lost.
 - The relays see only encrypted messages and unit numbers.
 
-## Tiers and cost
+## The relay's daily allowance
 
-- **Free:** must cost andeye nothing per group. It uses one relay within Cloudflare's free
-  allowance, Apple's and Google's push services (free), and the mesh. If the free allowance runs
-  out, the app shows a cross for the internet route, never a silent failure.
-- The relay counts its use against the free allowance. Before it runs out, the coordinator gets
+- The relay counts its use against its daily allowance. Before it runs out, the coordinator gets
   an alert they must acknowledge. If they do not, the group's responders are alerted too.
-- **Pro:** a subscription. It adds the second relay and anything else that buys resilience. andeye
-  pays for it, and Pro fees must more than cover what it costs.
+- If the allowance runs out, the app shows a cross for the internet route, never a silent
+  failure.
 
 ## Alerts on the responder's phone
 
@@ -213,6 +209,5 @@ Agreed with Martin, 2026-10-28.
 
 ## Open questions
 
-- Which provider runs the Pro second relay, and the Pro price.
 - How distance-based priority works for callers who move, such as walkers, using the position
   they send.

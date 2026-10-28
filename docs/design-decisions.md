@@ -33,5 +33,5 @@ decision silently.
 - Remote areas with no mobile signal and no relay in range: satellite messaging through the phone or a device such as Garmin inReach, rather than PMR446, CB or amateur radio.
 - Which BS 8484 and BS 9518 clauses the volunteer-responder model cannot meet, and whether a partner alarm receiving centre is needed for certified deployments.
 - Fall detection: Apple's CMFallDetectionManager needs an entitlement granted on application by the Account Holder, and the system's own fall alert still fires first. Apply once the watch app exists. Whether Google or Samsung expose the same on Wear OS is unchecked.
-- UKCA/RED conformity route for sold units, product liability insurance, and how the TSA telecare
+- UKCA/RED conformity route for sold units, and how the TSA telecare
   quality framework applies.
