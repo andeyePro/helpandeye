@@ -157,6 +157,7 @@ public final class HelpEngine: ObservableObject {
     public let identity: DeviceIdentity
     public let mesh: MeshLink
     public let relay: RelayLink
+    public let homeWiFi: LocalLink
     let alerts: AlertScheduler
     let store: EngineStore
     let now: () -> Date
@@ -187,8 +188,9 @@ public final class HelpEngine: ObservableObject {
 
     public init(identity: DeviceIdentity, mesh: MeshLink, relay: RelayLink, alerts: AlertScheduler, store: EngineStore,
                 saved: SavedState?, activity: Activity, calendar: Calendar = .current, now: @escaping () -> Date = Date.init,
-                companion: Bool = false) {
+                companion: Bool = false, homeWiFi: LocalLink? = nil) {
         self.identity = identity; self.mesh = mesh; self.relay = relay; self.alerts = alerts; self.store = store
+        self.homeWiFi = homeWiFi ?? NoLocalLink()
         self.saved = saved; self.activity = activity; self.calendar = calendar; self.now = now; self.companion = companion
         applyGroup()
     }
@@ -274,15 +276,15 @@ public final class HelpEngine: ObservableObject {
             let signed = HelpFrame.signing(f, as: me, identity: identity, group: gid)
             spawn { await self.sendToAll(signed) }
         }
-        // Names are personal, so they go over the internet only.
+        // Names are personal, so they go over the internet and home Wi-Fi only.
         for n in added.sorted() {
             guard let m = g.member(n) else { continue }
             let signed = HelpFrame.signing(.memberName(member: n, name: m.name), as: me, identity: identity, group: gid)
-            spawn { _ = await self.relay.send(signed, wake: nil) }
+            spawn { _ = await self.sendOffAir(signed) }
             if let phone = m.phone {
                 let at = g.phoneVersions[n] ?? UInt32(now().timeIntervalSince1970)
                 let signed = HelpFrame.signing(.memberPhone(member: n, phone: phone, at: at), as: me, identity: identity, group: gid)
-                spawn { _ = await self.relay.send(signed, wake: nil) }
+                spawn { _ = await self.sendOffAir(signed) }
             }
         }
     }
@@ -297,7 +299,7 @@ public final class HelpEngine: ObservableObject {
         s.group.phoneVersions[s.me] = at
         setState(s)
         let signed = HelpFrame.signing(.memberPhone(member: s.me, phone: number, at: at), as: s.me, identity: identity, group: groupID)
-        spawn { _ = await self.relay.send(signed, wake: nil) }
+        spawn { _ = await self.sendOffAir(signed) }
     }
 
     public func leave() {
@@ -362,6 +364,7 @@ public final class HelpEngine: ObservableObject {
             spawn { await self.boxReady() }
         }
         relay.configure(group: group, identity: identity)
+        homeWiFi.configure(group: group)
         publishMembersIfDue()
         checkGaps()
     }
@@ -400,6 +403,7 @@ public final class HelpEngine: ObservableObject {
         var s: Set<Route> = [.sms]
         if mesh.isReady { s.insert(.mesh) }
         if relay.isConfigured { s.insert(.internet) }
+        if homeWiFi.hasPeers { s.insert(.wifi) }
         return s
     }
 
@@ -437,6 +441,7 @@ public final class HelpEngine: ObservableObject {
         let routes = RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false)
         if !routes.contains(.mesh) { r.update(.mesh, .failed(mesh.unavailableReason)) }
         if !routes.contains(.internet) { r.update(.internet, .failed(relay.lastProblem ?? "Internet route not set up")) }
+        if homeWiFi.isEnabled, !routes.contains(.wifi) { r.update(.wifi, .failed(homeWiFi.unavailableReason)) }
         for route in routes { r.update(route, .sending) }
         activity.outgoing.append(r)
         trimOutgoing()
@@ -468,7 +473,7 @@ public final class HelpEngine: ObservableObject {
         let before = activity.outgoing[i].routes[route]
         activity.outgoing[i].update(route, state)
         guard before != state else { return }
-        let how = route == .internet ? "the internet" : "the local radio"
+        let how = route.words
         switch state {
         case .sent: log("\(describe(r.unit, r.number, r.colour)) sent over \(how)")
         case let .failed(why): log("\(describe(r.unit, r.number, r.colour)) not sent over \(how): \(why)")
@@ -517,7 +522,7 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// A reason for closing goes over the internet only, so needs it.
-    public var canSendReason: Bool { relay.isConfigured }
+    public var canSendReason: Bool { canSendOffAir }
 
     /// A coordinator closes someone's call, recording the caller's consent or a reason.
     @discardableResult
@@ -525,7 +530,7 @@ public final class HelpEngine: ObservableObject {
         let reason = MeshText.fit(reason.trimmingCharacters(in: .whitespacesAndNewlines), bytes: HelpFrame.maxReasonBytes)
         // A reason goes over the internet only; without it, it would reach nobody else.
         guard me?.role == .coordinator, let n = saved?.me, activity.inbox.requests[key] != nil,
-              consent || (!reason.isEmpty && relay.isConfigured) else { return false }
+              consent || (!reason.isEmpty && canSendOffAir) else { return false }
         settleCall(key.unit, key.request, Settled(state: consent ? .closedWithConsent : .closedWithReason, by: n, at: now(), reason: consent ? "" : reason))
         return true
     }
@@ -548,7 +553,7 @@ public final class HelpEngine: ObservableObject {
         let onAir = s.reason.isEmpty ? full
             : HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: ""), as: n, identity: identity, group: groupID)
         spawn {
-            if self.relay.isConfigured { _ = await self.relay.send(full, wake: nil) }
+            _ = await self.sendOffAir(full)
             _ = await self.sendOnMesh(onAir, kind: .optional)
         }
     }
@@ -601,7 +606,7 @@ public final class HelpEngine: ObservableObject {
     /// Typed text and position go only to responders (decision 12), sealed once for all of them;
     /// in a group made before responders had their own key, over the internet sealed with the
     /// group key, or else as direct messages to each responder's box.
-    public var canSendPersonal: Bool { relay.isConfigured || mesh.isReady }
+    public var canSendPersonal: Bool { relay.isConfigured || mesh.isReady || homeWiFi.hasPeers }
 
     public func addNote(_ text: String) -> String? {
         guard canSendPersonal else { return "Typed messages need the internet or your box." }
@@ -626,11 +631,13 @@ public final class HelpEngine: ObservableObject {
     private func sendPersonal(_ frame: HelpFrame) async {
         if let g = group, let me = saved?.me, g.secrets.responderPublicKey != nil {
             for sealed in ForResponders.seal(frame, from: identity, as: me, in: g, at: now()) {
+                if homeWiFi.hasPeers { _ = await homeWiFi.send(sealed) }
                 if relay.isConfigured, await relay.send(sealed, wake: nil) == nil { continue }
                 _ = await sendOnMesh(sealed, kind: .optional)
             }
             return
         }
+        if homeWiFi.hasPeers { _ = await homeWiFi.send(frame) }
         if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return }
         await sendDirect(frame, to: nil)
     }
@@ -651,23 +658,38 @@ public final class HelpEngine: ObservableObject {
         switch route {
         case .mesh: return await sendOnMesh(frame, kind: kind)
         case .internet: return await relay.send(frame, wake: nil)
+        case .wifi: return await homeWiFi.send(frame)
         case .sms: return "Needs you to send it"
         }
     }
 
     /// Follow-ups, availability and notice acknowledgements use the internet when it works and the
     /// mesh only when it does not, to keep radio time for calls.
+    /// Home Wi-Fi is free and uses no radio time, so it is always tried as well.
     private func sendOptional(_ frame: HelpFrame) async -> String? {
+        let viaWiFi = homeWiFi.hasPeers ? await homeWiFi.send(frame) : homeWiFi.unavailableReason
         if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return nil }
-        return await sendOnMesh(frame, kind: .optional)
+        let viaMesh = await sendOnMesh(frame, kind: .optional)
+        return viaWiFi == nil ? nil : viaMesh
     }
 
     /// Over the internet if it is set up, and over the mesh as well, so members without internet
     /// hear too. Optional airtime.
     private func sendToAll(_ frame: HelpFrame) async {
+        if homeWiFi.hasPeers { _ = await homeWiFi.send(frame) }
         if relay.isConfigured { _ = await relay.send(frame, wake: nil) }
         _ = await sendOnMesh(frame, kind: .optional)
     }
+
+    /// What is too personal for the radio goes over the internet and home Wi-Fi: on the Wi-Fi it
+    /// never leaves the house. Nil once either took it.
+    private func sendOffAir(_ frame: HelpFrame) async -> String? {
+        let viaWiFi = homeWiFi.hasPeers ? await homeWiFi.send(frame) : homeWiFi.unavailableReason
+        let viaRelay = relay.isConfigured ? await relay.send(frame, wake: nil) : (relay.lastProblem ?? "Internet route not set up")
+        return viaWiFi == nil ? nil : viaRelay
+    }
+
+    private var canSendOffAir: Bool { relay.isConfigured || homeWiFi.hasPeers }
 
     private func sendOnMesh(_ frame: HelpFrame, kind: AirtimeBudget.Kind) async -> String? {
         // Personal content never goes on the shared group channel (decision 12).
@@ -773,7 +795,7 @@ public final class HelpEngine: ObservableObject {
     /// the box connecting and from every tick, so it happens with no box too.
     private func repeatMembershipIfDue() async {
         guard actsAsCoordinator, let myNumber = saved?.me, let g = group,
-              now().timeIntervalSince(lastMembershipRepeat ?? .distantPast) > 86_400, mesh.isReady || relay.isConfigured else { return }
+              now().timeIntervalSince(lastMembershipRepeat ?? .distantPast) > 86_400, mesh.isReady || relay.isConfigured || homeWiFi.hasPeers else { return }
         lastMembershipRepeat = now()
         // The settings too, for members who missed them.
         if g.settingsVersion > 0, let f = g.settingsFrame(as: myNumber, identity: identity) { _ = await sendOptional(f) }
@@ -959,7 +981,7 @@ public final class HelpEngine: ObservableObject {
         guard me?.canRespond == true else { return }
         switch activity.inbox.receive(frame, via: route, at: now()) {
         case let .new(key):
-            log("\(describe(key.unit, key.request, activity.inbox.requests[key]?.colour)) heard over \(route == .internet ? "the internet" : "the local radio")")
+            log("\(describe(key.unit, key.request, activity.inbox.requests[key]?.colour)) heard over \(route.words)")
             scheduleAlerts(for: key)
         case let .updated(key) where activity.inbox.requests[key]?.isOpen == false: alerts.cancel(key)
         case .duplicate:
@@ -1201,10 +1223,10 @@ public final class HelpEngine: ObservableObject {
     /// only, as what they write is personal. Returns why it could not go, if it could not.
     public func askCoordinator(about setting: Profile.Setting?, _ text: String) async -> String? {
         guard let n = saved?.me else { return "Not in a group" }
-        guard relay.isConfigured else { return "Needs the internet route, which this group has not set up" }
+        guard canSendOffAir else { return "Needs the internet route, or another of the group's phones on this Wi-Fi" }
         let words = MeshText.fit(text.trimmingCharacters(in: .whitespacesAndNewlines), bytes: HelpFrame.maxRequestBytes)
         let frame = HelpFrame.changeRequest(member: n, setting: setting, at: UInt32(now().timeIntervalSince1970), text: words)
-        return await relay.send(.signing(frame, as: n, identity: identity, group: groupID), wake: nil)
+        return await sendOffAir(.signing(frame, as: n, identity: identity, group: groupID))
     }
 
     public func dismiss(_ request: ChangeRequest) { activity.changeRequests.removeAll { $0 == request } }
@@ -1244,8 +1266,8 @@ public final class HelpEngine: ObservableObject {
                                        grace: UInt16((s.checkIn?.grace ?? 1800) / 60), times: (s.checkIn?.times ?? []).map { UInt16($0) })
         // Signed over the internet, where anyone with the group key could otherwise set or clear
         // someone else's check-ins; the direct message is tied to this phone's box instead.
-        if only == nil, relay.isConfigured, let me = saved?.me {
-            _ = await relay.send(.signing(frame, as: me, identity: identity, group: groupID), wake: nil)
+        if only == nil, canSendOffAir, let me = saved?.me {
+            _ = await sendOffAir(.signing(frame, as: me, identity: identity, group: groupID))
         }
         await sendDirect(frame, to: only)
     }

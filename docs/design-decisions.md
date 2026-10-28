@@ -23,6 +23,7 @@ decision silently.
 | <a id="d16"></a>16 | Opt-in check-in schedule: a missed green press raises an amber request to the responders; off by default | Lone-worker and living-alone use. It creates a request; it never acknowledges, closes or times one out |
 | <a id="d17"></a>17 | Design to BS 8484 (lone worker services) and BS 9518 (alarm receiving centres) wherever they apply, and seek certification. The mesh route is additional to the standards, not a substitute for them | Employers and councils buy against these standards. The mesh exists for outages in which an alarm receiving centre cannot be reached, which the standards do not cover |
 | <a id="d18"></a>18 | Seek the entitlements to receive fall-detection events from Apple Watch and other wearables, and pass them to responders | A detected fall is the clearest case of someone unable to press a button |
+| <a id="d19"></a>19 | Within one home Wi-Fi network, the group's phones work fully with nothing else: they find each other and pass calls, acknowledgements and everything else directly, with no box, no server and no internet. For a household where someone is ill and others are at home, a granny flat, or a few people working in a small lab. Apple devices first (Martin, 2026-10-28) | Needs nothing but the phones, and costs nothing to run. A server is needed only to reach beyond the home |
 
 ## Open questions
 

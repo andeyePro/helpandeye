@@ -373,3 +373,15 @@ Needs a real Apple Watch with Help&I set up (section 7), and a responder's phone
 4. Tap it again, and press Help after a few seconds.
 
 Pass: in step 1 the complication shows a raised hand and Help wherever it fits. In step 2 the watch opens Help&I with the red button counting down from 60, taps the wrist every 10 seconds, at 30 seconds left says "Calling for help in 30 seconds. Press I'm OK to stop, or Help to ask for help now." (in the profile's own words), and at 0 sends Help, which the responder receives; it keeps counting with the wrist lowered. In step 3 the countdown stops and nothing is sent. In step 4 Help goes at once.
+
+## 41. Home Wi-Fi with nothing else
+
+Needs phone A (a caller) and phone B (a responder) on the same home Wi-Fi network, with no box connected and the internet route not set up (or the broadband unplugged, Wi-Fi still on).
+
+1. Open Help&I on both phones. Allow it to find devices on the local network when asked. Look under Group, Home Wi-Fi on each.
+2. On phone A press Help; on phone B acknowledge it.
+3. On phone A press Need a hand, type a note, and share where you are.
+4. Lock phone B, wait a minute, and press Help on phone A.
+5. Join phone C, of another group, to the same Wi-Fi, and press Help on phone A.
+
+Pass: in step 1 each phone shows one other phone of the group on this Wi-Fi. In step 2 phone A shows Home Wi-Fi: sent, then the acknowledgement, and phone B alerts. In step 3 phone B shows the note and the position. In step 4 phone B still alerts (once local push is set up, section 42), or else phone A shows the cross for Home Wi-Fi, never a false "sent". In step 5 phone C shows nothing.

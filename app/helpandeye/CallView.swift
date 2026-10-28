@@ -159,7 +159,7 @@ struct StatusCard: View {
     private var headline: String { words.headline }
 
     private func line(_ route: Route) -> String {
-        let name = switch route { case .internet: "Internet"; case .sms: "Text message"; case .mesh: "Local radio" }
+        let name = switch route { case .wifi: "Home Wi-Fi"; case .internet: "Internet"; case .sms: "Text message"; case .mesh: "Local radio" }
         switch request.routes[route] {
         case .sending?: return "\(name): sending"
         case .sent?: return "\(name): sent"

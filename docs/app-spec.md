@@ -109,6 +109,23 @@ Agreed with Martin, 2026-10-28 ([decision 6](design-decisions.md#d6)).
   own board receives the request over Bluetooth with no internet, and alerts them even when the
   app is in the background.
 
+## How the home Wi-Fi route works
+
+[Decision 19](design-decisions.md#d19).
+
+- Each phone advertises itself on the Wi-Fi network with Bonjour, under a name made from the
+  group's ID, so the group's phones find each other while the name tells no one else which group
+  it is. Each pair keeps one direct connection open.
+- Every message goes over it sealed with the group key, exactly as it would go to the relay, so a
+  stranger's phone on the same network can neither read nor fake one. Calls, acknowledgements,
+  notes, positions and settings all travel this way; what is too personal for the radio may go
+  here, as it never leaves the house.
+- It is the first route tried, and goes alongside every other route that works. A call that
+  reached no other phone of the group shows the cross, as on every route.
+- iOS stops an app listening in the background. To keep the route working with phones locked,
+  the app uses Apple's local push connectivity on the home Wi-Fi network, which the coordinator
+  names when setting the group up.
+
 ## How the internet route works
 
 - Requests go end-to-end encrypted to a relay, which is a Cloudflare Worker. A group can also

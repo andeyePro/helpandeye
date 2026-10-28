@@ -164,6 +164,29 @@ final class RelayModel {
     }
 }
 
+/// Home Wi-Fi: phones given the same `network` reach each other directly.
+@MainActor final class FakeLocal: LocalLink {
+    weak var air: Air?
+    weak var phone: Phone?
+    var network: String?
+    var sent: [HelpFrame] = []
+    private var groupID: Data?
+    var isEnabled: Bool { network != nil }
+    var unavailableReason: String { network == nil ? "Not on Wi-Fi" : "No other phones of the group on this Wi-Fi" }
+    func configure(group: GroupState?) { groupID = group?.secrets.groupID }
+    var peers: [Phone] {
+        guard let air, let network, let me = phone else { return [] }
+        return air.phones.filter { $0 !== me && $0.wifi.network == network && $0.wifi.groupID == groupID && groupID != nil }
+    }
+    var hasPeers: Bool { !peers.isEmpty }
+    func send(_ frame: HelpFrame) async -> String? {
+        guard let air, let me = phone, !peers.isEmpty else { return unavailableReason }
+        sent.append(frame)
+        for p in peers where air.keep(frame, me, p) { air.queue.append((me, p, { p.engine.receive(frame, via: .wifi) })) }
+        return nil
+    }
+}
+
 @MainActor final class FakeAlerts: AlertScheduler {
     var scheduled: [IncomingRequest.Key: Alert] = [:]
     var cancelled: Set<IncomingRequest.Key> = []
@@ -185,6 +208,7 @@ final class RelayModel {
     /// Replaced when a test closes and reopens the app.
     let mesh = FakeMesh()
     let relay = FakeRelay()
+    let wifi = FakeLocal()
     let alerts = FakeAlerts()
     var engine: HelpEngine!
 
@@ -194,8 +218,8 @@ final class RelayModel {
         mesh.air = air; relay.air = air
         engine = HelpEngine(identity: identity, mesh: mesh, relay: relay, alerts: alerts, store: NoStore(),
                             saved: nil, activity: Activity(), calendar: Calendar(identifier: .gregorian), now: { clock.now },
-                            companion: owner != nil)
-        mesh.phone = self; relay.phone = self
+                            companion: owner != nil, homeWiFi: wifi)
+        mesh.phone = self; relay.phone = self; wifi.phone = self; wifi.air = air
         engine.bandChanged(mesh.radio?.band)
         air.phones.append(self)
     }

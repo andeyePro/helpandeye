@@ -38,9 +38,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 /// Applies the reader's chosen text size to every screen.
 struct SizedRoot: View {
     @AppStorage(TextSize.key) private var size = TextSize.asPhone
+    @Environment(\.scenePhase) private var phase
     var body: some View {
         // Left alone unless a larger size is chosen, so the phone's own setting applies directly.
-        if size == .asPhone { RootView().tint(.link) } else { RootView().dynamicTypeSize(size.sizes).tint(.link) }
+        Group {
+            if size == .asPhone { RootView().tint(.link) } else { RootView().dynamicTypeSize(size.sizes).tint(.link) }
+        }
+        .onChange(of: phase) { _, now in if now == .active { AppModel.shared.resumeHomeWiFi() } }
     }
 }
 

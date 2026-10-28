@@ -50,7 +50,7 @@ struct RequestRow: View {
                let url = URL(string: "https://maps.apple.com/?ll=\(p.latitude),\(p.longitude)&q=Help%26I%20caller") {
                 Link("Open their location in Maps (within \(Int(p.accuracy)) m)", destination: url)
             }
-            Text("Heard by " + request.heardOn.map { $0 == .mesh ? "local radio" : ($0 == .internet ? "internet" : "text") }.sorted().joined(separator: " and "))
+            Text("Heard over " + request.heardOn.map(\.words).sorted().joined(separator: " and "))
             if request.isAcknowledged {
                 Text("Acknowledged by " + request.acknowledgedBy.map(engine.name(ofMember:)).joined(separator: ", "))
                     .font(.callout.bold())

@@ -2,7 +2,13 @@ import Foundation
 
 /// The ways a request can travel (decision 8).
 public enum Route: String, Sendable, CaseIterable, Codable {
-    case internet, sms, mesh
+    /// The home Wi-Fi route (decision 19), first: it is free, needs no server, and is quickest.
+    case wifi, internet, sms, mesh
+
+    /// What the caller, the log and the responder's list call it.
+    public var words: String {
+        switch self { case .wifi: "home Wi-Fi"; case .internet: "the internet"; case .sms: "text message"; case .mesh: "the local radio" }
+    }
 }
 
 public enum RouteState: Equatable, Sendable, Codable {

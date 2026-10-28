@@ -13,6 +13,8 @@ final class AppModel: ObservableObject {
     /// One box for every group this person is in.
     let hub: MeshHub
     let relay = Relay()
+    /// The home Wi-Fi route for the first group (decision 19).
+    let home = HomeWiFi()
     /// The group this person is in first: the one they may call for help in, and coordinate.
     let engine: HelpEngine
     /// Other groups they respond in (responders only), each with its own engine and relay.
@@ -27,6 +29,7 @@ final class AppModel: ObservableObject {
         let tag: String
         let engine: HelpEngine
         let relay: Relay
+        let home: HomeWiFi
         var id: String { tag }
     }
 
@@ -39,19 +42,20 @@ final class AppModel: ObservableObject {
         hub = MeshHub(box: board, airtime: airtime)
         let link = hub.link(for: Self.firstGroup)
         engine = HelpEngine(identity: Store.identity(), mesh: link, relay: relay, alerts: NotificationAlerts(), store: AppStore(),
-                            saved: Store.loadState(), activity: Store.loadActivity())
+                            saved: Store.loadState(), activity: Store.loadActivity(), homeWiFi: home)
         link.onFrame = { [weak self] in self?.engine.receive($0, via: .mesh) }
         link.onText = { [weak self] in self?.engine.receiveText(from: $0, $1) }
         board.onFrame = { [weak self] in self?.hub.received($0, on: $1) }
         board.onText = { [weak self] in self?.hub.receivedText(from: $0, $1) }
         relay.onFrame = { [weak self] in self?.engine.receive($0, via: .internet) }
         relay.onAllowanceLow = { [weak self] in self?.engine.raise(.allowanceLow) }
+        home.onFrame = { [weak self] in self?.engine.receive($0, via: .wifi) }
         board.$state.removeDuplicates().sink { [weak self] state in
             if state == .ready { Task { @MainActor in for e in self?.engines ?? [] { await e.boxReady() } } }
         }.store(in: &bag)
         board.$selfInfo.map { $0?.radio.band }.sink { [weak self] band in self?.engines.forEach { $0.bandChanged(band) } }.store(in: &bag)
         for publisher in [engine.objectWillChange.eraseToAnyPublisher(), board.objectWillChange.eraseToAnyPublisher(),
-                          relay.objectWillChange.eraseToAnyPublisher()] {
+                          relay.objectWillChange.eraseToAnyPublisher(), home.objectWillChange.eraseToAnyPublisher()] {
             publisher.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         }
         carryOverOldChoices()
@@ -152,9 +156,11 @@ final class AppModel: ObservableObject {
     /// Starts the engine for another group, from what was saved under its tag.
     private func start(_ tag: String) {
         let relay = Relay()
+        let home = HomeWiFi()
         let link = hub.link(for: Data(tag.utf8))
         let e = HelpEngine(identity: engine.identity, mesh: link, relay: relay, alerts: NotificationAlerts(prefix: tag + "-", ownsCheckIns: false),
-                           store: AppStore(group: tag), saved: Store.loadState(tag), activity: Store.loadActivity(tag))
+                           store: AppStore(group: tag), saved: Store.loadState(tag), activity: Store.loadActivity(tag), homeWiFi: home)
+        home.onFrame = { [weak e] in e?.receive($0, via: .wifi) }
         link.onFrame = { [weak e] in e?.receive($0, via: .mesh) }
         link.onText = { [weak e] in e?.receiveText(from: $0, $1) }
         relay.onFrame = { [weak e] in e?.receive($0, via: .internet) }
@@ -163,7 +169,7 @@ final class AppModel: ObservableObject {
         relay.pushToken = self.relay.pushToken
         e.bandChanged(board.selfInfo?.radio.band)
         e.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
-        others.append(Other(tag: tag, engine: e, relay: relay))
+        others.append(Other(tag: tag, engine: e, relay: relay, home: home))
         if board.state == .ready { Task { await e.boxReady() } }
     }
 
@@ -192,6 +198,12 @@ final class AppModel: ObservableObject {
     func setPushToken(_ token: Data) {
         relay.pushToken = token
         others.forEach { $0.relay.pushToken = token }
+    }
+
+    /// Back in the foreground: listen on the home Wi-Fi again, which iOS stops in the background.
+    func resumeHomeWiFi() {
+        home.resume()
+        others.forEach { $0.home.resume() }
     }
 
     /// A push from a relay: fetch what is waiting in every group.
