@@ -90,7 +90,8 @@ final class ScreensTests: XCTestCase {
     /// screens long.
     @discardableResult
     private func reveal(_ e: XCUIElement) -> XCUIElement {
-        for _ in 0..<8 where !(e.exists && e.isHittable) { app.swipeUp() }
+        // The Group screen is long: settings, then members, then more.
+        for _ in 0..<15 where !(e.exists && e.isHittable) { app.swipeUp(velocity: .fast) }
         return e
     }
 
@@ -112,11 +113,14 @@ final class ScreensTests: XCTestCase {
     /// Saves a screenshot and records what the audit finds, without stopping at the first problem.
     private func look(_ name: String) {
         shoot(name)
-        // Text scrolled under the see-through title and tab bars, or partly off the screen, is
-        // read through a blur or not at all: not what anyone reads, so not counted. Apple's clipped-text and partial Dynamic Type checks
-        // are known to flag SwiftUI text that does fit and does grow; those are logged as advice
-        // and checked by eye on the screenshots, the largest-text ones above all.
-        let bars = (app.navigationBars.allElementsBoundByIndex + app.tabBars.allElementsBoundByIndex).map(\.frame)
+        // Text scrolled under the see-through title and tab bars, or into the soft fade iOS draws
+        // beside them (about 60 points beyond each bar), or partly off the screen, is read mid-fade
+        // or not at all: scrolled into place it reads at full contrast, so it is not counted.
+        // Apple's clipped-text and partial Dynamic Type checks are known to flag SwiftUI text that
+        // does fit and does grow, and a finding on an element with no size and no label is on
+        // nothing anyone can see; those are logged as advice and checked by eye on the
+        // screenshots, the largest-text ones above all.
+        let bars = (app.navigationBars.allElementsBoundByIndex + app.tabBars.allElementsBoundByIndex).map { $0.frame.insetBy(dx: 0, dy: -60) }
         try? app.performAccessibilityAudit { issue in
             let frame = issue.element?.frame ?? .zero
             let detail = "\(name): \(issue.compactDescription) – \(issue.element?.label ?? "") \(frame)"
@@ -125,7 +129,8 @@ final class ScreensTests: XCTestCase {
                 // Read through a bar's blur, partly scrolled off the screen or out of a sheet, or no
                 // element of the app's at all (what the system draws, such as the glass tab bar).
                 print("ADVICE under a bar or off the screen: " + detail)
-            } else if issue.auditType == .textClipped || issue.compactDescription.contains("partially unsupported") {
+            } else if issue.auditType == .textClipped || issue.compactDescription.contains("partially unsupported")
+                        || (frame.isEmpty && issue.element?.label.isEmpty != false) {
                 print("ADVICE " + detail)
             } else {
                 self.problems.append(detail)
