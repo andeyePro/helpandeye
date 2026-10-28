@@ -50,18 +50,21 @@ export function payload(kind, sealed) {
 export async function push(env, token, kind, { fetchImpl = fetch, now = Date.now(), sealed } = {}) {
   if (!configured(env) || !/^[0-9a-f]{64,200}$/i.test(token.token)) return 0;
   const host = token.sandbox ? "api.sandbox.push.apple.com" : "api.push.apple.com";
-  const quiet = kind !== "call";
+  // A watch is only ever woken quietly: it alerts its wearer itself, and only when their phone is
+  // out of reach, so one call never shows twice.
+  const watch = token.device === "watch";
+  const quiet = kind !== "call" || watch;
   try {
     const res = await fetchImpl(`https://${host}/3/device/${token.token}`, {
       method: "POST",
       headers: {
         authorization: `bearer ${await providerToken(env, Math.floor(now / 1000))}`,
-        "apns-topic": env.APNS_TOPIC,
+        "apns-topic": watch ? env.APNS_TOPIC + ".watchkitapp" : env.APNS_TOPIC,
         "apns-push-type": quiet ? "background" : "alert",
         "apns-priority": quiet ? "5" : "10",
         "apns-expiration": String(Math.floor(now / 1000) + 3600),
       },
-      body: JSON.stringify(payload(kind, sealed)),
+      body: JSON.stringify(payload(watch ? "quiet" : kind, sealed)),
     });
     return res.status;
   } catch {

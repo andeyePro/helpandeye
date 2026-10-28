@@ -47,6 +47,16 @@ test("a call is a visible time-sensitive push that names nobody; quiet only wake
   assert.doesNotMatch(JSON.stringify(payload("call")), /unit|name|[0-9]{5}/);
 });
 
+test("a watch is woken quietly, at the watch app, even for a call", async () => {
+  const { env: e } = await env();
+  const seen = [];
+  const fetchImpl = async (url, init) => { seen.push({ url, init }); return { status: 200 }; };
+  assert.equal(await push(e, { ...token, device: "watch" }, "call", { fetchImpl, now: 1_793_000_000_000 }), 200);
+  assert.equal(seen[0].init.headers["apns-topic"], "com.andeye.help.watchkitapp");
+  assert.equal(seen[0].init.headers["apns-push-type"], "background");
+  assert.deepEqual(JSON.parse(seen[0].init.body), { aps: { "content-available": 1 } });
+});
+
 test("a bad token or a failed request sends nothing and reports 0", async () => {
   const { env: e } = await env();
   assert.equal(await push(e, { token: "nope" }, "call", { fetchImpl: async () => ({ status: 200 }) }), 0);

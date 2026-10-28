@@ -31,8 +31,11 @@ final class WatchModel: NSObject, ObservableObject {
     private var bag: Set<AnyCancellable> = []
     private var ticker: Timer?
 
+    static let shared = WatchModel()
+
     override init() {
         super.init()
+        relay.device = "watch"
         if let id = Store.handedOverIdentity() { start(id) }
         if WCSession.isSupported() {
             WCSession.default.delegate = self
@@ -82,6 +85,16 @@ final class WatchModel: NSObject, ObservableObject {
         phoneInReach = reachable
         // The phone alerts its owner while it is in reach; the watch only when it is not.
         alerts.quiet = reachable
+    }
+
+    /// Where Apple can push to wake this watch when its phone is out of reach.
+    func setPushToken(_ token: Data) { relay.pushToken = token }
+
+    /// A quiet push from the relay: fetch what is waiting. The engine schedules the watch's own
+    /// alerts, which sound only while the phone is out of reach.
+    func wake() async {
+        await relay.poll()
+        engine?.tick()
     }
 
     // MARK: What the screen shows

@@ -110,6 +110,18 @@ test("push tokens belong to current members and the sender is not woken", async 
   assert.deepEqual(await relay.pushTargets(member.key), [{ token: "a".repeat(64), sandbox: true }]);
 });
 
+test("a member's watch has its own push token beside the phone's, and goes with the member", async () => {
+  const relay = new GroupRelay(new MapStorage());
+  const coord = await phone(), member = await phone();
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }], primary: coord.key });
+  await relay.setPushToken(member.key, { token: "b".repeat(64) });
+  await relay.setPushToken(member.key, { token: "d".repeat(64), device: "watch" });
+  assert.deepEqual(await relay.pushTargets(coord.key), [{ token: "b".repeat(64), sandbox: false }, { token: "d".repeat(64), sandbox: false, device: "watch" }]);
+  assert.deepEqual(await relay.pushTargets(member.key), [], "a member's own watch is not woken by its own call");
+  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }], removed: [member.key] });
+  assert.deepEqual(await relay.pushTargets(coord.key), []);
+});
+
 test("a first read can ask for the last few messages, and the cursor moves past expired ones", async () => {
   let now = 0;
   const relay = new GroupRelay(new MapStorage(), () => now);

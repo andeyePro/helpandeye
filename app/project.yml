@@ -86,6 +86,11 @@ targets:
         CFBundleDisplayName: "Help&I"
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.andeye.help
+        WKBackgroundModes: [remote-notification]
+    entitlements:
+      path: helpandeyeWatch/helpandeyeWatch.entitlements
+      properties:
+        aps-environment: development
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.watchkitapp

@@ -75,6 +75,9 @@ final class Relay: ObservableObject, RelayLink {
 
     /// Where Apple can push to wake this phone. Sent whenever the relay or group changes.
     var pushToken: Data? { didSet { Task { await publishPushToken() } } }
+    /// "watch" on a watch acting for its phone: the relay keeps one token of each per member and
+    /// wakes a watch quietly.
+    var device = "phone"
 
     func publishPushToken() async {
         guard let group, let pushToken else { return }
@@ -84,7 +87,7 @@ final class Relay: ObservableObject, RelayLink {
         let sandbox = false
         #endif
         let hex = pushToken.map { String(format: "%02x", $0) }.joined()
-        guard let body = try? JSONSerialization.data(withJSONObject: ["token": hex, "sandbox": sandbox]) else { return }
+        guard let body = try? JSONSerialization.data(withJSONObject: ["token": hex, "sandbox": sandbox, "device": device] as [String: Any]) else { return }
         _ = await request("PUT", RelayProtocol.path(for: group.secrets, "push"), body: body)
     }
 

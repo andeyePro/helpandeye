@@ -1,12 +1,33 @@
 import helpandeyeCore
 import SwiftUI
+import UserNotifications
+import WatchKit
 
 @main
 struct HelpAWatchApp: App {
-    @StateObject private var model = WatchModel()
+    @WKApplicationDelegateAdaptor private var delegate: WatchDelegate
+    @StateObject private var model = WatchModel.shared
 
     var body: some Scene {
         WindowGroup { WatchCallView().environmentObject(model) }
+    }
+}
+
+/// Lets the relay wake the watch when its phone is out of reach, so calls are heard with the app
+/// closed.
+final class WatchDelegate: NSObject, WKApplicationDelegate {
+    func applicationDidFinishLaunching() {
+        WKApplication.shared().registerForRemoteNotifications()
+        Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) }
+    }
+
+    func didRegisterForRemoteNotifications(withDeviceToken token: Data) {
+        MainActor.assumeIsolated { WatchModel.shared.setPushToken(token) }
+    }
+
+    func didReceiveRemoteNotification(_ info: [AnyHashable: Any]) async -> WKBackgroundFetchResult {
+        await WatchModel.shared.wake()
+        return .newData
     }
 }
 

@@ -157,7 +157,8 @@ export class GroupRelay {
     if (ownerFresh) await this.storage.put("ownerGeneration", list.generation);
     await this.storage.put("members", { generation: Math.max(current?.generation ?? 0, list.generation), members });
     // Push tokens of anyone no longer listed are deleted, not just ignored.
-    const gone = [...(await this.storage.list({ prefix: "p:" })).keys()].filter((k) => !roles.has(k.slice(2)));
+    const tokenKeys = [...(await this.storage.list({ prefix: "p:" })).keys(), ...(await this.storage.list({ prefix: "w:" })).keys()];
+    const gone = tokenKeys.filter((k) => !roles.has(k.slice(2)));
     if (gone.length) await this.storage.delete(gone);
   }
 
@@ -166,21 +167,23 @@ export class GroupRelay {
     if (!current || !current.members.some((m) => m.key === key)) throw new RelayError(403, "not a member of this group");
   }
 
-  /// A member's phone tells the relay where to push to wake it. Kept per member key, and dropped
-  /// with the member.
+  /// A member's phone, or their watch acting for it, tells the relay where to push to wake it.
+  /// One of each per member key, dropped with the member.
   async setPushToken(member, body) {
     await this.requireMember(member);
     if (!body || typeof body.token !== "string" || !/^[0-9a-f]{64,200}$/i.test(body.token)) throw new RelayError(400, "bad push token");
-    await this.storage.put("p:" + member, { token: body.token.toLowerCase(), sandbox: Boolean(body.sandbox) });
+    const watch = body.device === "watch";
+    const token = { token: body.token.toLowerCase(), sandbox: Boolean(body.sandbox) };
+    await this.storage.put((watch ? "w:" : "p:") + member, watch ? { ...token, device: "watch" } : token);
   }
 
-  /// Push tokens of every current member except the sender.
+  /// Push tokens of every current member except the sender, phones and watches.
   async pushTargets(sender) {
     const current = await this.members();
     if (!current) return [];
-    const tokens = await this.storage.list({ prefix: "p:" });
     const members = new Set(current.members.map((m) => m.key));
-    return [...tokens.entries()].filter(([k]) => k !== "p:" + sender && members.has(k.slice(2))).map(([, t]) => t);
+    const tokens = [...(await this.storage.list({ prefix: "p:" })).entries(), ...(await this.storage.list({ prefix: "w:" })).entries()];
+    return tokens.filter(([k]) => k.slice(2) !== sender && members.has(k.slice(2))).map(([, t]) => t);
   }
 
   /// Each message is its own storage key, so no single value grows with the log.
