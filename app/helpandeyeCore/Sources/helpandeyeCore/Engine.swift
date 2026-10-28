@@ -1055,8 +1055,18 @@ public final class HelpEngine: ObservableObject {
         let times: [Date]
         switch r.colour {
         case .green?: times = [max(turnAt, t)]
-        // The caller said they are OK after it: calm reminders, until a responder has checked.
-        case _ where r.callerIsOK: times = alertTimes(turnAt: max(turnAt, t), every: 1800, from: t, count: count)
+        // The caller said they are OK after it: calm reminders, as often and as many as their
+        // coordinator chose, until a responder has checked.
+        case _ where r.callerIsOK:
+            let p = group?.profile(ofUnit: key.unit) ?? .standard
+            let start = max(turnAt, r.settled?.at ?? t)
+            if let limit = p.calmReminders {
+                // Counted from when they said so, so topping up never adds more.
+                times = Array(alertTimes(turnAt: start, every: p.calmEvery, from: start, count: max(limit, 1))
+                    .filter { $0 >= t.addingTimeInterval(-1) }.prefix(count))
+            } else {
+                times = alertTimes(turnAt: start, every: p.calmEvery, from: t, count: count)
+            }
         case .amber?: times = alertTimes(turnAt: turnAt, every: 300, quick: 6, later: 1800, from: t, count: count)
         default: times = alertTimes(turnAt: turnAt, every: 60, quick: 10, later: 600, from: t, count: count)
         }

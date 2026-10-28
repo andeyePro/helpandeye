@@ -40,6 +40,21 @@ import XCTest
         XCTAssertFalse(responder.engine.activity.inbox.requests[red]!.isOpen)
     }
 
+    func testTheCoordinatorChoosesHowManyCalmRemindersAndHowOften() async {
+        await callerProfile { $0.calmEvery = 3600; $0.calmReminders = 3 }
+        caller.engine.press(.red)
+        await t.air.run()
+        let red = t.key
+        caller.engine.press(.green)
+        await t.air.run()
+        let times = responder.alerts.scheduled[red]?.times ?? []
+        XCTAssertEqual(times.count, 3)
+        XCTAssertEqual(zip(times, times.dropFirst()).map { $1.timeIntervalSince($0) }, [3600, 3600])
+        await t.advance(4 * 3600)
+        XCTAssertTrue(responder.alerts.scheduled[red]?.times.allSatisfy { $0 < self.t.clock.now } ?? true, "no more than three, however often topped up")
+        XCTAssertTrue(responder.engine.activity.inbox.requests[red]!.isOpen, "still open: a responder still checks")
+    }
+
     func testAResponderWhoMissedImOKHearsItWithTheNextResend() async {
         caller.engine.press(.red)
         let red = t.key

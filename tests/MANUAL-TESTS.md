@@ -335,12 +335,12 @@ Needs phone A (a caller), phone B (a responder) and phone C (the coordinator), w
 
 1. On phone A press Help, then I'm OK.
 2. On phone B, look at the call, wait for its next alert, then acknowledge it.
-3. On phone C, under Profiles, set I'm OK to Closes the call, and turn on They may close their own call. On phone A press Need a hand, then I'm OK.
+3. On phone C, under Profiles, set Calm reminders every 5 minutes and How many to 2, then repeat steps 1 and 2 without acknowledging for 15 minutes. Then set I'm OK to Trust it: the call closes, and turn on They may close their own call. On phone A press Need a hand, then I'm OK.
 4. On phone A press Help, then Close this call.
 5. On phone A press Help. On phone C, on the Respond screen, tap Close this call, write a reason, and close it.
 6. Repeat step 5 with the internet off on every phone, using the boxes.
 
-Pass: in step 1 phone A says it has been sent, then "Your responders have been told you're OK. One of them will still check on you." Phone B shows "Says they're OK now. Please still check on them.", and its alerts come calmly, about every half hour, not urgently, until it acknowledges. In step 3 the Need a hand call is closed on every phone and phone B's alerts stop. In step 4 phone A says "You closed your Help call." In step 5 phone A and phone B show who closed it and the reason. In step 6 they show who closed it, without the reason. Nothing closes or times out a call on its own.
+Pass: in step 1 phone A says it has been sent, then "Your responders have been told you're OK. One of them will still check on you." Phone B shows "Says they're OK now. Please still check on them.", and its alerts come calmly, about every half hour, not urgently, until it acknowledges. In step 3 phone B gets two calm reminders, five minutes apart, then no more while the call stays open; then the Need a hand call is closed on every phone and phone B's alerts stop. In step 4 phone A says "You closed your Help call." In step 5 phone A and phone B show who closed it and the reason. In step 6 they show who closed it, without the reason. Nothing closes or times out a call on its own.
 
 ## 38. Choosing the caller's sounds
 

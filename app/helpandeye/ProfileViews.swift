@@ -22,8 +22,8 @@ extension Profile.SeenSound {
 extension Profile.AfterOK {
     var label: String {
         switch self {
-        case .closesCall: "Closes the call"
-        case .stopsRepeats: "Stops the urgent repeats; a responder still checks"
+        case .closesCall: "Trust it: the call closes"
+        case .stopsRepeats: "Always check: a responder still checks"
         }
     }
 }
@@ -222,6 +222,13 @@ struct ProfileEditor: View {
                     ForEach(Profile.AfterOK.allCases, id: \.self) { Text($0.label) }
                 }
                 LabeledField(label: "What they hear, or leave empty for: \(p.okSpokenStandard)", text: $p.okWords)
+                if p.afterOK == .stopsRepeats {
+                    Stepper("Calm reminders every \(Int(p.calmEvery / 60)) minutes", value: minutes(\.calmEvery), in: 5...240, step: 5)
+                    Picker("How many", selection: $p.calmReminders) {
+                        Text("Until someone acknowledges").tag(Int?.none)
+                        ForEach([1, 2, 3, 4, 6, 8, 12], id: \.self) { Text("\($0)").tag(Int?.some($0)) }
+                    }
+                }
                 Toggle("They may close their own call", isOn: $p.callerMayClose)
                 mayChange(.afterOK)
             }
@@ -237,8 +244,8 @@ struct ProfileEditor: View {
                 Stepper("For Need a hand, after \(Int(p.amberInterval / 60)) minutes", value: minutes(\.amberInterval), in: 5...120, step: 5)
             }
             Section(header: Header("Settings page")) {
-                Toggle("Show them only the three buttons", isOn: $p.hidesSettings)
-                Text("They will not see their settings, so cannot change any. Callers only: someone who also responds keeps the Respond and Group screens.")
+                Toggle("For people who only call: show only the three buttons", isOn: $p.hidesSettings)
+                Text("They will not see their settings, so cannot change any. Someone with this profile who also responds keeps the Respond and Group screens.")
             }
             Section {
                 Button("Save") { save() }.buttonStyle(.action)

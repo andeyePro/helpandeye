@@ -30,11 +30,13 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
     /// The sound when a responder has seen the call.
     public enum SeenSound: String, Codable, Sendable, CaseIterable { case chime, none }
 
-    /// What I'm OK does while Help or Need a hand is open (decision 6).
+    /// What I'm OK does while Help or Need a hand is open (decision 6): the coordinator chooses
+    /// whether responders trust it or always check.
     public enum AfterOK: String, Codable, Sendable, CaseIterable {
-        /// The caller closes the call.
+        /// Trusted: the caller closes the call.
         case closesCall
-        /// The urgent repeats stop, but the call stays open until a responder has checked.
+        /// Always checked: the urgent repeats stop, but the call stays open until a responder has
+        /// checked, with calm reminders meanwhile.
         case stopsRepeats
     }
 
@@ -51,6 +53,10 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
     public var afterOK = AfterOK.stopsRepeats
     /// What the caller hears after I'm OK closes or calms a call; the app's own when empty.
     public var okWords = ""
+    /// While a responder still has to check: how often the calm reminders come, and how many
+    /// (nil: until someone acknowledges). The coordinator's alone, like the alert times.
+    public var calmEvery: TimeInterval = 1800
+    public var calmReminders: Int?
     public var shareWhere = false
     /// Offer a ready-written text to responders when nothing else got through.
     public var textFallback = true
@@ -125,7 +131,7 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
 
     // Read tolerantly, so a profile from an older or newer phone still loads.
     enum CodingKeys: String, CodingKey {
-        case id, name, face, buttonWords, symbols, soundsAndSpeech, notSent, seen, afterOK, okWords, shareWhere, textFallback
+        case id, name, face, buttonWords, symbols, soundsAndSpeech, notSent, seen, afterOK, okWords, calmEvery, calmReminders, shareWhere, textFallback
         case checkIns, redInterval, amberInterval, callerMayClose, hidesSettings, personMayChange
     }
 
@@ -146,6 +152,8 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
         try put(seen, s.seen, .seen)
         try put(afterOK, s.afterOK, .afterOK)
         try put(okWords, s.okWords, .okWords)
+        try put(calmEvery, s.calmEvery, .calmEvery)
+        try c.encodeIfPresent(calmReminders, forKey: .calmReminders)
         try put(shareWhere, s.shareWhere, .shareWhere)
         try put(textFallback, s.textFallback, .textFallback)
         try c.encodeIfPresent(checkIns, forKey: .checkIns)
@@ -168,6 +176,8 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
         seen = (try? c.decodeIfPresent(SeenSound.self, forKey: .seen)) ?? s.seen
         afterOK = (try? c.decodeIfPresent(AfterOK.self, forKey: .afterOK)) ?? s.afterOK
         okWords = try c.value(.okWords, or: "")
+        calmEvery = max(300, try c.value(.calmEvery, or: s.calmEvery))
+        calmReminders = try c.decodeIfPresent(Int.self, forKey: .calmReminders)
         shareWhere = try c.value(.shareWhere, or: s.shareWhere)
         textFallback = try c.value(.textFallback, or: s.textFallback)
         checkIns = try c.decodeIfPresent(CheckInSchedule.self, forKey: .checkIns)
