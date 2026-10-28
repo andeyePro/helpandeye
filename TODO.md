@@ -21,8 +21,7 @@
 
 ## Open (work)
 
-- [ ] **Coordinator settings, the watch countdown and a log** - agreed with Martin 2026-10-28; all items confirmed. Done so far: profiles with per-setting locks, button words and symbols (with the SOS warning), hiding the settings page, I'm OK after a call (A/B), closing a call, decision 6, the not-sent and seen sounds, the log (see CHANGELOG). Still to do:
-  - "Ask the coordinator to change this": a signed request shown under Group for coordinators. It lives only in the person's settings, never on the call screen, so it cannot confuse anyone in an emergency.
+- [ ] **Coordinator settings, the watch countdown and a log** - agreed with Martin 2026-10-28; all items confirmed. Done so far: profiles with per-setting locks, button words and symbols (with the SOS warning), hiding the settings page, I'm OK after a call (A/B), closing a call, decision 6, the not-sent and seen sounds, the log, asking the coordinator to change a setting (see CHANGELOG). Still to do:
   - Watch: a Help complication in every shape, and one-tap ready-made Apple faces (easy-read analogue and digital) with it large.
   - Complication countdown: tapping it starts a 60-second countdown shown in the red button, vibrating every 10 seconds. At 30 seconds with no touch it says "Calling for help in 30 seconds. Press I'm OK to stop, or Help to ask for help now." At 0 it sends Help. Keep it running with an extended runtime session; check on a real watch.
 - [ ] **Watch straight to the box** - **Blocked:** Martin trying it (Help&I-fromClaude T1). Not built: watchOS reportedly offers only Pair or Dismiss for a Bluetooth accessory, with no way to type the box's six-digit code, which MeshCore's companion firmware needs. Waiting on Martin trying it (Help&I-fromClaude T1). Out of reach of its phone, the watch uses its own internet only.

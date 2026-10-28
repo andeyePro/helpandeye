@@ -324,6 +324,11 @@ Needs phone A (a caller), phone B (a responder) and phone C (the coordinator), a
 
 Pass: in step 1 phone C warns that SOS can sound like an emergency service. In step 2 phone A's buttons show only their symbols (VoiceOver still reads the words), the sounds switch cannot be changed, and the screen says settings it cannot change are set by the coordinator. In step 3 phone A shows only the Help screen, with the 999 notice, and phone C suggests making a second coordinator. In step 4 phone A is back on the first profile, with all its screens.
 
+5. Give phone A the profile again, with its sounds locked. On phone A, under Group, Your settings, tap Ask the coordinator to change one, choose The sounds, write "Too loud at night" and send it. Look at phone A's Help screen.
+6. On phone C, under Group, For coordinators, read the request and tap Done.
+
+Pass: in step 5 phone A says the request was sent, and nothing about it appears on the Help screen. In step 6 phone C shows "<name> asks to change the sounds: Too loud at night", and it goes when Done is tapped. With the internet route not set up, phone A says it was not sent and why.
+
 ## 37. Closing a call, and I'm OK after a call
 
 Needs phone A (a caller), phone B (a responder) and phone C (the coordinator), with the internet.

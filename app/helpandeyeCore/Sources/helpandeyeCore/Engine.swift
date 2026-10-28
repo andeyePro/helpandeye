@@ -136,6 +136,8 @@ public struct Activity: Codable, Sendable {
     /// to them even with the log off.
     public var log = GroupLog()
     public var lastSettingsChange: GroupLog.Entry?
+    /// On a coordinator's phone: people's requests to change their settings, until dealt with.
+    public var changeRequests: [ChangeRequest] = []
 
     public init() {}
 }
@@ -849,7 +851,7 @@ public final class HelpEngine: ObservableObject {
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
             }
-        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .callState:
+        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .callState, .changeRequest:
             // Counted only when signed (below), so a removed phone cannot fake them.
             return
         case let .signed(signer, _, _):
@@ -865,6 +867,12 @@ public final class HelpEngine: ObservableObject {
                 if sender.canRespond { activity.rota.apply(inner); checkGaps() }
             case let .checkIns(unit, _, _, _):
                 if sender.unit == unit, unit != me?.unit { activity.checkInWatch.apply(inner) }
+            case let .changeRequest(member, setting, at, text):
+                guard actsAsCoordinator else { break }
+                let r = ChangeRequest(member: member, setting: setting, at: Date(timeIntervalSince1970: TimeInterval(at)), text: text)
+                guard !activity.changeRequests.contains(r) else { break }
+                activity.changeRequests.append(r)
+                log("\(name(ofMember: member)) asked to change \(setting?.words ?? "a setting")" + (text.isEmpty ? "" : ": \(text)"))
             case let .callState(unit, request, state, at, reason):
                 // The caller settles their own call; a coordinator may close anyone's (decision 6).
                 let allowed = state == .callerOK || state == .closedByCaller ? sender.unit == unit : sender.role == .coordinator
@@ -1167,6 +1175,18 @@ public final class HelpEngine: ObservableObject {
         setState(s)
     }
 
+    /// Asks the group's coordinators to change one of this person's settings. Over the internet
+    /// only, as what they write is personal. Returns why it could not go, if it could not.
+    public func askCoordinator(about setting: Profile.Setting?, _ text: String) async -> String? {
+        guard let n = saved?.me else { return "Not in a group" }
+        guard relay.isConfigured else { return "Needs the internet route, which this group has not set up" }
+        let words = MeshText.fit(text.trimmingCharacters(in: .whitespacesAndNewlines), bytes: HelpFrame.maxRequestBytes)
+        let frame = HelpFrame.changeRequest(member: n, setting: setting, at: UInt32(now().timeIntervalSince1970), text: words)
+        return await relay.send(.signing(frame, as: n, identity: identity, group: groupID), wake: nil)
+    }
+
+    public func dismiss(_ request: ChangeRequest) { activity.changeRequests.removeAll { $0 == request } }
+
     /// Check-ins set by a profile the person may not change replace their own.
     private func followProfileCheckIns() {
         guard !companion, let s = saved, me?.canCall == true else { return }
@@ -1273,5 +1293,6 @@ extension Activity {
         alertedGreens = try c.value(.alertedGreens, or: [])
         log = try c.value(.log, or: GroupLog())
         lastSettingsChange = try c.decodeIfPresent(GroupLog.Entry.self, forKey: .lastSettingsChange)
+        changeRequests = try c.value(.changeRequests, or: [])
     }
 }

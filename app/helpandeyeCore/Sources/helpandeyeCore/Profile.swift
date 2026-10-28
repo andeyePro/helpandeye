@@ -8,6 +8,17 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
     /// What a person may be allowed to change for themselves.
     public enum Setting: String, Codable, Sendable, CaseIterable {
         case buttons, sounds, afterOK, shareWhere, textFallback, checkIns
+
+        public var words: String {
+            switch self {
+            case .buttons: "how the buttons look"
+            case .sounds: "the sounds"
+            case .afterOK: "what I'm OK does after a call"
+            case .shareWhere: "sending where they are"
+            case .textFallback: "offering a text"
+            case .checkIns: "check-ins"
+            }
+        }
     }
 
     /// What each button shows.
@@ -153,6 +164,14 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
         let settings = (try? c.decodeIfPresent([String].self, forKey: .personMayChange)).flatMap { $0 }
         personMayChange = settings.map { Set($0.compactMap(Setting.init)) } ?? s.personMayChange
     }
+}
+
+/// Someone's request to change one of their settings, kept on coordinators' phones.
+public struct ChangeRequest: Codable, Equatable, Sendable {
+    public let member: UInt16
+    public let setting: Profile.Setting?
+    public let at: Date
+    public let text: String
 }
 
 extension GroupState {

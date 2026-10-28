@@ -42,6 +42,7 @@ struct HearSounds: View {
 /// others are shown, as set by their coordinator.
 struct YourSettingsSection: View {
     @EnvironmentObject var model: AppModel
+    @State private var asking = false
 
     var body: some View {
         let given = model.group?.profile(of: model.saved?.me) ?? .standard
@@ -73,12 +74,49 @@ struct YourSettingsSection: View {
             Text("Where you are goes only to your responders, encrypted, after the call itself.")
             if Profile.Setting.allCases.contains(where: { !given.mayChange($0) }) {
                 Text("Settings you cannot change are set by your coordinator.")
+                Button("Ask the coordinator to change one") { asking = true }
             }
         }
+        .sheet(isPresented: $asking) { NavigationStack { AskCoordinatorView(locked: Profile.Setting.allCases.filter { !given.mayChange($0) }) } }
     }
 
     private func own<T>(_ path: WritableKeyPath<Profile, T>) -> Binding<T> {
         Binding(get: { model.profile[keyPath: path] }, set: { v in model.setOwn { $0[keyPath: path] = v } })
+    }
+}
+
+/// A request to the coordinators to change a setting. Only ever from the settings page, never the
+/// call screen, so it cannot be mistaken for a call.
+struct AskCoordinatorView: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.dismiss) private var dismiss
+    let locked: [Profile.Setting]
+    @State private var setting: Profile.Setting?
+    @State private var text = ""
+    @State private var result: String?
+
+    var body: some View {
+        Form {
+            Section(header: Header("What would you like changed?")) {
+                Picker("Setting", selection: $setting) {
+                    ForEach(locked, id: \.self) { Text($0.words.prefix(1).uppercased() + $0.words.dropFirst()).tag(Optional($0)) }
+                    Text("Something else").tag(Profile.Setting?.none)
+                }
+                LabeledField(label: "What to change, in a few words", text: $text)
+                Button("Send to the coordinators") {
+                    Task {
+                        let problem = await model.engine.askCoordinator(about: setting, text)
+                        result = problem.map { "Not sent: \($0)." } ?? "Sent. A coordinator will see it under Group."
+                    }
+                }
+                .buttonStyle(.action)
+                if let result { Text(result) }
+            }
+        }
+        .navigationTitle("Ask the coordinator")
+        .keyboardDismissable()
+        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
+        .onAppear { setting = locked.first }
     }
 }
 

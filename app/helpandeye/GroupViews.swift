@@ -229,6 +229,12 @@ struct GroupView: View {
                         NavigationLink("Profiles") { ProfilesView() }
                         NavigationLink("Log") { LogView() }
                         NavigationLink("Advanced settings") { AdvancedSettingsView() }
+                        ForEach(model.engine.activity.changeRequests, id: \.at) { r in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("\(model.name(ofMember: r.member)) asks to change \(r.setting?.words ?? "a setting")" + (r.text.isEmpty ? "." : ": \(r.text)"))
+                                Button("Done") { model.engine.dismiss(r) }.buttonStyle(.secondaryAction)
+                            }
+                        }
                         if let c = model.engine.activity.lastSettingsChange {
                             Text("Latest settings change, \(c.at.formatted(date: .abbreviated, time: .shortened)): \(c.text).")
                         }

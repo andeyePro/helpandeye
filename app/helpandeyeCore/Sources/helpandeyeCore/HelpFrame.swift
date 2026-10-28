@@ -93,6 +93,10 @@ public enum HelpFrame: Equatable, Sendable {
     /// their own call) or a coordinator. A coordinator's reason is personal, so a frame with one
     /// goes over the internet only.
     case callState(unit: UInt32, request: UInt16, state: CallState, at: UInt32, reason: String)
+    /// A person asks the coordinators to change one of their settings (app spec, Profiles), from
+    /// their settings page only. Counts only inside a frame signed by that person. What they write
+    /// is personal, so it goes over the internet only.
+    case changeRequest(member: UInt16, setting: Profile.Setting?, at: UInt32, text: String)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -100,6 +104,9 @@ public enum HelpFrame: Equatable, Sendable {
     public static let formatVersion: UInt8 = 1
     static let settingsHeader: UInt8 = 0x21
     static let callStateHeader: UInt8 = 0x22
+    static let changeRequestHeader: UInt8 = 0x23
+    /// Room for what someone writes in a change request inside a signed frame.
+    public static let maxRequestBytes = 60
     /// Room for a coordinator's reason inside a signed frame.
     public static let maxReasonBytes = 56
     /// MeshCore data_type for Help&I datagrams: inside the testing range, which needs no
@@ -125,6 +132,7 @@ public enum HelpFrame: Equatable, Sendable {
         switch self {
         case .note, .position, .checkIns, .memberName, .memberPhone: false
         case let .callState(_, _, _, _, reason): reason.isEmpty
+        case .changeRequest: false
         // A signed frame may go only if what it wraps may.
         case let .signed(_, inner, _): HelpFrame(inner)?.mayGoOnGroupChannel ?? false
         default: true
@@ -194,6 +202,10 @@ public enum HelpFrame: Equatable, Sendable {
         case let .callState(unit, request, state, at, reason):
             let bytes = Data(MeshText.fit(reason, bytes: Self.maxReasonBytes).utf8)
             w.u8(Self.callStateHeader); w.u32(unit); w.u16(request); w.u8(state.rawValue); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
+        case let .changeRequest(member, setting, at, text):
+            let bytes = Data(MeshText.fit(text, bytes: Self.maxRequestBytes).utf8)
+            let code = setting.flatMap { Profile.Setting.allCases.firstIndex(of: $0) }.map { UInt8($0 + 1) } ?? 0
+            w.u8(Self.changeRequestHeader); w.u16(member); w.u8(code); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
         case let .memberPhone(member, phone, at):
             let bytes = Data(phone.prefix(Self.maxPhoneBytes).utf8)
             w.u8(Self.header(.memberPhone)); w.u16(member); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
@@ -213,6 +225,14 @@ public enum HelpFrame: Equatable, Sendable {
             guard let signer = r.u16(), let version = r.u32(), let n = r.u16(), n <= Self.maxSettingsBytes, let settings = r.take(Int(n)),
                   let sig = r.take(64) else { return nil }
             self = .groupSettings(signer: signer, version: version, settings: Data(settings), signature: Data(sig))
+            return
+        }
+        if head == Self.changeRequestHeader {
+            guard let member = r.u16(), let code = r.u8(), let at = r.u32(), let n = r.u8(), Int(n) <= Self.maxRequestBytes,
+                  let text = r.take(Int(n)), let words = String(data: Data(text), encoding: .utf8) else { return nil }
+            let all = Profile.Setting.allCases
+            let setting = code > 0 && Int(code) <= all.count ? all[Int(code) - 1] : nil
+            self = .changeRequest(member: member, setting: setting, at: at, text: words)
             return
         }
         if head == Self.callStateHeader {
@@ -346,6 +366,7 @@ public enum HelpFrame: Equatable, Sendable {
         case .checkIns, .note, .position: return frame
         // The caller of this checks that the signer owns the unit or is a coordinator.
         case .callState: return frame
+        case let .changeRequest(member, _, _, _) where member == signer: return frame
         default: return nil
         }
     }
