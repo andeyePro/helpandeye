@@ -137,7 +137,7 @@ final class AppModel: ObservableObject {
     func joinedAnother(_ group: GroupState, as number: UInt16, invitedBy: UInt16?) -> Bool {
         guard group.member(number)?.role == .responder,
               !engines.contains(where: { $0.group?.secrets.groupID == group.secrets.groupID }) else { return false }
-        let tag = "g" + group.secrets.groupID.map { String(format: "%02x", $0) }.joined()
+        let tag = group.tag
         start(tag)
         others.last?.engine.joined(group, as: number, invitedBy: invitedBy)
         // Remembered only once joined, so an interrupted join never comes back as an empty group.

@@ -10,6 +10,9 @@ public struct GroupSettings: Codable, Equatable, Sendable {
 }
 
 extension GroupState {
+    /// A short name for keeping a group's things apart on a device (storage, alerts).
+    public var tag: String { "g" + secrets.groupID.map { String(format: "%02x", $0) }.joined() }
+
     public var settings: GroupSettings { GroupSettings(policy: policy, relayURL: relayURL) }
 
     /// The settings as a signed frame from coordinator `signer`.

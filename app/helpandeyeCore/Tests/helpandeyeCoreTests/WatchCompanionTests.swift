@@ -100,6 +100,19 @@ import XCTest
         XCTAssertEqual(Alert(key: a.key, title: "t", body: "b", calm: false, times: [t.addingTimeInterval(60)]).fromNow(t).times, [t.addingTimeInterval(60)])
     }
 
+    func testAHandoverCarriesEveryGroupTheOwnerRespondsIn() throws {
+        let other = coordinator.engine.saved!
+        let h = WatchHandover(saved: responder.engine.saved!, identity: responder.identity, others: [other])
+        let back = try JSONDecoder().decode(WatchHandover.self, from: JSONEncoder().encode(h))
+        XCTAssertEqual(back.each.map(\.group.name), [responder.engine.group!.name, other.group.name])
+        XCTAssertTrue(back.each.allSatisfy { $0.keys == responder.identity.rawRepresentation })
+        // One from a phone before several groups still opens.
+        var plain = try JSONSerialization.jsonObject(with: JSONEncoder().encode(h)) as! [String: Any]
+        plain["others"] = nil
+        let old = try JSONDecoder().decode(WatchHandover.self, from: JSONSerialization.data(withJSONObject: plain))
+        XCTAssertEqual(old.each.count, 1)
+    }
+
     func testAHandoverWithOtherKeysIsRefused() {
         XCTAssertFalse(watch.engine.take(WatchHandover(saved: caller.engine.saved!, identity: DeviceIdentity())))
         XCTAssertFalse(responder.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity)),

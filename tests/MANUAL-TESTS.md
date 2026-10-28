@@ -296,5 +296,6 @@ Needs two coordinators' phones (A and C) with their own groups, and phone B with
 2. Press Come now on a caller in phone A's group, then on a caller in phone C's group.
 3. On phone B, acknowledge each.
 4. Try joining a third group invited to call for help.
+5. Switch phone B off, then press Come now in each group again, and acknowledge both on phone B's watch.
 
-Pass: phone B's box holds both groups' channels (the Box tab stays Connected) and phone B alerts for both calls, listed under each group's name. Each acknowledgement shows only on its own group's caller. A call in one group never appears on the other group's phones. In step 4 phone B says it can only respond in a further group.
+Pass: phone B's box holds both groups' channels (the Box tab stays Connected) and phone B alerts for both calls, listed under each group's name. Each acknowledgement shows only on its own group's caller. A call in one group never appears on the other group's phones. In step 4 phone B says it can only respond in a further group. In step 5 phone B's watch alerts for both calls and each acknowledgement shows only on its own group's caller.

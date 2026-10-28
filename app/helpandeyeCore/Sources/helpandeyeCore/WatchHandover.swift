@@ -8,9 +8,32 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     public let group: GroupState
     public let me: UInt16
     public let keys: Data
+    /// Other groups the owner responds in, so the watch hears their calls too.
+    public var others: [Part] = []
 
-    public init(saved: SavedState, identity: DeviceIdentity) {
+    public struct Part: Codable, Equatable, Sendable {
+        public let group: GroupState
+        public let me: UInt16
+    }
+
+    public init(saved: SavedState, identity: DeviceIdentity, others: [SavedState] = []) {
         group = saved.group; me = saved.me; keys = identity.rawRepresentation
+        self.others = others.map { Part(group: $0.group, me: $0.me) }
+    }
+
+    /// One handover per group, the first group's first, each as if it were the only one.
+    public var each: [WatchHandover] {
+        [WatchHandover(group: group, me: me, keys: keys)] + others.map { WatchHandover(group: $0.group, me: $0.me, keys: keys) }
+    }
+
+    init(group: GroupState, me: UInt16, keys: Data) { self.group = group; self.me = me; self.keys = keys }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        group = try c.decode(GroupState.self, forKey: .group)
+        me = try c.decode(UInt16.self, forKey: .me)
+        keys = try c.decode(Data.self, forKey: .keys)
+        others = try c.decodeIfPresent([Part].self, forKey: .others) ?? []
     }
 
     public var identity: DeviceIdentity? { try? DeviceIdentity(rawRepresentation: keys) }

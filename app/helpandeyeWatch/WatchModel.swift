@@ -10,7 +10,9 @@ import WatchConnectivity
 final class WatchModel: NSObject, ObservableObject {
     struct Open: Identifiable, Equatable {
         let unit: UInt32, request: UInt16, colour: Colour, who: String
-        var id: String { "\(unit)-\(request)" }
+        /// The group's tag, so an acknowledgement goes to the right group.
+        var group = ""
+        var id: String { "\(group)-\(unit)-\(request)" }
         var key: IncomingRequest.Key { .init(unit: unit, request: request) }
     }
 
@@ -34,6 +36,16 @@ final class WatchModel: NSObject, ObservableObject {
     private let alerts = WatchAlerts()
     private var bag: Set<AnyCancellable> = []
     private var ticker: Timer?
+    /// Other groups the owner responds in, by tag, each with its own engine, relay and alerts.
+    private var others: [String: Other] = [:]
+
+    private struct Other {
+        let engine: HelpEngine
+        let relay: Relay
+        let alerts: WatchAlerts
+    }
+
+    private var allEngines: [HelpEngine] { [engine].compactMap { $0 } + others.values.map(\.engine) }
 
     static let shared = WatchModel()
 
@@ -47,10 +59,13 @@ final class WatchModel: NSObject, ObservableObject {
         }
         ticker = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let engine = self.engine else { return }
-                engine.tick()
-                self.relay.busy = engine.activity.outgoing.contains { $0.nextResend != nil && $0.unit != 0 }
-                    || engine.activity.inbox.requests.values.contains { !$0.isAcknowledged && $0.colour != .green }
+                guard let self else { return }
+                for (e, r) in [(self.engine, self.relay)] + self.others.values.map({ ($0.engine as HelpEngine?, $0.relay) }) {
+                    guard let e else { continue }
+                    e.tick()
+                    r.busy = e.activity.outgoing.contains { $0.nextResend != nil && $0.unit != 0 }
+                        || e.activity.inbox.requests.values.contains { !$0.isAcknowledged && $0.colour != .green }
+                }
             }
         }
     }
@@ -68,16 +83,54 @@ final class WatchModel: NSObject, ObservableObject {
     /// still keeps the watch's own call numbering, so no number is ever used twice.
     fileprivate func take(_ data: Data) {
         guard let handover = try? JSONDecoder().decode(WatchHandover.self, from: data), let identity = handover.identity else { return }
-        if engine?.take(handover) == true { return }
-        Store.keep(handedOver: identity)
-        Store.save(handover.state(keeping: Store.loadState()))
-        start(identity)
-        engine?.take(handover)
+        if engine?.take(handover) != true {
+            Store.keep(handedOver: identity)
+            Store.save(handover.state(keeping: Store.loadState()))
+            start(identity)
+            engine?.take(handover)
+        }
+        takeOthers(Array(handover.each.dropFirst()), identity: identity)
+    }
+
+    /// The other groups' handovers: new ones started, gone ones forgotten.
+    private func takeOthers(_ parts: [WatchHandover], identity: DeviceIdentity) {
+        let wanted = Set(parts.map(\.group.tag))
+        for (tag, o) in others where !wanted.contains(tag) {
+            o.alerts.cancelAll()
+            o.engine.leave()
+            Store.forget(group: tag)
+            others[tag] = nil
+        }
+        for part in parts {
+            let tag = part.group.tag
+            if let o = others[tag], o.engine.take(part) { continue }
+            let relay = Relay(), alerts = WatchAlerts(prefix: tag + "-")
+            relay.device = "watch"
+            relay.pushToken = self.relay.pushToken
+            Store.save(part.state(keeping: Store.loadState(tag)), group: tag)
+            let e = HelpEngine(identity: identity, mesh: NoBox(), relay: relay, alerts: alerts, store: AppStore(group: tag),
+                               saved: Store.loadState(tag), activity: Store.loadActivity(tag), companion: true)
+            relay.onFrame = { [weak e] in e?.receive($0, via: .internet) }
+            e.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
+            e.take(part)
+            others[tag] = Other(engine: e, relay: relay, alerts: alerts)
+        }
+        settleAlerts()
+    }
+
+    /// Each group's alerts stay quiet only for calls the phone, in reach, says it has.
+    private func settleAlerts() {
+        let first = engine?.group?.tag ?? ""
+        let has = phoneInReach ? phoneOpen : []
+        alerts.phoneHas = Set(has.filter { $0.group.isEmpty || $0.group == first }.map(\.key))
+        for (tag, o) in others { o.alerts.phoneHas = Set(has.filter { $0.group == tag }.map(\.key)) }
     }
 
     /// The owner left the group on their phone: the watch stops acting for them at once.
     fileprivate func forget() {
         alerts.cancelAll()
+        for (tag, o) in others { o.alerts.cancelAll(); Store.forget(group: tag) }
+        others = [:]
         engine = nil
         bag = []
         Store.forgetHandedOver()
@@ -98,26 +151,30 @@ final class WatchModel: NSObject, ObservableObject {
         phoneOpen = (context["open"] as? [[String: Any]] ?? []).compactMap { d in
             guard let u = (d["unit"] as? Int).flatMap(UInt32.init(exactly:)), let r = (d["request"] as? Int).flatMap(UInt16.init(exactly:)),
                   let c = (d["colour"] as? Int).flatMap({ Colour(rawValue: UInt8($0)) }), let w = d["who"] as? String else { return nil }
-            return Open(unit: u, request: r, colour: c, who: w)
+            return Open(unit: u, request: r, colour: c, who: w, group: d["group"] as? String ?? "")
         }
-        alerts.phoneHas = phoneInReach ? Set(phoneOpen.map(\.key)) : []
+        settleAlerts()
     }
 
     fileprivate func setReach(_ reachable: Bool) {
         phoneInReach = reachable
         // The watch stays quiet only for calls its phone, in reach, has itself heard and is
         // alerting for; any other call it alerts for at once.
-        alerts.phoneHas = reachable ? Set(phoneOpen.map(\.key)) : []
+        settleAlerts()
     }
 
     /// Where Apple can push to wake this watch when its phone is out of reach.
-    func setPushToken(_ token: Data) { relay.pushToken = token }
+    func setPushToken(_ token: Data) {
+        relay.pushToken = token
+        others.values.forEach { $0.relay.pushToken = token }
+    }
 
     /// A quiet push from the relay: fetch what is waiting. The engine schedules the watch's own
     /// alerts, which sound only while the phone is out of reach.
     func wake() async {
         await relay.poll()
-        engine?.tick()
+        for o in others.values { await o.relay.poll() }
+        allEngines.forEach { $0.tick() }
     }
 
     // MARK: What the screen shows
@@ -126,7 +183,7 @@ final class WatchModel: NSObject, ObservableObject {
 
     var status: (text: String, cross: Bool)? {
         if let problem { return (problem, true) }
-        if let key = lastAck, let s = engine?.ackSendStatus(key) {
+        if let key = lastAck, let s = allEngines.lazy.compactMap({ $0.ackSendStatus(key) }).first {
             switch s {
             case .notSent: return ("Not acknowledged: this watch cannot reach the internet. Use your phone.", true)
             case .sending: return ("Sending your acknowledgement…", false)
@@ -146,10 +203,17 @@ final class WatchModel: NSObject, ObservableObject {
 
     var open: [Open] {
         if phoneInReach { return phoneOpen }
-        guard let engine else { return [] }
-        return engine.activity.inbox.sorted.filter { !$0.isAcknowledged }.prefix(5).map {
-            Open(unit: $0.key.unit, request: $0.key.request, colour: $0.colour ?? .red, who: engine.name(ofUnit: $0.key.unit))
+        return allEngines.flatMap { e in
+            e.activity.inbox.sorted.filter { !$0.isAcknowledged }.prefix(5).map {
+                Open(unit: $0.key.unit, request: $0.key.request, colour: $0.colour ?? .red, who: e.name(ofUnit: $0.key.unit),
+                     group: e === engine ? "" : (e.group?.tag ?? ""))
+            }
         }
+    }
+
+    /// The engine for an open call's group.
+    private func engine(for r: Open) -> HelpEngine? {
+        r.group.isEmpty || r.group == engine?.group?.tag ? engine : others[r.group]?.engine
     }
 
     // MARK: Buttons
@@ -186,12 +250,12 @@ final class WatchModel: NSObject, ObservableObject {
     /// reach. Two copies of one person's acknowledgement are one acknowledgement.
     func acknowledge(_ r: Open) {
         problem = nil
-        if engine?.acknowledge(r.key) == true { lastAck = r.key }
+        if engine(for: r)?.acknowledge(r.key) == true { lastAck = r.key }
         guard phoneInReach else {
             if lastAck != r.key { problem = "Not acknowledged: use your phone." }
             return
         }
-        WCSession.default.sendMessage(["ackUnit": Int(r.unit), "ackRequest": Int(r.request)], replyHandler: { reply in
+        WCSession.default.sendMessage(["ackUnit": Int(r.unit), "ackRequest": Int(r.request), "group": r.group], replyHandler: { reply in
             let ok = reply["ok"] as? Bool == true
             Task { @MainActor in
                 if ok { self.phoneOpen.removeAll { $0 == r } } else if self.lastAck != r.key { self.problem = "Not acknowledged. Use your phone." }
@@ -239,7 +303,8 @@ extension WatchModel: WCSessionDelegate {
 /// alerting for it (two buzzes for one call would only confuse), and let go the moment that stops
 /// being true, as one alert now rather than a burst of the ones missed.
 @MainActor final class WatchAlerts: AlertScheduler {
-    private let inner = NotificationAlerts()
+    private let inner: NotificationAlerts
+    init(prefix: String = "") { inner = NotificationAlerts(prefix: prefix, ownsCheckIns: false) }
     private var held: [IncomingRequest.Key: Alert] = [:]
     private var sounding: Set<IncomingRequest.Key> = []
     var phoneHas: Set<IncomingRequest.Key> = [] { didSet { if phoneHas != oldValue { settle() } } }

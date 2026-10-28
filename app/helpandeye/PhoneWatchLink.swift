@@ -34,10 +34,12 @@ final class PhoneWatchLink: NSObject, ObservableObject {
         }
         // Open requests this person can acknowledge from the wrist, most urgent first. Names stay on
         // the paired watch, which is this person's own device.
-        if model.me?.canRespond == true {
-            context["open"] = model.inbox.sorted.filter { !$0.isAcknowledged }.prefix(5).map { r -> [String: Any] in
-                ["unit": Int(r.key.unit), "request": Int(r.key.request), "colour": Int(r.colour?.rawValue ?? 1),
-                 "who": model.name(ofUnit: r.key.unit)]
+        if model.engines.contains(where: { $0.me?.canRespond == true }) {
+            context["open"] = model.engines.filter { $0.me?.canRespond == true }.flatMap { e in
+                e.activity.inbox.sorted.filter { !$0.isAcknowledged }.prefix(5).map { r -> [String: Any] in
+                    ["unit": Int(r.key.unit), "request": Int(r.key.request), "colour": Int(r.colour?.rawValue ?? 1),
+                     "who": e.name(ofUnit: r.key.unit), "group": e.group?.tag ?? ""]
+                }
             }
         }
         try? WCSession.default.updateApplicationContext(context)
@@ -50,7 +52,8 @@ final class PhoneWatchLink: NSObject, ObservableObject {
     /// watch to forget them.
     private func handOver() {
         guard let model, WCSession.default.isWatchAppInstalled else { return }
-        let data = model.saved.flatMap { try? JSONEncoder().encode(WatchHandover(saved: $0, identity: model.identity)) } ?? Data()
+        let others = model.others.compactMap(\.engine.saved)
+        let data = model.saved.flatMap { try? JSONEncoder().encode(WatchHandover(saved: $0, identity: model.identity, others: others)) } ?? Data()
         guard data != handedOver else { return }
         handedOver = data
         WCSession.default.transferUserInfo(data.isEmpty ? ["left": true] : ["handover": data])
@@ -70,8 +73,11 @@ extension PhoneWatchLink: WCSessionDelegate {
             Task { @MainActor in
                 guard let u = UInt32(exactly: unit), let r = UInt16(exactly: request) else { replyHandler(["ok": false]); return }
                 let key = IncomingRequest.Key(unit: u, request: r)
+                // In the group the watch named; the first group if it named none.
+                let tag = message["group"] as? String
+                let engine = self.model?.engines.first { tag == nil || tag == "" || $0.group?.tag == tag }
                 // The watch is told whether an acknowledgement was really made.
-                replyHandler(["ok": self.model?.acknowledge(key) == true])
+                replyHandler(["ok": engine?.acknowledge(key) == true])
             }
             return
         }
