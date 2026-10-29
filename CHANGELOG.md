@@ -4,6 +4,8 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-29
 
+- [x] **Simulator on the build Mac** - Martin ran `sudo xcodebuild -runFirstLaunch` there; its simulators now list and run, so screen tests move off the second Mac, which is in use.
+
 - [x] **Screens for the re-review fixes** - full screen run on the second Mac (3 iPhones and iPads, 2 watches, light and dark, normal and largest text): every iPhone and watch run has no audit issues; the new screens (removed from the first group with the Available tab, the three position messages, settings too big to send) show correctly. The iPad runs fail only on the known invite-code contrast reading (TODO, audit findings), and two runs timed out taking a screenshot. At the largest text the call's choices (Need company, Something else) broke words letter by letter in two columns; they are now one column there.
 
 - [x] **Second look at the re-review fixes** - an independent review of 0534cd6 found that a registration waiting out its pause ignored a poll's answer, so a newly listed phone could wait up to 10 minutes for wake-ups; now the answer starts it at once. A home Wi-Fi end always sends its challenge before its proof, however the two arrive; receipts not yet sent are capped like those awaited; and a choice the call has no room for says so, with 999 advice. 252 core tests pass; phone and watch build.
