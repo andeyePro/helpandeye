@@ -177,6 +177,7 @@ struct FollowUps: View {
     @State private var problem: String?
     @FocusState private var typing: Bool
     @StateObject private var location = OneShotLocation()
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Whether a route took where the caller is; nil while it is still going.
     @State private var positionSent: Bool?
 
@@ -197,7 +198,8 @@ struct FollowUps: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Tell them more (optional)").font(.headline)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 8) {
+            // One column at the largest text sizes, so no word is broken across lines.
+            LazyVGrid(columns: typeSize.isAccessibilitySize ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 150))], spacing: 8) {
                 ForEach(CallCategory.choices, id: \.self) { c in
                     let chosen = request.categories.contains(c)
                     // Pressed again, a choice is taken back: one pressed by mistake is not stuck.
