@@ -69,6 +69,5 @@ how a unit behaves need your own run on real hardware. Agents read [AGENTS.md](.
 ## How does @claude in Discussions work?
 
 Mention @claude in a discussion and Claude, Anthropic's AI assistant, replies there. It answers
-only questions about Help&I, and links this FAQ, the website's FAQ or an earlier discussion
-when they already cover the question. It answers a limited number of questions a day, and a few
-for each person.
+only questions about Help&I. Where this FAQ, the website's FAQ, a decision or an earlier
+discussion already covers part of a question, it links that and adds what is new.

@@ -1,9 +1,11 @@
 # Answers @claude mentions in GitHub Discussions. Replies are posted by github-actions[bot] and
 # say they come from Claude: Anthropic's app-token exchange only accepts its own action, which
 # does not handle Discussions. Needs a repository secret CLAUDE_CODE_OAUTH_TOKEN made with
-# `claude setup-token` on a Claude subscription. Anyone may ask, within a daily limit for everyone
-# and a smaller one for each person, set by the repository variables CLAUDE_DAILY_LIMIT and
-# CLAUDE_PERSON_LIMIT. Answers worth keeping are suggested for the FAQ in an issue.
+# `claude setup-token` on a Claude subscription. Anyone may ask. When someone outside the team uses
+# more than CLAUDE_ALERT_USD (a repository variable; $3 at API prices if unset) in any 6 hours, an
+# issue titled "Discussions usage" gets a comment with their tokens and models, for a maintainer to
+# look at. Setting CLAUDE_DAILY_LIMIT (and optionally CLAUDE_PERSON_LIMIT) turns on a hard limit
+# instead. Answers worth keeping are suggested for the FAQ in an issue.
 name: Claude in Discussions
 
 on:
@@ -33,12 +35,13 @@ jobs:
 
       - name: Check the daily limit
         id: limit
+        if: vars.CLAUDE_DAILY_LIMIT != ''
         env:
           GH_TOKEN: ${{ github.token }}
           WHO: ${{ github.event.sender.login }}
           ROLE: ${{ github.event.comment.author_association || github.event.discussion.author_association }}
-          DAILY: ${{ vars.CLAUDE_DAILY_LIMIT || '20' }}
-          EACH: ${{ vars.CLAUDE_PERSON_LIMIT || '3' }}
+          DAILY: ${{ vars.CLAUDE_DAILY_LIMIT }}
+          EACH: ${{ vars.CLAUDE_PERSON_LIMIT || vars.CLAUDE_DAILY_LIMIT }}
         run: |
           since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
           # Who started each other run of the last day that asked Claude, or may still.
@@ -107,11 +110,15 @@ jobs:
               "- [\(.title)](\(.url))\(if .isAnswered then " (answered)" else "" end)"' > "$RUNNER_TEMP/earlier.md"
 
       - name: Ask Claude
+        id: ask
         if: steps.limit.outputs.over != 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          WHO: ${{ github.event.sender.login }}
+          ROLE: ${{ github.event.comment.author_association || github.event.discussion.author_association }}
         run: |
           npm install -g --silent @anthropic-ai/claude-code@2.1.310
+          mkdir -p "$RUNNER_TEMP/usage"
           {
             cat .github/claude/discussion-prompt.md
             for f in README.md AGENTS.md CONTRIBUTING.md docs/design-decisions.md docs/app-spec.md docs/FAQ.md; do
@@ -128,6 +135,10 @@ jobs:
             --strict-mcp-config --max-turns 20 --output-format json \
             --json-schema '{"type":"object","properties":{"relevant":{"type":"boolean"},"reply":{"type":"string"},"faq":{"type":"string"}},"required":["relevant","reply","faq"],"additionalProperties":false}' \
             < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/result.json"
+          # What this answer used, kept for a week so later runs can add up each person's use.
+          jq --arg who "$WHO" --arg role "$ROLE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{who: $who, role: $role, at: $at, usd: (.total_cost_usd // 0), models: (.modelUsage // {})}' \
+            "$RUNNER_TEMP/result.json" > "$RUNNER_TEMP/usage/usage.json"
           jq -e '(.structured_output.reply | length > 0 and length < 6000) and (.structured_output.faq | length < 3000)' "$RUNNER_TEMP/result.json" > /dev/null
 
       - name: Post the reply
@@ -138,7 +149,7 @@ jobs:
           OVER: ${{ steps.limit.outputs.over }}
         run: |
           if [ "$OVER" = true ]; then
-            reply="I have answered as many questions as I can for today, so I cannot answer this one now. The [FAQ](https://help.andeye.com/#faq) or the [developer FAQ](https://github.com/andeyePro/helpandeye/blob/main/docs/FAQ.md) may already cover it, and one of the team may reply here. You can ask me again tomorrow."
+            reply="I cannot answer any more questions today. One of the team will see this one, and you can ask me again tomorrow."
             faq=""
           else
             reply=$(jq -r .structured_output.reply "$RUNNER_TEMP/result.json")
@@ -165,3 +176,51 @@ jobs:
             fi
             gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "From $url"$'\n\n'"$faq"
           fi
+
+      - name: Keep the usage
+        if: always() && steps.ask.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: claude-usage
+          path: ${{ runner.temp }}/usage/usage.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Watch for heavy use
+        if: always() && steps.ask.outcome != 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WHO: ${{ github.event.sender.login }}
+          ROLE: ${{ github.event.comment.author_association || github.event.discussion.author_association }}
+          ALERT: ${{ vars.CLAUDE_ALERT_USD || '3' }}
+          WHERE: ${{ github.event.comment.html_url || github.event.discussion.html_url }}
+        run: |
+          case "$ROLE" in OWNER|MEMBER|COLLABORATOR|CONTRIBUTOR) exit 0 ;; esac
+          [ -f "$RUNNER_TEMP/usage/usage.json" ] || exit 0
+          since=$(date -u -d '6 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          mkdir -p "$RUNNER_TEMP/earlier-usage"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/claude-discussions.yml/runs?created=%3E%3D$since&per_page=100" \
+            --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .conclusion != \"skipped\") | .id" > "$RUNNER_TEMP/recent.txt"
+          while read -r id; do
+            # Runs that never asked Claude have no usage to fetch.
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" -n claude-usage -D "$RUNNER_TEMP/earlier-usage/$id" 2>/dev/null || true
+          done < "$RUNNER_TEMP/recent.txt"
+          find "$RUNNER_TEMP/earlier-usage" -name usage.json -exec cat {} + > "$RUNNER_TEMP/earlier.jsonl"
+          # This person's use in the last 6 hours, before and including this answer, by model.
+          jq -s -r --arg who "$WHO" --argjson alert "$ALERT" --slurpfile now "$RUNNER_TEMP/usage/usage.json" '
+            ([.[] | select(.who == $who)]) as $before | ($before + $now) as $all |
+            ($before | map(.usd) | add // 0) as $was | ($all | map(.usd) | add) as $is |
+            if $was < $alert and $is >= $alert then
+              "**\($who)** has used about $\($is * 100 | round / 100) at API prices in \($all | length) answers in the last 6 hours (alert at $\($alert)).\n\n| Model | Input | Output | Cache read | Cache write | Web searches | $ |\n|---|---|---|---|---|---|---|\n" +
+              ([$all[].models | to_entries[]] | group_by(.key) | map(
+                "| \(.[0].key) | \(map(.value.inputTokens // 0) | add) | \(map(.value.outputTokens // 0) | add) | \(map(.value.cacheReadInputTokens // 0) | add) | \(map(.value.cacheCreationInputTokens // 0) | add) | \(map(.value.webSearchRequests // 0) | add) | \(map(.value.costUSD // 0) | add * 100 | round / 100) |"
+              ) | join("\n"))
+            else empty end' "$RUNNER_TEMP/earlier.jsonl" > "$RUNNER_TEMP/alert.md"
+          [ -s "$RUNNER_TEMP/alert.md" ] || exit 0
+          issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'in:title "Discussions usage"' --json number --jq '.[0].number // empty')
+          if [ -z "$issue" ]; then
+            issue=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "Discussions usage" \
+              --body "Someone outside the team used @claude in Discussions more than the alert level in 6 hours. Nothing was stopped; look at what they asked and decide whether it is abuse.")
+            issue=${issue##*/}
+          fi
+          gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "$(cat "$RUNNER_TEMP/alert.md")"$'\n\n'"Latest: $WHERE"

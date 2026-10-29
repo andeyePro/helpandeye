@@ -174,7 +174,7 @@ O5.5 Fixed: an audit that cannot run, or a screenshot that cannot be saved, is r
 
 The current [decision 12](https://github.com/andeyePro/helpandeye/blob/640de64f9831681fbc7d6ce07ef194062c606247/docs/design-decisions.md?plain=1#L19) explicitly adopts responder-key-sealed group messages for typed text/position. That updated mechanism is legitimate and supersedes the old individual-DM mechanism requirement; it does not authorise health-category disclosure to caller members. **Fix:** settle the category privacy contract explicitly and, while the present prohibition stands, carry categories only in the responder-encrypted envelope. Add a caller-only recipient test for every category and personal field.
 
-O5.5 Fixed, for Martin to confirm: a category the caller chose (Fallen, Unwell and the rest) now goes sealed for responders like typed text; only a missed check-in, raised by another member's phone, goes plainly. AGENTS.md, CONTRIBUTING.md and the app spec now say the caller's choice is personal content too.
+O5.5 Fixed (confirmed by Martin, 2026-10-29: medical matters are for responders only): a category the caller chose (Fallen, Unwell and the rest) now goes sealed for responders like typed text; only a missed check-in, raised by another member's phone, goes plainly. AGENTS.md, CONTRIBUTING.md and the app spec now say the caller's choice is personal content too.
 
 ### D18 — Low: design and manual-test documents contain conflicting current contracts and stale counts
 
@@ -569,7 +569,7 @@ Any [non-bot discussion author whose text contains `@claude`](https://github.com
 
 **Recommendation:** explicitly choose a public-access budget and enforce a global/per-author limit or maintainer approval for new/untrusted participants. Bound input size and model usage, add a circuit breaker and monitor failures/consumption. Verify external subscription/account limits rather than assuming repository code supplies them. Retain the tool allowlist and bot-loop filter.
 
-O5.5 Fixed: Martin chose to keep it open to anyone, with a limit. Before asking Claude, the workflow counts the runs of the last 24 hours that asked it, including failed and unfinished ones, and refuses with a fixed reply past 20 in all or 3 for one person outside the team (repository variables `CLAUDE_DAILY_LIMIT`, `CLAUDE_PERSON_LIMIT`); if the count cannot be read, the run stops. Repeat questions are cheaper: the bot is given both FAQs and the list of earlier discussions and told to link them rather than answer again. Two runs at the same moment can each pass at the limit, so it can be exceeded by a few. A global concurrency group was not added, because GitHub keeps only one pending run per group and would drop answers.
+O5.5 Fixed: Martin chose (2026-10-29) to watch rather than limit, so as not to turn away an interested contributor or customer. Every answer records its cost, tokens and models as a run artifact kept for 7 days; when someone outside the team passes `CLAUDE_ALERT_USD` (default $3 at API prices) within 6 hours, a comment on an issue titled "Discussions usage" lists their tokens and models by model, for a maintainer to judge. A hard limit is built and fails closed, but stays off unless the repository variable `CLAUDE_DAILY_LIMIT` is set (with `CLAUDE_PERSON_LIMIT` for each person). Repeat questions cost less: the bot is given both FAQs and the list of earlier discussions and builds on them with links. A global concurrency group was not added, because GitHub keeps only one pending run per group and would drop answers.
 
 ### R2 — Automatic blinking lasts beyond five seconds without a page control
 
@@ -599,7 +599,7 @@ The [CLA workflow grants write permissions](https://github.com/andeyePro/helpand
 
 **Recommendation:** pin a reviewed action SHA, verify every required permission, and use a dedicated signature-storage branch or repository with a narrowly scoped write route. Verify first-use and signing against actual branch-protection rules without weakening production protections. Make CLA document/version changes an explicit reviewed process: [the signing URL follows mutable `main/CLA.md`](https://github.com/andeyePro/helpandeye/blob/1119a0377bbb1671c1cdfeafb595bbed439b5f8e/.github/workflows/cla.yml#L25), although the ledger path is versioned. This is a governance/control recommendation, not a legal conclusion about existing signatures.
 
-O5.5 Response: action pinned by SHA. Moving signatures off `main` to a dedicated branch is Martin's decision.
+O5.5 Fixed: action pinned by SHA, and signatures now go to their own `cla-signatures` branch (Martin, 2026-10-29), which holds nothing else; none had been signed, so nothing moved. The signing link still follows `main/CLA.md`; the ledger path is versioned.
 
 ### R5 — Separate footnote links from disclosure controls
 
