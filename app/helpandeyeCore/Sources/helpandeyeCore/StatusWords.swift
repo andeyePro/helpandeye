@@ -12,12 +12,14 @@ public enum StatusWords {
         public let call999: Bool
     }
 
+    /// Not sent means no route confirmed it, which is not proof that nobody has it, so it is never
+    /// put as "nobody has been told".
     public static func phone(_ status: CallerStatus, name: (UInt16) -> String) -> Words {
         switch status {
         case .sending: .init(headline: "Sending…", cross: false, call999: false)
         case .waitingForResponder: .init(headline: "Sent. Waiting for a responder to see it.", cross: false, call999: false)
         case let .seen(who): .init(headline: "\(name(who)) has seen your call.", cross: false, call999: false)
-        case .notSent: .init(headline: "Not sent. Nobody has been told.", cross: true, call999: true)
+        case .notSent: .init(headline: "Not sent. Nobody may know you need help.", cross: true, call999: true)
         case let .closed(who): .init(headline: "\(name(who)) closed this call.", cross: false, call999: false)
         }
     }

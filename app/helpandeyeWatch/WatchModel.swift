@@ -245,7 +245,10 @@ final class WatchModel: NSObject, ObservableObject {
     }
 
     /// Not set up and no phone to send through: the buttons could not reach anyone.
-    var needsSetUp: Bool { engine?.me == nil && !phoneInReach }
+    var cannotCall: Bool { engine?.me == nil && !phoneInReach }
+
+    /// Nothing to show at all: no group on this watch, even one that could still alert, and no phone.
+    var needsSetUp: Bool { allEngines.allSatisfy { $0.me == nil } && !phoneInReach }
 
     /// What is said after Need a hand, while that call has not failed.
     var amberNote: String? {
@@ -272,17 +275,21 @@ final class WatchModel: NSObject, ObservableObject {
         return phoneStatus.map { ($0, phoneFailed) }
     }
 
-    /// Every group's open calls together, most urgent first, then the first five.
+    /// Every open call from the phone and from the watch's own groups, most urgent first. None is cut
+    /// off: a call whose alert sounds here must stay reachable however many others there are.
     var open: [Open] {
         let all = allEngines.flatMap { e in e.activity.inbox.requests.values.filter(\.isOpen).map { (e, $0) } }
         let own = all.sorted { ResponderInbox.moreUrgent($0.1, $1.1) }.map { e, r in
             Open(unit: r.key.unit, request: r.key.request, colour: r.colour ?? .red, who: e.name(ofUnit: r.key.unit), group: e.group?.tag ?? "")
         }
-        guard phoneInReach else { return Array(own.prefix(5)) }
+        guard phoneInReach else { return own }
         // Calls only the watch has heard are shown too, as their alerts ring here.
         let first = engine?.group?.tag ?? ""
         let watchOnly = own.filter { o in !phoneOpen.contains { $0.key == o.key && ($0.group.isEmpty ? first : $0.group) == o.group } }
-        return Array((phoneOpen + watchOnly).prefix(5))
+        // Red before amber before green; calls of one colour keep the order they came in.
+        return (phoneOpen + watchOnly).enumerated()
+            .sorted { ($0.element.colour.rawValue, $0.offset) < ($1.element.colour.rawValue, $1.offset) }
+            .map(\.element)
     }
 
     /// The engine for a group's tag; an empty tag (from a phone before several groups) is the first.
@@ -335,7 +342,7 @@ final class WatchModel: NSObject, ObservableObject {
     /// From the Help complication: Help goes in 60 seconds unless the wearer presses I'm OK. It
     /// keeps running with the wrist lowered, in an extended runtime session.
     func startCountdown() {
-        guard countdown == nil, !needsSetUp else { return }
+        guard countdown == nil, !cannotCall else { return }
         let now = Date()
         countdown = HelpCountdown(startedAt: now)
         countdownCheckedAt = now

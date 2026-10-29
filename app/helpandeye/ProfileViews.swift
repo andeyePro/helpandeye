@@ -168,6 +168,9 @@ struct ProfilesView: View {
             }
         }
         .navigationTitle("Profiles")
+        #if DEBUG && targetEnvironment(simulator)
+        .onAppear { if ProcessInfo.processInfo.arguments.contains("-HelpAOversizedSettings") { model.tryOversizedSettings() } }
+        #endif
     }
 
     private func holders(_ p: Profile) -> String {
@@ -373,6 +376,7 @@ struct ProfileEditor: View {
                 if mine.contains(n) { g.policy.profileOf[n] = edited.id } else if g.policy.profileOf[n] == edited.id { g.policy.profileOf[n] = nil }
             }
         }
-        saved = true
+        // Settings too big to send are not kept: the editor keeps the edit and shows why instead.
+        saved = model.engine.settingsProblem == nil
     }
 }

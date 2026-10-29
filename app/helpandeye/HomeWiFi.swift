@@ -6,14 +6,17 @@ import Network
 /// other with Bonjour and keep a direct connection open, so a call needs no box, no server and no
 /// internet. A connection counts only once the other end has proved it is another member
 /// (`LocalWire.Session`), and a frame counts as sent only once that member's Help&I confirms it
-/// read it. The advertised name says nothing about the group. In the app it runs while Help&I is
-/// open; the local push extension runs the same with the phone locked.
+/// took it in. The advertised name says nothing about the group. In the app it runs while Help&I is
+/// open; the local push extension runs the same with the phone locked, and confirms only what it
+/// keeps (`keeps`).
 @MainActor final class HomeWiFi: ObservableObject, LocalLink {
     /// Other members' phones connected and proven now.
     @Published private(set) var peerCount = 0
     /// Why the route cannot work at all here, such as Local Network access being turned off.
     @Published private(set) var problem: String?
     var onFrame: ((HelpFrame) -> Void)?
+    /// Whether a frame heard is one this end takes in, so is confirmed. Everything, in the app.
+    var keeps: (HelpFrame) -> Bool = { _ in true }
 
     private var group: GroupState?
     private var me: UInt16?
@@ -48,10 +51,16 @@ import Network
     var hasPeers: Bool { peers.values.contains(where: \.proven) }
     var unavailableReason: String { problem ?? (group == nil ? "Not in a group" : "No other phones of the group on this Wi-Fi") }
 
+    /// Starts afresh when the keys, this phone's number or who is in the group changes, so a
+    /// connection proven by someone since removed does not stay open.
     func configure(group: GroupState?, me: UInt16?, identity: DeviceIdentity) {
-        let changed = group?.secrets != self.group?.secrets || me != self.me
+        let changed = group?.secrets != self.group?.secrets || me != self.me || Self.who(group) != Self.who(self.group)
         self.group = group; self.me = me; self.identity = identity
         if changed { restart() }
+    }
+
+    private static func who(_ g: GroupState?) -> [UInt16: Data] {
+        Dictionary((g?.members ?? []).map { ($0.number, $0.signingKey ?? Data()) }, uniquingKeysWith: { a, _ in a })
     }
 
     /// After the app was in the background, where iOS stops listening.
@@ -67,9 +76,9 @@ import Network
         switch s { case .failed?, .cancelled?, nil: true; default: false }
     }
 
-    func send(_ frame: HelpFrame) async -> String? {
-        let ready = peers.values.filter(\.proven)
-        guard !ready.isEmpty else { return unavailableReason }
+    func send(_ frame: HelpFrame, to only: Set<UInt16>?) async -> String? {
+        let ready = peers.values.filter { p in p.session.peer.map { n in only?.contains(n) ?? true } ?? false }
+        guard !ready.isEmpty else { return only == nil ? unavailableReason : "None of the phones it is for is on this Wi-Fi" }
         nextMessage &+= 1
         let id = nextMessage
         let confirmed = await withCheckedContinuation { (done: CheckedContinuation<Bool, Never>) in
@@ -189,7 +198,7 @@ import Network
             Task { @MainActor in
                 guard let self, let p = self.peers[id], p.connection === c else { return }
                 if let data {
-                    let (events, reply) = p.session.take(data, at: Date())
+                    let (events, reply) = p.session.take(data)
                     if !reply.isEmpty { c.send(content: reply, completion: .idempotent) }
                     for e in events {
                         switch e {
@@ -197,7 +206,7 @@ import Network
                             UserDefaults.standard.set(true, forKey: Self.usedKey)
                             self.update()
                         case let .frame(frame, mid):
-                            c.send(content: p.session.receipt(for: mid), completion: .idempotent)
+                            if self.keeps(frame), let receipt = p.session.receipt(for: mid) { c.send(content: receipt, completion: .idempotent) }
                             self.onFrame?(frame)
                         case let .receipt(mid): self.settle(mid, confirmed: true)
                         }

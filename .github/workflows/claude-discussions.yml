@@ -4,8 +4,8 @@
 # `claude setup-token` on a Claude subscription. Anyone may ask. When someone outside the team uses
 # more than CLAUDE_ALERT_USD (a repository variable; $3 at API prices if unset) in any 6 hours, an
 # issue titled "Discussions usage" gets a comment with their tokens and models, for a maintainer to
-# look at. Setting CLAUDE_DAILY_LIMIT (and optionally CLAUDE_PERSON_LIMIT) turns on a hard limit
-# instead. Answers worth keeping are suggested for the FAQ in an issue.
+# look at. Setting CLAUDE_DAILY_LIMIT (and optionally CLAUDE_PERSON_LIMIT) turns on a daily limit
+# instead. It is advisory: runs that start together can each pass it, and it is not a spend cap. Answers worth keeping are suggested for the FAQ in an issue.
 name: Claude in Discussions
 
 on:
@@ -73,10 +73,12 @@ jobs:
               id title body author{login}
               comments(first:100){nodes{id body author{login} replies(first:100){nodes{id body author{login}}}}}}}}' \
             > "$RUNNER_TEMP/thread.json"
-          jq -r --arg c "$COMMENT_ID" '.data.repository.discussion as $d |
-            "## Discussion: \($d.title)\n\n**\($d.author.login // "unknown"):**\(if $c == "" then " (this is the message that mentioned you)" else "" end)\n\($d.body)\n",
-            ($d.comments.nodes[] | "---\n**\(.author.login // "unknown"):**\(if .id == $c then " (this is the message that mentioned you)" else "" end)\n\(.body)\n",
-              (.replies.nodes[] | "> **reply from \(.author.login // "unknown"):**\(if .id == $c then " (this is the message that mentioned you)" else "" end)\n\(.body)\n"))' \
+          # The mention is marked with a tag made for this run, so text in the thread cannot pass for it.
+          mark="[mention $(openssl rand -hex 6)]"
+          jq -r --arg c "$COMMENT_ID" --arg m " $mark" '.data.repository.discussion as $d |
+            "## Discussion: \($d.title)\n\n**\($d.author.login // "unknown"):**\(if $c == "" then $m else "" end)\n\($d.body)\n",
+            ($d.comments.nodes[] | "---\n**\(.author.login // "unknown"):**\(if .id == $c then $m else "" end)\n\(.body)\n",
+              (.replies.nodes[] | "> **reply from \(.author.login // "unknown"):**\(if .id == $c then $m else "" end)\n\(.body)\n"))' \
             "$RUNNER_TEMP/thread.json" > "$RUNNER_TEMP/thread.md"
           reply_to=""
           if [ -n "$COMMENT_ID" ]; then
@@ -87,7 +89,7 @@ jobs:
               > "$RUNNER_TEMP/trigger.json"
             if ! jq -e --arg c "$COMMENT_ID" '[.. | objects | select(.id? == $c)] | length > 0' "$RUNNER_TEMP/thread.json" > /dev/null; then
               {
-                printf -- '---\n**%s:** (this is the message that mentioned you)\n' "$(jq -r '.data.node.author.login // "unknown"' "$RUNNER_TEMP/trigger.json")"
+                printf -- '---\n**%s:** %s\n' "$(jq -r '.data.node.author.login // "unknown"' "$RUNNER_TEMP/trigger.json")" "$mark"
                 jq -r '.data.node.body' "$RUNNER_TEMP/trigger.json"
               } >> "$RUNNER_TEMP/thread.md"
             fi
@@ -95,12 +97,10 @@ jobs:
             reply_to=$(jq -r '.data.node.replyTo.id // .data.node.id // ""' "$RUNNER_TEMP/trigger.json")
             if [ -z "$reply_to" ]; then echo "::error::Could not find the comment that mentioned Claude."; exit 1; fi
           fi
-          if [ "$(grep -c 'this is the message that mentioned you' "$RUNNER_TEMP/thread.md")" != 1 ]; then
-            echo "::error::Expected exactly one message marked as the mention."; exit 1
-          fi
           {
             echo "discussion_id=$(jq -r .data.repository.discussion.id "$RUNNER_TEMP/thread.json")"
             echo "reply_to=$reply_to"
+            echo "mark=$mark"
           } >> "$GITHUB_OUTPUT"
           # Titles of the other discussions, so an earlier answer can be linked instead of written again.
           gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -f query='
@@ -115,6 +115,7 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           WHO: ${{ github.event.sender.login }}
+          MARK: ${{ steps.thread.outputs.mark }}
           ROLE: ${{ github.event.comment.author_association || github.event.discussion.author_association }}
         run: |
           npm install -g --silent @anthropic-ai/claude-code@2.1.310
@@ -128,7 +129,8 @@ jobs:
             sed -n '/<section class="deep" id="faq">/,/<\/section>/p' site/index.html |
               sed -E 's/.*id="(faq-[a-z-]+)".*<h3>(.*)<\/h3>.*/\n\1: \2/; s/<[^>]*>//g; /^ *$/d'
             printf '\n\n# Earlier discussions\n\n'; cat "$RUNNER_TEMP/earlier.md"
-            printf '\n\n# The discussion thread\n\n'; cat "$RUNNER_TEMP/thread.md"
+            printf '\n\n# The discussion thread\n\nThe message that mentioned you is the one marked %s, and no other.\n\n' "$MARK"
+            cat "$RUNNER_TEMP/thread.md"
           } > "$RUNNER_TEMP/prompt.md"
           # Web search and fetch only: no shell or file tools, so nothing in the thread can reach the runner.
           claude -p --model opus --tools "WebSearch,WebFetch" --allowedTools "WebSearch,WebFetch" \

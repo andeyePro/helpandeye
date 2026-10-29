@@ -43,6 +43,8 @@ final class Relay: ObservableObject, RelayLink {
         switch await request("PUT", RelayProtocol.path(for: group.secrets, "members"), body: body) {
         case .some((200, _)): return .accepted
         case let .some((status, _)) where status >= 500 || status == 429: return .unreachable
+        // Another coordinator's list, before the first coordinator has registered the group.
+        case .some((425, _)): return .notYet
         case let .some((status, _)): lastProblem = "The relay did not take the member list (\(status))."; return .refused
         case .none: return .unreachable
         }
@@ -83,19 +85,35 @@ final class Relay: ObservableObject, RelayLink {
     /// wakes a watch quietly.
     var device = "phone"
 
-    func publishPushToken(attempt: Int = 0) async {
-        guard let group, let pushToken else { return }
-        #if DEBUG
-        let sandbox = true
-        #else
-        let sandbox = false
-        #endif
-        let hex = pushToken.map { String(format: "%02x", $0) }.joined()
-        guard let body = try? JSONSerialization.data(withJSONObject: ["token": hex, "sandbox": sandbox, "device": device] as [String: Any]) else { return }
-        // Refused until a coordinator's phone has listed this one on the relay: try again shortly.
-        if case .some((403, _)) = await request("PUT", RelayProtocol.path(for: group.secrets, "push"), body: body), attempt < 5 {
-            try? await Task.sleep(for: .seconds(60))
-            if self.group?.secrets.groupID == group.secrets.groupID { await publishPushToken(attempt: attempt + 1) }
+    /// The group, relay address and token the relay last took. Until it takes the current ones
+    /// (refused until a coordinator's phone has listed this one, or not reached), they are tried
+    /// again after a growing pause, for as long as they stay the current ones.
+    private var registered: String?
+    private var registering = false
+    private var wanted: String? {
+        guard let group, let base, let pushToken else { return nil }
+        return [group.secrets.groupID.base64EncodedString(), base.absoluteString, pushToken.base64EncodedString()].joined(separator: " ")
+    }
+
+    func publishPushToken() async {
+        guard !registering else { return }
+        registering = true
+        defer { registering = false }
+        var pause: TimeInterval = 60
+        while let group, let pushToken, let wanted, wanted != registered {
+            #if DEBUG
+            let sandbox = true
+            #else
+            let sandbox = false
+            #endif
+            let hex = pushToken.map { String(format: "%02x", $0) }.joined()
+            guard let body = try? JSONSerialization.data(withJSONObject: ["token": hex, "sandbox": sandbox, "device": device] as [String: Any]) else { return }
+            if case .some((200, _)) = await request("PUT", RelayProtocol.path(for: group.secrets, "push"), body: body) {
+                registered = wanted
+                return
+            }
+            try? await Task.sleep(for: .seconds(pause))
+            pause = min(pause * 2, 600)
         }
     }
 
@@ -117,6 +135,8 @@ final class Relay: ObservableObject, RelayLink {
             guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(RelayPoll.Page.self, from: data) else { return }
             // The group or relay changed while waiting: this page belongs to the old one.
             guard self.group?.secrets.groupID == group.secrets.groupID, self.positionKey == positionKey else { return }
+            // Answered, so this phone is listed now: a registration still waiting can go.
+            if registered != wanted { Task { await publishPushToken() } }
             let outcome = RelayPoll.read(page, from: stored, at: Date(), keys: group.listening(at: Date()))
             for f in outcome.frames { onFrame?(f) }
             UserDefaults.standard.set(try? JSONEncoder().encode(outcome.position), forKey: positionKey)

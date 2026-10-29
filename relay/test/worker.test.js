@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Group } from "../src/worker.js";
-import { b64, signingInput } from "../src/relay.js";
+import { b64, MAX_WAKES_PER_MINUTE, signingInput } from "../src/relay.js";
 
 class MapStorage {
   constructor() { this.m = new Map(); }
@@ -81,6 +81,12 @@ test("the post says when no wake got through, drops dead tokens, and a resend wa
   status = 200;
   assert.equal((await post()).woke, undefined, "success says nothing");
   assert.equal(globalThis.fetch.mock.callCount(), 2, "a resend wakes again");
+  // Codex NR7: past the minute's wakes the message is kept but nobody is woken, and it says so,
+  // so the phone asks for a wake again on its next resend.
+  for (let i = 2; i < MAX_WAKES_PER_MINUTE; i++) await post();
+  const calls = globalThis.fetch.mock.callCount();
+  assert.equal((await post()).woke, false, "held back by the limit");
+  assert.equal(globalThis.fetch.mock.callCount(), calls, "and Apple was not asked");
 });
 
 test("a token APNs says is dead is dropped and not tried again", async (t) => {

@@ -143,18 +143,23 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
             piece = rest
         }
         if !piece.isEmpty { pieces.append(piece) }
+        guard pieces.count <= partsLeft else { return [] }
         notes.append(text)
         return pieces.map { .note(unit: unit, request: number, part: nextPart(), text: $0) }
     }
 
-    public mutating func addNote(_ typed: String) -> HelpFrame {
+    public mutating func addNote(_ typed: String) -> HelpFrame? {
+        guard partsLeft > 0 else { return nil }
         let frame = HelpFrame.note(unit: unit, request: number, part: nextPart(), typed: typed)
         if case let .note(_, _, _, text) = frame { notes.append(text) }
         return frame
     }
 
+    /// A call carries at most 255 notes and choices, each in its own part, so none overwrites another.
+    public var partsLeft: Int { 255 - Int(parts) }
+
     private mutating func nextPart() -> UInt8 {
-        parts = parts == 255 ? 255 : parts + 1
+        parts += 1
         return parts
     }
 

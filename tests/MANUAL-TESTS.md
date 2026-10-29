@@ -55,7 +55,7 @@ Pass: phone A shows "Sending…", then "Sent. Waiting for a responder to see it.
 1. Switch off phone A's board (or forget it in Box).
 2. On phone A, press Need a hand.
 
-Pass: phone A shows a cross and "Not sent. Nobody has been told.", lists why each route failed, offers Try again, and says "If you need help now, call 999." With a SIM in phone A and a mobile number saved by at least one responder (Group, Your mobile number), it also offers Send as a text, which opens a ready-written message naming no one, addressed to every responder with a number. With no responder number saved, Send as a text is not offered at all.
+Pass: phone A shows a cross and "Not sent. Nobody may know you need help.", lists why each route failed, offers Try again, and says "If you need help now, call 999." With a SIM in phone A and a mobile number saved by at least one responder (Group, Your mobile number), it also offers Send as a text, which opens a ready-written message naming no one, addressed to every responder with a number. With no responder number saved, Send as a text is not offered at all.
 
 ## 5. Follow-ups arrive with their call
 
@@ -122,7 +122,7 @@ Pass: after step 1, phone A shows "Connecting to your box…" while it is off an
 1. Forget the box on phone A, and leave the internet route unset.
 2. Press Help.
 
-Pass: the cross and "Not sent. Nobody has been told." appear at once, not "Sending…".
+Pass: the cross and "Not sent. Nobody may know you need help." appear at once, not "Sending…".
 
 ## 13. Check-ins
 

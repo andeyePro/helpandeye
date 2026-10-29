@@ -36,13 +36,22 @@ final class AppModel: ObservableObject {
     /// Every engine, the first group's first.
     var engines: [HelpEngine] { [engine] + others.map(\.engine) }
 
+    /// The screen tests' phone that was removed from its first group but responds in another, which
+    /// takes a second phone to arrange for real. Debug simulator builds only, and only with the
+    /// test's own launch argument; nothing is saved as the first group or listed as another.
+    #if DEBUG && targetEnvironment(simulator)
+    private static let screensOtherGroupOnly = ProcessInfo.processInfo.arguments.contains("-HelpAOtherGroupOnly")
+    #else
+    private static let screensOtherGroupOnly = false
+    #endif
+
     private init() {
         let airtime = AirtimeLedger(budget: Store.loadAirtime() ?? Store.loadActivity().airtime)
         airtime.onChange = { Store.save(airtime: $0) }
         hub = MeshHub(box: board, airtime: airtime)
         let link = hub.link(for: Self.firstGroup)
         engine = HelpEngine(identity: Store.identity(), mesh: link, relay: relay, alerts: NotificationAlerts(), store: AppStore(),
-                            saved: Store.loadState(), activity: Store.loadActivity(), homeWiFi: home)
+                            saved: Self.screensOtherGroupOnly ? nil : Store.loadState(), activity: Store.loadActivity(), homeWiFi: home)
         link.onFrame = { [weak self] in self?.engine.receive($0, via: .mesh) }
         link.onText = { [weak self] in self?.engine.receiveText(from: $0, $1) }
         board.onFrame = { [weak self] in self?.hub.received($0, on: $1) }
@@ -62,6 +71,12 @@ final class AppModel: ObservableObject {
         voiceTracker = .init(engine.current)
         engine.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.tellCaller() }.store(in: &bag)
         for tag in Store.otherGroups { start(tag) }
+        #if DEBUG && targetEnvironment(simulator)
+        if Self.screensOtherGroupOnly {
+            start("screens")
+            others.last?.engine.createGroup(name: "Hill Road", myName: "Sam", call: false)
+        }
+        #endif
         ticker = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -122,6 +137,20 @@ final class AppModel: ObservableObject {
         engine.joined(group, as: number, invitedBy: invitedBy)
     }
     func updateGroup(_ change: (inout GroupState) -> Void) { engine.updateGroup(change) }
+
+    #if DEBUG && targetEnvironment(simulator)
+    /// Asks for settings too big to send, as the engine's own test does, so the screen tests meet
+    /// the real refusal. Nothing is kept: the engine refuses them.
+    func tryOversizedSettings() {
+        updateGroup { g in
+            for i in 1...40 {
+                var p = Profile(id: UInt8(i), name: UUID().uuidString)
+                p.okWords = (0..<6).map { _ in UUID().uuidString }.joined()
+                g.policy.profiles.append(p)
+            }
+        }
+    }
+    #endif
     func leave() { engine.leave() }
     func setRelay(_ url: String) { engine.setRelay(url) }
     func setOwn(_ change: (inout Profile) -> Void) { engine.setOwn(change) }
@@ -134,8 +163,8 @@ final class AppModel: ObservableObject {
     func add(_ category: CallCategory) { engine.add(category) }
     func withdraw(_ category: CallCategory) { engine.withdraw(category) }
     func addNote(_ text: String) -> String? { engine.addNote(text) }
-    func sharePosition(latitude: Double, longitude: Double, accuracy: Double, sent: ((Bool) -> Void)? = nil) {
-        engine.sharePosition(latitude: latitude, longitude: longitude, accuracy: accuracy, sent: sent)
+    func sharePosition(latitude: Double, longitude: Double, accuracy: Double, call: UInt16?, sent: ((Bool) -> Void)? = nil) {
+        engine.sharePosition(latitude: latitude, longitude: longitude, accuracy: accuracy, call: call, sent: sent)
     }
 
     @discardableResult func acknowledge(_ key: IncomingRequest.Key) -> Bool { engine.acknowledge(key) }

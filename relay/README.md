@@ -27,24 +27,27 @@ once awake. Because the push goes to everyone at once, a responder whose turn wo
 told early over the internet route: the escalation order still decides the repeated alerts.
 
 The reply to a post is `{"seq": n}`. If a wake was asked for and every push failed in a way that
-trying again could fix, it is `{"seq": n, "woke": false}`; a post with the same `wake` then pushes
-again. Push tokens APNs reports as dead are deleted.
+trying again could fix, or the sender has asked for more pushes this minute than it may, it is
+`{"seq": n, "woke": false}`; a post with the same `wake` then pushes again. Push tokens APNs
+reports as dead are deleted.
 
 The group's first coordinator owns the group on the relay. The group's ID is made from their key
 (8 random bytes, then the first 8 bytes of SHA-256 over `HELPA-GROUP-1`, those bytes and the
-key), so the group can be registered only by a list naming them as `primary`, whoever sends it.
+key), so the group can be registered only by them, with a list naming them as `primary`. Until
+they have, another coordinator's list is refused with 425 (too early), and taken once they have.
 After that, any coordinator's list adds people, as members; only the owner sets roles, from their
 newest list, and removes people, by naming them in `removed`; nobody removed is ever listed
 again. When the owner removes a coordinator, people only that coordinator added, and the owner
-does not list, go too. A list holds at most 256 members, and every key must be a 32-byte key. Each message is its own storage key, at most 512
-characters, kept for seven days, 2,000 at most.
+does not list, go too, and only the owner can list them again. A list holds at most 256 members,
+and every key must be a 32-byte key. Each message is its own storage key, its sealed text at most
+4,096 characters, kept for seven days, 2,000 at most.
 
 A phone's first read asks for the last 200 messages and acts only on the last quarter of an hour
 of them, so a call still open is heard at once and a week of old ones is not.
 
 Each phone may post 20 messages a minute and ask for 2 pushes a minute; past that, posts are
-refused with 429 and pushes are not sent. Push tokens of anyone left out of a new member list are
-deleted.
+refused with 429 and pushes are not sent. Leaving someone out of a list does not take them off;
+only `removed` does. When someone is taken off, their push tokens are deleted.
 
 Every response carries `X-HelpA-Allowance-Low: 1` once 40,000 relay requests have been made in
 the day, so coordinators hear before the free tier runs out. Each relay request uses two Durable

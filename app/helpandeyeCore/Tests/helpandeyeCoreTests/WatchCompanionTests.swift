@@ -92,6 +92,29 @@ import XCTest
         XCTAssertFalse(caller.engine.adopt(.call(unit: key.unit, request: 5, colour: .red, sentAt: 0)), "only watch-numbered calls")
     }
 
+    /// Codex NR2: the watch's I'm OK, reaching the phone after Help was pressed there, leaves that
+    /// Help open and urgent, even where I'm OK closes calls.
+    func testAWatchImOKArrivingLateNeverSettlesAHelpPressedOnThePhoneSinceIt() async {
+        coordinator.engine.updateGroup { $0.policy.profiles[0].afterOK = .closesCall }
+        await air.run()
+        caller.engine.press(.amber)
+        await air.run()
+        let amber = caller.request!.number
+        clock.now = clock.now.addingTimeInterval(5)
+        watch.engine.press(.green)
+        let ok = watch.request!.callFrame
+        clock.now = clock.now.addingTimeInterval(0.5)
+        caller.engine.press(.red)
+        let red = caller.request!.number
+        XCTAssertTrue(caller.engine.adopt(ok))
+        await air.run()
+        XCTAssertNotNil(caller.engine.activity.outgoing.first { $0.number == amber }?.settled, "what was open when I'm OK was pressed is settled")
+        XCTAssertNil(caller.engine.activity.outgoing.first { $0.number == red }?.settled, "the later Help is not")
+        let heard = responder.engine.activity.inbox.requests[IncomingRequest.Key(unit: caller.request!.unit, request: red)]
+        XCTAssertEqual(heard?.isOpen, true)
+        XCTAssertEqual(heard?.callerIsOK, false)
+    }
+
     func testHeldAlertsLetGoLateBuzzOnceNotInABurst() {
         let t = clock.now
         let a = Alert(key: .init(unit: 1, request: 1), title: "t", body: "b", calm: false,

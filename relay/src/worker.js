@@ -59,7 +59,8 @@ export class Group {
         const wakes = msg.wake === "call" || msg.wake === "quiet";
         const mayWake = await this.relay.limit(key, wakes);
         const seq = await this.relay.post(key, msg.sealed);
-        let woke;
+        // Too many wakes this minute: kept, but nobody woken, so the client asks again on its resend.
+        let woke = wakes && !mayWake ? false : undefined;
         if (wakes && mayWake && configured(this.env)) {
           const targets = await this.relay.pushTargets(key);
           const results = await Promise.all(targets.map((t) => push(this.env, t, msg.wake, { sealed: msg.sealed })));

@@ -62,9 +62,11 @@ struct WatchCallView: View {
                     details.tag(Page.details)
                 }
                 .tabViewStyle(.verticalPage)
-                // Whatever the watch has to say about a call is shown at once.
-                .onChange(of: model.status?.text) { _, new in if new != nil { page = .details } }
-                .onChange(of: model.open.count) { old, new in if new > old { page = .details } }
+                // Whatever the watch has to say about a call is shown at once, except while counting
+                // down to Help, when the page with the stop control stays in view.
+                .onChange(of: model.status?.text) { _, new in if new != nil && model.countdown == nil { page = .details } }
+                .onChange(of: model.open.count) { old, new in if new > old && model.countdown == nil { page = .details } }
+                .onChange(of: model.countdown != nil) { _, counting in if counting { page = .buttons } }
             }
         }
         .task(id: phase) { await model.checkAlerts() }
@@ -83,15 +85,20 @@ struct WatchCallView: View {
     }
 
     /// Three clear buttons: the most urgent takes the bottom half, as on the phone.
-    private var buttons: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                callButton(.amber, shape: RoundedRectangle(cornerRadius: 12))
-                callButton(.green, shape: RoundedRectangle(cornerRadius: 12))
+    @ViewBuilder private var buttons: some View {
+        // With no group of its own and no phone, these could reach nobody; other groups' calls are on the next page.
+        if model.cannotCall {
+            setUp
+        } else {
+            VStack(spacing: 4) {
+                HStack(spacing: 4) {
+                    callButton(.amber, shape: RoundedRectangle(cornerRadius: 12))
+                    callButton(.green, shape: RoundedRectangle(cornerRadius: 12))
+                }
+                callButton(.red, shape: screenCorners)
             }
-            callButton(.red, shape: screenCorners)
+            .ignoresSafeArea(edges: .bottom)
         }
-        .ignoresSafeArea(edges: .bottom)
     }
 
     /// Lower corners that follow the screen's own, where the watch can draw them.

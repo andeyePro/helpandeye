@@ -43,6 +43,9 @@ public enum PublishResult: Equatable, Sendable {
     case accepted
     /// The relay said no; trying the same list again will not help.
     case refused
+    /// Not yet: the group's first coordinator has not registered it, so another coordinator's list
+    /// is turned away for now. Worth trying again later, unchanged.
+    case notYet
     /// No answer; worth trying again later.
     case unreachable
 }
@@ -265,6 +268,7 @@ public final class HelpEngine: ObservableObject {
             saved = s
             store.save(s)
             publishedList = nil; publishedAt = nil; refusedList = nil; lastTriedList = nil; publishBackoff = 60
+            publishRound += 1
         } else {
             setState(s)
         }
@@ -272,14 +276,15 @@ public final class HelpEngine: ObservableObject {
         guard actsAsCoordinator else { return }
         if settingsChanged { logSettings(by: s.me, s.group.settings.changes(from: old.settings), old: old.settings) }
         let frame = settingsChanged ? s.group.settingsFrame(as: s.me, identity: identity) : nil
+        let gid = groupID
         if relayMoved {
             spawn {
-                if let frame, self.relay.isConfigured { _ = await self.relay.send(frame, wake: nil) }
+                if let frame { _ = await self.sendOnInternet(frame, in: gid) }
                 self.applyGroup()
-                if let frame { _ = await self.sendOptional(frame) }
+                if let frame { _ = await self.sendOptional(frame, in: gid) }
             }
         } else if let frame {
-            spawn { _ = await self.sendOptional(frame) }
+            spawn { _ = await self.sendOptional(frame, in: gid) }
         }
         let roleChanged = s.group.members.filter { m in old.member(m.number).map { $0.role != m.role } ?? false }.map(\.number)
         announce(membershipOf: s.group, added: Set(s.group.members.map(\.number)).subtracting(before),
@@ -300,17 +305,17 @@ public final class HelpEngine: ObservableObject {
             + roles.sorted().compactMap { g.roleFrame($0) }
         for f in frames {
             let signed = HelpFrame.signing(f, as: me, identity: identity, group: gid)
-            spawn { await self.sendToAll(signed) }
+            spawn { await self.sendToAll(signed, in: gid) }
         }
         // Names are personal, so they go over the internet and home Wi-Fi only.
         for n in added.sorted() {
             guard let m = g.member(n) else { continue }
             let signed = HelpFrame.signing(.memberName(member: n, name: m.name), as: me, identity: identity, group: gid)
-            spawn { _ = await self.sendOffAir(signed) }
+            spawn { _ = await self.sendOffAir(signed, in: gid) }
             if let phone = m.phone {
                 let at = g.phoneVersions[n] ?? UInt32(now().timeIntervalSince1970)
                 let signed = HelpFrame.signing(.memberPhone(member: n, phone: phone, at: at), as: me, identity: identity, group: gid)
-                spawn { _ = await self.sendOffAir(signed) }
+                spawn { _ = await self.sendOffAir(signed, in: gid) }
             }
         }
     }
@@ -324,8 +329,9 @@ public final class HelpEngine: ObservableObject {
         s.group.members[i].phone = number.isEmpty ? nil : number
         s.group.phoneVersions[s.me] = at
         setState(s)
-        let signed = HelpFrame.signing(.memberPhone(member: s.me, phone: number, at: at), as: s.me, identity: identity, group: groupID)
-        spawn { _ = await self.sendOffAir(signed) }
+        let gid = groupID
+        let signed = HelpFrame.signing(.memberPhone(member: s.me, phone: number, at: at), as: s.me, identity: identity, group: gid)
+        spawn { _ = await self.sendOffAir(signed, in: gid) }
     }
 
     public func leave() {
@@ -456,8 +462,11 @@ public final class HelpEngine: ObservableObject {
     public func adopt(_ call: HelpFrame) -> Bool {
         guard !companion, case let .call(unit, number, colour, sentAt) = call, unit == me?.unit, number >= 0x8000 else { return false }
         if activity.outgoing.contains(where: { $0.unit == unit && $0.number == number }) { return true }
-        if colour == .green { settleOnOK() }
-        launch(OutgoingRequest(unit: unit, number: number, colour: colour, createdAt: Date(timeIntervalSince1970: TimeInterval(sentAt))))
+        let pressed = Date(timeIntervalSince1970: TimeInterval(sentAt))
+        // The watch's I'm OK settles only what was open when it was pressed: never a call made on
+        // the phone while it was on its way.
+        if colour == .green { settleOnOK(pressedAt: pressed) }
+        launch(OutgoingRequest(unit: unit, number: number, colour: colour, createdAt: pressed))
         return true
     }
 
@@ -474,9 +483,10 @@ public final class HelpEngine: ObservableObject {
         log("\(describe(r.unit, r.number, colour)) pressed")
         if colour == .green { activity.greens.append(r.createdAt) }
         let frame = r.callFrame
+        let gid = groupID
         for route in routes {
             spawn {
-                let failure = route == .internet ? await self.relay.send(frame, wake: .call) : await self.send(frame, on: route, kind: .call)
+                let failure = route == .internet ? await self.sendOnInternet(frame, wake: .call, in: gid) : await self.send(frame, on: route, kind: .call, in: gid)
                 self.updateOutgoing(r, route, failure.map(RouteState.failed) ?? .sent)
             }
         }
@@ -508,11 +518,16 @@ public final class HelpEngine: ObservableObject {
     }
 
     public func add(_ category: CallCategory) {
-        guard var r = activity.outgoing.popLast() else { return }
+        guard current?.partsLeft ?? 0 > 0, var r = activity.outgoing.popLast() else { return }
         let frame = r.add(category)
         activity.outgoing.append(r)
-        let groupID = group?.secrets.groupID
-        spawn { await self.sendPersonal(frame, in: groupID) }
+        let gid = groupID
+        // A missed check-in is not the caller's choice, so it goes plainly, like the call.
+        if frame.personalPart == nil {
+            spawn { _ = await self.sendOptional(frame, in: gid) }
+        } else {
+            spawn { await self.sendPersonal(frame, in: gid) }
+        }
     }
 
     /// Takes back a category pressed by mistake.
@@ -520,8 +535,8 @@ public final class HelpEngine: ObservableObject {
         guard var r = activity.outgoing.popLast() else { return }
         let frame = r.withdraw(category)
         activity.outgoing.append(r)
-        let groupID = group?.secrets.groupID
-        if let frame { spawn { await self.sendPersonal(frame, in: groupID) } }
+        let gid = groupID
+        if let frame { spawn { await self.sendPersonal(frame, in: gid) } }
     }
 
     // MARK: Settling a call (decision 6)
@@ -537,10 +552,14 @@ public final class HelpEngine: ObservableObject {
         }
     }
 
-    private func settleOnOK() {
+    /// `pressedAt` is when I'm OK was pressed on the watch, to the second. A call made in that
+    /// second or later stays as it is, so the doubt always leaves a call urgent.
+    private func settleOnOK(pressedAt: Date? = nil) {
         guard let n = saved?.me else { return }
         let state: CallState = profile.afterOK == .closesCall ? .closedByCaller : .callerOK
-        for r in settledByOK { settleCall(r.unit, r.number, Settled(state: state, by: n, at: now())) }
+        for r in settledByOK where pressedAt.map({ r.createdAt < $0 }) ?? true {
+            settleCall(r.unit, r.number, Settled(state: state, by: n, at: pressedAt ?? now()))
+        }
     }
 
     /// The caller closes their latest open call, where their profile lets them.
@@ -580,9 +599,10 @@ public final class HelpEngine: ObservableObject {
         let full = HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: s.reason), as: n, identity: identity, group: groupID)
         let onAir = s.reason.isEmpty ? full
             : HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: ""), as: n, identity: identity, group: groupID)
+        let gid = groupID
         spawn {
-            _ = await self.sendOffAir(full)
-            _ = await self.sendOnMesh(onAir, kind: .optional)
+            _ = await self.sendOffAir(full, in: gid)
+            _ = await self.sendOnMesh(onAir, kind: .optional, in: gid)
         }
     }
 
@@ -640,100 +660,123 @@ public final class HelpEngine: ObservableObject {
         guard canSendPersonal else { return "Typed messages need the internet, home Wi-Fi or your box." }
         guard var r = activity.outgoing.popLast() else { return nil }
         // Sealed and signed for responders, long text goes as several notes that each fit the radio.
-        let frames = group?.secrets.responderPublicKey == nil ? [r.addNote(text)] : r.addNotes(text, pieceBytes: ForResponders.maxNoteBytes)
+        let frames = group?.secrets.responderPublicKey == nil ? [r.addNote(text)].compactMap { $0 } : r.addNotes(text, pieceBytes: ForResponders.maxNoteBytes)
         activity.outgoing.append(r)
-        let groupID = group?.secrets.groupID
-        spawn { for f in frames { await self.sendPersonal(f, in: groupID) } }
+        if frames.isEmpty, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "This call cannot take any more messages. If you need help now, call 999."
+        }
+        let gid = groupID
+        spawn { for f in frames { await self.sendPersonal(f, in: gid) } }
         return nil
     }
 
-    /// `sent` hears whether any route took it: not whether anyone has read it.
-    public func sharePosition(latitude: Double, longitude: Double, accuracy: Double, sent: ((Bool) -> Void)? = nil) {
-        guard canSendPersonal, let r = current else { sent?(false); return }
+    /// `sent` hears whether any route took it: not whether anyone has read it. `call` is the call
+    /// it was asked for, as a fix can come after another call was made; nil for the latest.
+    public func sharePosition(latitude: Double, longitude: Double, accuracy: Double, call: UInt16? = nil, sent: ((Bool) -> Void)? = nil) {
+        guard canSendPersonal, let r = call == nil ? current : activity.outgoing.last(where: { $0.number == call }) else { sent?(false); return }
         let frame = HelpFrame.position(unit: r.unit, request: r.number, latitudeE7: Int32(latitude * 1e7),
                                        longitudeE7: Int32(longitude * 1e7), accuracy: UInt16(clamping: Int(accuracy)))
-        let groupID = group?.secrets.groupID
-        spawn { let ok = await self.sendPersonal(frame, in: groupID); sent?(ok) }
+        let gid = groupID
+        spawn { let ok = await self.sendPersonal(frame, in: gid); sent?(ok) }
     }
 
     /// Sealed once for all responders (decision 12) and sent once, over the internet or else on the
     /// group channel. A group made before responders had their own key falls back to a direct
     /// message to each responder's box. Only into the group it was typed in: never one this phone
     /// joined while an earlier piece was still going. True if any route took it.
-    @discardableResult private func sendPersonal(_ frame: HelpFrame, in groupID: Data?) async -> Bool {
-        guard let g = group, g.secrets.groupID == groupID else { return false }
+    @discardableResult private func sendPersonal(_ frame: HelpFrame, in gid: Data) async -> Bool {
+        guard let g = group, g.secrets.groupID == gid else { return false }
         if let me = saved?.me, g.secrets.responderPublicKey != nil {
             var took = false
             for sealed in ForResponders.seal(frame, from: identity, as: me, in: g, at: now()) {
-                if homeWiFi.hasPeers, await homeWiFi.send(sealed) == nil { took = true }
-                guard group?.secrets.groupID == groupID else { return took }
-                if relay.isConfigured, await relay.send(sealed, wake: nil) == nil { took = true; continue }
-                guard group?.secrets.groupID == groupID else { return took }
-                if await sendOnMesh(sealed, kind: .optional) == nil { took = true }
+                if await sendOnWiFi(sealed, in: gid) == nil { took = true }
+                if await sendOnInternet(sealed, in: gid) == nil { took = true; continue }
+                if await sendOnMesh(sealed, kind: .optional, in: gid) == nil { took = true }
             }
             return took
         }
         var took = false
-        if homeWiFi.hasPeers, await homeWiFi.send(frame) == nil { took = true }
-        guard group?.secrets.groupID == groupID else { return took }
-        if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return true }
-        guard group?.secrets.groupID == groupID else { return took }
-        await sendDirect(frame, to: nil)
-        return took || mesh.isReady
+        if await sendOnWiFi(frame, in: gid) == nil { took = true }
+        if await sendOnInternet(frame, in: gid) == nil { return true }
+        return await sendDirect(frame, to: nil, in: gid) || took
     }
 
     /// Personal content as MeshCore direct messages to each responder's box (or one member's),
-    /// which MeshCore encrypts to that box alone. Within the optional half of the airtime.
-    private func sendDirect(_ frame: HelpFrame, to only: UInt16?) async {
-        guard mesh.isReady, let text = MeshText.encode(frame), let radio = mesh.radio, radio.band != nil, budget != nil else { return }
+    /// which MeshCore encrypts to that box alone. Within the optional half of the airtime. True if
+    /// the box took at least one.
+    @discardableResult private func sendDirect(_ frame: HelpFrame, to only: UInt16?, in gid: Data) async -> Bool {
+        guard mesh.isReady, let text = MeshText.encode(frame), let radio = mesh.radio, radio.band != nil, budget != nil else { return false }
         let seconds = radio.airtime(bytes: meshPacketBytes(payload: text.utf8.count + 8))
+        var took = false
         for m in group?.members ?? [] where m.canRespond && m.number != saved?.me && (only == nil || m.number == only) {
+            guard groupID == gid else { return took }
             guard let key = activity.boardKeys[m.number], budget!.allows(seconds, kind: .optional, at: now()) else { continue }
             let reservation = budget!.record(seconds, at: now())
-            if case .refused = await mesh.sendText(text, to: key) { budget?.cancel(reservation) }
+            switch await mesh.sendText(text, to: key) {
+            case .sent: took = true
+            case .refused: budget?.cancel(reservation)
+            case .unknown: break
+            }
+        }
+        return took
+    }
+
+    private func send(_ frame: HelpFrame, on route: Route, kind: AirtimeBudget.Kind, in gid: Data) async -> String? {
+        switch route {
+        case .mesh: return await sendOnMesh(frame, kind: kind, in: gid)
+        case .internet: return await sendOnInternet(frame, in: gid)
+        case .wifi: return await sendOnWiFi(frame, in: gid)
+        case .sms: return "Needs you to send it"
         }
     }
 
-    private func send(_ frame: HelpFrame, on route: Route, kind: AirtimeBudget.Kind) async -> String? {
-        switch route {
-        case .mesh: return await sendOnMesh(frame, kind: kind)
-        case .internet: return await relay.send(frame, wake: nil)
-        case .wifi: return await homeWiFi.send(frame)
-        case .sms: return "Needs you to send it"
-        }
+    /// Every send names the group it was made in, and each route is tried only while this phone is
+    /// still in that group: a send waiting on one route must never go out sealed with the keys of a
+    /// group joined meanwhile.
+    private static let groupChanged = "This phone has changed group since"
+
+    private func sendOnWiFi(_ frame: HelpFrame, to only: Set<UInt16>? = nil, in gid: Data) async -> String? {
+        guard groupID == gid else { return Self.groupChanged }
+        return homeWiFi.hasPeers ? await homeWiFi.send(frame, to: only) : homeWiFi.unavailableReason
+    }
+
+    private func sendOnInternet(_ frame: HelpFrame, wake: RelayWake? = nil, in gid: Data) async -> String? {
+        guard groupID == gid else { return Self.groupChanged }
+        return relay.isConfigured ? await relay.send(frame, wake: wake) : "Internet route not set up"
     }
 
     /// Follow-ups, availability and notice acknowledgements use the internet when it works and the
     /// mesh only when it does not, to keep radio time for calls.
     /// Home Wi-Fi is free and uses no radio time, so it is always tried as well.
-    private func sendOptional(_ frame: HelpFrame) async -> String? {
-        let viaWiFi = homeWiFi.hasPeers ? await homeWiFi.send(frame) : homeWiFi.unavailableReason
-        if relay.isConfigured, await relay.send(frame, wake: nil) == nil { return nil }
-        let viaMesh = await sendOnMesh(frame, kind: .optional)
+    private func sendOptional(_ frame: HelpFrame, in gid: Data) async -> String? {
+        let viaWiFi = await sendOnWiFi(frame, in: gid)
+        if await sendOnInternet(frame, in: gid) == nil { return nil }
+        let viaMesh = await sendOnMesh(frame, kind: .optional, in: gid)
         return viaWiFi == nil ? nil : viaMesh
     }
 
     /// Over the internet if it is set up, and over the mesh as well, so members without internet
     /// hear too. Optional airtime.
-    private func sendToAll(_ frame: HelpFrame) async {
-        if homeWiFi.hasPeers { _ = await homeWiFi.send(frame) }
-        if relay.isConfigured { _ = await relay.send(frame, wake: nil) }
-        _ = await sendOnMesh(frame, kind: .optional)
+    private func sendToAll(_ frame: HelpFrame, in gid: Data) async {
+        _ = await sendOnWiFi(frame, in: gid)
+        _ = await sendOnInternet(frame, in: gid)
+        _ = await sendOnMesh(frame, kind: .optional, in: gid)
     }
 
     /// What is too personal for the radio goes over the internet and home Wi-Fi: on the Wi-Fi it
-    /// never leaves the house.
-    private func sendOffAir(_ frame: HelpFrame) async -> String? {
-        let viaWiFi = homeWiFi.hasPeers ? await homeWiFi.send(frame) : homeWiFi.unavailableReason
+    /// never leaves the house. `only` is who must have it, when it is for them alone.
+    private func sendOffAir(_ frame: HelpFrame, to only: Set<UInt16>? = nil, in gid: Data) async -> String? {
+        let viaWiFi = await sendOnWiFi(frame, to: only, in: gid)
         guard relay.isConfigured else { return viaWiFi }
         // With the internet route set up, its answer counts: the one it was meant for, such as a
         // coordinator, may not be on this Wi-Fi.
-        return await relay.send(frame, wake: nil)
+        return await sendOnInternet(frame, in: gid)
     }
 
     private var canSendOffAir: Bool { relay.isConfigured || homeWiFi.hasPeers }
 
-    private func sendOnMesh(_ frame: HelpFrame, kind: AirtimeBudget.Kind) async -> String? {
+    private func sendOnMesh(_ frame: HelpFrame, kind: AirtimeBudget.Kind, in gid: Data) async -> String? {
+        guard groupID == gid else { return Self.groupChanged }
         // Personal content never goes on the shared group channel (decision 12).
         guard frame.mayGoOnGroupChannel else { return "Only goes over the internet" }
         guard mesh.isReady, let radio = mesh.radio else { return mesh.unavailableReason }
@@ -757,7 +800,8 @@ public final class HelpEngine: ObservableObject {
         boxesToAnswer = []
         answeredBoxes.formUnion(members)
         lastBoxAnswer = now()
-        await sendToAll(.signedBoard(member: me, publicKey: mine, identity: identity, group: groupID))
+        let gid = groupID
+        await sendToAll(.signedBoard(member: me, publicKey: mine, identity: identity, group: gid), in: gid)
         for m in members.sorted() { await shareCheckIns(to: m) }
     }
 
@@ -766,7 +810,8 @@ public final class HelpEngine: ObservableObject {
         guard let myNumber = saved?.me, let key = mesh.boxPublicKey else { return }
         activity.boardKeys[myNumber] = key
         for (member, k) in activity.boardKeys where member != myNumber { await mesh.addContact(k, name: "Help&I \(member)") }
-        await sendToAll(.signedBoard(member: myNumber, publicKey: key, identity: identity, group: groupID))
+        let gid = groupID
+        await sendToAll(.signedBoard(member: myNumber, publicKey: key, identity: identity, group: gid), in: gid)
         await repeatMembershipIfDue()
     }
 
@@ -816,21 +861,27 @@ public final class HelpEngine: ObservableObject {
         guard due else { return }
         lastPublishTry = t
         lastTriedList = list
+        let round = publishRound
         spawn {
-            switch await self.relay.publishMembers() {
+            let result = await self.relay.publishMembers()
+            // The relay's address changed while this was going: it says nothing about the new one.
+            guard self.publishRound == round else { return }
+            switch result {
             case .accepted:
                 // Only the list that was sent counts as published; a change made meanwhile still goes.
                 self.publishedList = list; self.publishedAt = self.now(); self.publishBackoff = 60
                 self.publishMembersIfDue()
             case .refused:
                 self.refusedList = list
-            case .unreachable:
+            case .unreachable, .notYet:
                 self.publishBackoff = min(self.publishBackoff * 2, 1800)
             }
         }
     }
 
     private var lastTriedList: RelayProtocol.MemberList?
+    /// Moves on when the relay's address changes, so an answer from the old address is not kept.
+    private var publishRound = 0
 
     /// A coordinator repeats who is in the group, at most once a day, for members who missed it; and
     /// the first coordinator's repeat is what confirms people other coordinators invited. Runs from
@@ -839,16 +890,17 @@ public final class HelpEngine: ObservableObject {
         guard actsAsCoordinator, let myNumber = saved?.me, let g = group,
               now().timeIntervalSince(lastMembershipRepeat ?? .distantPast) > 86_400, mesh.isReady || relay.isConfigured || homeWiFi.hasPeers else { return }
         lastMembershipRepeat = now()
+        let gid = g.secrets.groupID
         // The settings too, for members who missed them.
-        if g.settingsVersion > 0, let f = g.settingsFrame(as: myNumber, identity: identity) { _ = await sendOptional(f) }
+        if g.settingsVersion > 0, let f = g.settingsFrame(as: myNumber, identity: identity) { _ = await sendOptional(f, in: gid) }
         for m in g.members where m.number != myNumber {
-            if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
-            if m.role == .coordinator, let f = g.roleFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: groupID)) }
+            if let f = g.addedFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: gid), in: gid) }
+            if m.role == .coordinator, let f = g.roleFrame(m.number) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: gid), in: gid) }
         }
         // Removals too, so a phone that missed one stops counting that member's acknowledgements.
         if myNumber == g.primaryCoordinator {
             for n in g.removedMembers.sorted() {
-                await sendToAll(.signing(.memberRemoved(member: n, version: g.membershipVersion), as: myNumber, identity: identity, group: groupID))
+                await sendToAll(.signing(.memberRemoved(member: n, version: g.membershipVersion), as: myNumber, identity: identity, group: gid), in: gid)
             }
         }
     }
@@ -873,16 +925,17 @@ public final class HelpEngine: ObservableObject {
         for i in activity.outgoing.indices where activity.outgoing[i].unit != 0 && activity.outgoing[i].resendDue(at: t) {
             activity.outgoing[i].markResent(at: t)
             let r = activity.outgoing[i]
+            let gid = groupID
             for route in RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false) {
                 // The first time a call reaches the relay, ask it to wake the others, even if that is
                 // on a resend because the internet came back.
                 let firstOnInternet = route == .internet && r.routes[.internet] != .sent
                 spawn {
                     // Resends count as optional airtime, so they never use up what a new press needs.
-                    let failure = firstOnInternet ? await self.relay.send(r.callFrame, wake: .call)
-                        : await self.send(r.callFrame, on: route, kind: .optional)
+                    let failure = firstOnInternet ? await self.sendOnInternet(r.callFrame, wake: .call, in: gid)
+                        : await self.send(r.callFrame, on: route, kind: .optional, in: gid)
                     if failure == nil { self.updateOutgoing(r, route, .sent) }
-                    if let ok = self.okFrame(r) { _ = await self.send(ok, on: route, kind: .optional) }
+                    if let ok = self.okFrame(r) { _ = await self.send(ok, on: route, kind: .optional, in: gid) }
                 }
             }
         }
@@ -948,8 +1001,13 @@ public final class HelpEngine: ObservableObject {
                 activity.changeRequests.append(r)
                 log("\(name(ofMember: member)) asked to change \(setting?.words ?? "a setting")" + (text.isEmpty ? "" : ": \(text)"))
             case let .callState(unit, request, state, at, reason):
-                // The caller settles their own call; a coordinator may close anyone's (decision 6).
-                let allowed = state == .callerOK || state == .closedByCaller ? sender.unit == unit : sender.role == .coordinator
+                // The caller says they are OK, and closes their own call where their coordinator
+                // allows it; a coordinator may close anyone's (decision 6).
+                let allowed = switch state {
+                case .callerOK: sender.unit == unit
+                case .closedByCaller: sender.unit == unit && group?.profile(ofUnit: unit).callerMayEnd == true
+                default: sender.role == .coordinator
+                }
                 if allowed {
                     settleCall(IncomingRequest.Key(unit: unit, request: request),
                            Settled(state: state, by: signer, at: Date(timeIntervalSince1970: TimeInterval(at)), reason: reason), via: route)
@@ -982,8 +1040,9 @@ public final class HelpEngine: ObservableObject {
                     // The first coordinator lists at once anyone it hears another coordinator add, so
                     // they are confirmed without waiting for the daily repeat.
                     if case let .memberAdded(n, _, _, _, _, _) = inner, isPrimaryCoordinator, !companion, let f = group?.addedFrame(n), let me = saved?.me {
-                        let signed = HelpFrame.signing(f, as: me, identity: identity, group: groupID)
-                        spawn { await self.sendToAll(signed) }
+                        let gid = groupID
+                        let signed = HelpFrame.signing(f, as: me, identity: identity, group: gid)
+                        spawn { await self.sendToAll(signed, in: gid) }
                     }
                 }
             default: break
@@ -1048,7 +1107,8 @@ public final class HelpEngine: ObservableObject {
         guard now().timeIntervalSince(lastReAck[key] ?? .distantPast) >= (mine != nil ? 25 : 300) else { return }
         lastReAck[key] = now()
         let frame = mine ?? any
-        spawn { await self.sendToAll(frame) }
+        let gid = groupID
+        spawn { await self.sendToAll(frame, in: gid) }
     }
 
     // MARK: Responding
@@ -1077,9 +1137,10 @@ public final class HelpEngine: ObservableObject {
         // Results from an earlier attempt must not overwrite this one's.
         let attempt = UUID()
         ackAttempt[key] = attempt
+        let gid = groupID
         for route in routes {
             spawn {
-                let failure = route == .internet ? await self.relay.send(frame, wake: .quiet) : await self.send(frame, on: route, kind: .call)
+                let failure = route == .internet ? await self.sendOnInternet(frame, wake: .quiet, in: gid) : await self.send(frame, on: route, kind: .call, in: gid)
                 guard self.ackAttempt[key] == attempt else { return }
                 self.ackSends[key]?[route] = failure.map(RouteState.failed) ?? .sent
             }
@@ -1167,8 +1228,9 @@ public final class HelpEngine: ObservableObject {
         checkGaps()
         let frame = HelpFrame.availability(responder: me, from: UInt32(from.timeIntervalSince1970),
                                            until: UInt32(until.timeIntervalSince1970), available: available)
-        let signed = HelpFrame.signing(frame, as: me, identity: identity, group: groupID)
-        spawn { _ = await self.sendOptional(signed) }
+        let gid = groupID
+        let signed = HelpFrame.signing(frame, as: me, identity: identity, group: gid)
+        spawn { _ = await self.sendOptional(signed, in: gid) }
     }
 
     public var gaps: [DateInterval] { activity.rota.gaps(from: now()) }
@@ -1201,7 +1263,8 @@ public final class HelpEngine: ObservableObject {
         activity.notices[notice]?.acknowledge(by: me)
         let frame = HelpFrame.signing(.noticeAck(notice: notice, by: me, at: UInt32(now().timeIntervalSince1970)), as: me,
                                       identity: identity, group: groupID)
-        spawn { _ = await self.sendOptional(frame) }
+        let gid = groupID
+        spawn { _ = await self.sendOptional(frame, in: gid) }
     }
 
     /// Makes a member a coordinator too, so the group does not depend on one person.
@@ -1275,7 +1338,9 @@ public final class HelpEngine: ObservableObject {
         guard canSendOffAir else { return "Needs the internet route, or another of the group's phones on this Wi-Fi" }
         let words = MeshText.fit(text.trimmingCharacters(in: .whitespacesAndNewlines), bytes: HelpFrame.maxRequestBytes)
         let frame = HelpFrame.changeRequest(member: n, setting: setting, at: UInt32(now().timeIntervalSince1970), text: words)
-        return await sendOffAir(.signing(frame, as: n, identity: identity, group: groupID))
+        // Only a coordinator's phone takes it in, so only theirs counts on home Wi-Fi.
+        let coordinators = Set(group?.members.filter { $0.role == .coordinator }.map(\.number) ?? [])
+        return await sendOffAir(.signing(frame, as: n, identity: identity, group: groupID), to: coordinators, in: groupID)
     }
 
     public func dismiss(_ request: ChangeRequest) { activity.changeRequests.removeAll { $0 == request } }
@@ -1315,10 +1380,11 @@ public final class HelpEngine: ObservableObject {
                                        grace: UInt16((s.checkIn?.grace ?? 1800) / 60), times: (s.checkIn?.times ?? []).map { UInt16($0) })
         // Signed over the internet, where anyone with the group key could otherwise set or clear
         // someone else's check-ins; the direct message is tied to this phone's box instead.
+        let gid = groupID
         if only == nil, canSendOffAir, let me = saved?.me {
-            _ = await sendOffAir(.signing(frame, as: me, identity: identity, group: groupID))
+            _ = await sendOffAir(.signing(frame, as: me, identity: identity, group: gid), in: gid)
         }
-        await sendDirect(frame, to: only)
+        await sendDirect(frame, to: only, in: gid)
     }
 
     /// A missed check-in raises an amber request, once per missed time, unless a red or amber call

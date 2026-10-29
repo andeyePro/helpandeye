@@ -63,6 +63,7 @@ struct RootView: View {
             TabView {
                 RespondView().tabItem { Label("Respond", systemImage: "bell.fill") }
                     .badge(model.engines.reduce(0) { $0 + $1.activity.inbox.requests.values.filter(\.isOpen).count })
+                SurvivingAvailability().tabItem { Label("Available", systemImage: "clock.fill") }
                 WelcomeView().tabItem { Label("Group", systemImage: "person.3.fill") }
             }
         } else {
@@ -82,6 +83,27 @@ struct RootView: View {
                 GroupView().tabItem { Label("Group", systemImage: "person.3.fill") }
                 BoxView().tabItem { Label("Box", systemImage: "antenna.radiowaves.left.and.right") }
             }
+    }
+}
+
+/// The availability control for someone removed from their first group: it is otherwise only in the
+/// Group view, which they no longer have. It sets it in every group they still respond in.
+struct SurvivingAvailability: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        let responder = model.engines.first { $0.me?.canRespond == true }
+        Form {
+            Section(header: Header("Your availability")) {
+                if let responder, let me = responder.me {
+                    let available = responder.activity.rota.isAvailable(me.number, at: Date())
+                    Text(available ? "You are available to respond." : "You are not available.")
+                    Button(available ? "I'm not available for the next 12 hours" : "I'm available for the next 12 hours") {
+                        model.setAvailable(!available)
+                    }
+                }
+            }
+        }
     }
 }
 

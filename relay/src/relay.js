@@ -121,7 +121,7 @@ export class GroupRelay {
     if (!current) {
       if (!list.members.some((m) => m.key === list.primary && m.role === "coordinator")) throw new RelayError(400, "the list must name its first coordinator");
       if (groupId && !(await ownsGroup(groupId, list.primary))) throw new RelayError(403, "not this group's first coordinator");
-      if (signer !== list.primary) throw new RelayError(403, "the group's first coordinator registers it");
+      if (signer !== list.primary) throw new RelayError(425, "the group's first coordinator registers it first");
       owner = list.primary;
     } else {
       if (!current.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(403, "only a coordinator can change members");

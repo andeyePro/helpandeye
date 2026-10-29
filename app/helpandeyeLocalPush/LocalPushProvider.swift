@@ -6,8 +6,11 @@ import UserNotifications
 /// local push provider whenever the phone is on the home Wi-Fi network its owner named, with the
 /// phone locked or the app closed. It joins the group's phones on the network as the app does, and
 /// turns a call it hears into an alert; opening Help&I does the rest, as the caller's phone keeps
-/// sending until someone acknowledges. Needs signing, with the shared keychain group (as the
-/// notification extension does) and the local push entitlement.
+/// sending until someone acknowledges. It confirms only the calls it alerts for: anything else
+/// (a note, a position, an acknowledgement) it does not keep, so the sender does not count it as
+/// sent here and carries on by its other routes. It reads the group afresh with each frame, so a
+/// change made in the app since it started counts. Needs signing, with the shared keychain group
+/// (as the notification extension does) and the local push entitlement.
 final class LocalPushProvider: NEAppPushProvider {
     private var home: HomeWiFi?
 
@@ -15,7 +18,16 @@ final class LocalPushProvider: NEAppPushProvider {
         Task { @MainActor in
             guard let saved = SharedStore.saved(), let identity = SharedStore.identity() else { return }
             let home = HomeWiFi()
-            home.onFrame = { [weak self] frame in self?.alert(for: frame, saved: saved) }
+            home.keeps = { frame in
+                guard case let .call(unit, _, colour, _) = frame, colour != .green, let s = SharedStore.saved(),
+                      let me = s.group.member(s.me) else { return false }
+                return me.canRespond && unit != me.unit
+            }
+            home.onFrame = { [weak self, weak home] frame in
+                guard let saved = SharedStore.saved() else { return }
+                self?.alert(for: frame, saved: saved)
+                home?.configure(group: saved.group, me: saved.me, identity: identity)
+            }
             home.configure(group: saved.group, me: saved.me, identity: identity)
             self.home = home
         }
@@ -50,7 +62,9 @@ final class LocalPushProvider: NEAppPushProvider {
         case let .signed(signer, _, _):
             guard let sender = saved.group.member(signer),
                   case let .callState(unit, request, state, _, _)? = frame.verifiedInner(signedBy: sender.signingKey, group: saved.group.secrets.groupID),
-                  state == .callerOK || state == .closedByCaller ? sender.unit == unit : sender.role == .coordinator else { return }
+                  state == .callerOK ? sender.unit == unit
+                  : state == .closedByCaller ? sender.unit == unit && saved.group.profile(ofUnit: unit).callerMayEnd
+                  : sender.role == .coordinator else { return }
             let key = IncomingRequest.Key(unit: unit, request: request)
             if state.closes {
                 center.removeDeliveredNotifications(withIdentifiers: [Self.id(key)])

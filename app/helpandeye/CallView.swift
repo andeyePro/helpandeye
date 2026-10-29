@@ -37,14 +37,15 @@ struct CallView: View {
         CallerVoice.shared.pressed()
         model.press(colour)
         if model.profile.shareWhere, colour != .green, model.canSendPersonal {
-            location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) }
+            let call = model.current?.number
+            location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2, call: call) }
         }
     }
 
     private var content: some View {
         VStack(spacing: 16) {
             if let r = model.current { StatusCard(request: r, composingSMS: $composingSMS) }
-            if let r = model.current, r.colour != .green, r.status != .notSent {
+            if let r = model.current, r.colour != .green, r.status != .notSent || FollowUps.shownPosition != nil {
                 FollowUps(request: r)
             }
             Spacer(minLength: 0)
@@ -179,6 +180,20 @@ struct FollowUps: View {
     /// Whether a route took where the caller is; nil while it is still going.
     @State private var positionSent: Bool?
 
+    /// A simulator has no route and no location fix, so the screen tests ask for each message of
+    /// where the caller is by launch argument, and for the follow-ups a call that did not go
+    /// would not show. Debug simulator builds only.
+    #if DEBUG && targetEnvironment(simulator)
+    static let shownPosition: Bool?? = {
+        let a = ProcessInfo.processInfo.arguments
+        return a.contains("-HelpAPositionSending") ? .some(nil) : a.contains("-HelpAPositionSent") ? .some(true) : a.contains("-HelpAPositionFailed") ? .some(false) : nil
+    }()
+    #else
+    static let shownPosition: Bool?? = nil
+    #endif
+    private var shownPosition: Bool?? { Self.shownPosition }
+    private var canSendPersonal: Bool { model.canSendPersonal || shownPosition != nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Tell them more (optional)").font(.headline)
@@ -200,7 +215,7 @@ struct FollowUps: View {
                     .accessibilityHint(chosen ? "Tells your responders to ignore this" : "Tells your responders")
                 }
             }
-            if model.canSendPersonal {
+            if canSendPersonal {
                 HStack(alignment: .bottom) {
                     TextField("Type or speak a short message", text: $typed, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
@@ -211,15 +226,16 @@ struct FollowUps: View {
                 }
                 Button {
                     positionSent = nil
-                    location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2) { ok in positionSent = ok } }
+                    let call = request.number
+                    location.find { model.sharePosition(latitude: $0, longitude: $1, accuracy: $2, call: call) { ok in positionSent = ok } }
                 } label: {
                     Label(location.state == .finding ? "Finding where you are…" : "Share where I am", systemImage: "location.fill")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.secondaryAction)
                 .disabled(location.state == .finding)
-                if location.state == .shared {
-                    switch positionSent {
+                if location.state == .shared || shownPosition != nil {
+                    switch shownPosition ?? positionSent {
                     case nil: Text("Sending where you are…")
                     case true?: Text("Where you are was sent.")
                     case false?: Text("Where you are could not be sent. Try again, or call 999.")

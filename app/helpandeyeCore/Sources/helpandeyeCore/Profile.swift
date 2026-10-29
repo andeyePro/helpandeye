@@ -67,6 +67,9 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
     public var amberInterval: TimeInterval = 900
     /// Whether the caller may close their own call (decision 6).
     public var callerMayClose = false
+    /// Whether a close signed by this caller counts on other phones: they may close their call, or
+    /// their I'm OK closes it, as their coordinator set it or as they chose where allowed.
+    public var callerMayEnd: Bool { callerMayClose || afterOK == .closesCall || mayChange(.afterOK) }
     /// Show the caller only the three buttons, with no settings page.
     public var hidesSettings = false
     public var personMayChange: Set<Setting> = [.sounds, .shareWhere, .textFallback, .checkIns]

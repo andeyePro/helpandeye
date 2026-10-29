@@ -203,9 +203,12 @@ test("only the first coordinator, whose key the group ID is made from, can regis
   await rejects(new GroupRelay(new MapStorage()).setMembers(member.key, { generation: 1, members: [c(member)], primary: member.key }, id), 403);
   // Nor can someone who lists themselves as a coordinator beside the real first one, with or without the ID.
   const first = new GroupRelay(new MapStorage());
-  await rejects(first.setMembers(second.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key }, id), 403);
-  await rejects(first.setMembers(second.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key }), 403);
+  // Turned away for now, not for good: once the first coordinator registers, the same list is taken.
+  await rejects(first.setMembers(second.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key }, id), 425);
+  await rejects(first.setMembers(second.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key }), 425);
   assert.equal(await first.members(), null);
+  await first.setMembers(owner.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key }, id);
+  await first.setMembers(second.key, { generation: 1, members: [c(owner), c(second)], primary: owner.key }, id);
   const relay = new GroupRelay(new MapStorage());
   await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second), c(member)], primary: owner.key }, id);
   await rejects(relay.setMembers(second.key, { generation: 2, members: [c(owner), c(second)], primary: second.key }, id), 409);

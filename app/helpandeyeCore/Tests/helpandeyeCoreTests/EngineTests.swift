@@ -36,6 +36,8 @@ import XCTest
     var channelsPerSend: Int { max(secrets.count, 1) }
     var unavailableReason = "No box connected"
     var secrets: [Data] = []
+    /// The box turns down every direct message, as with its queue full.
+    var refusesText = false
 
     func send(_ frame: HelpFrame, urgent: Bool) async -> MeshSendResult {
         guard isReady, let air, let me = phone else { return .refused("No box connected") }
@@ -49,6 +51,7 @@ import XCTest
 
     func sendText(_ text: String, to key: Data) async -> MeshSendResult {
         guard isReady, let air, let me = phone, let mine = boxPublicKey else { return .refused("No box connected") }
+        if refusesText { return .refused("Box queue full") }
         air.directSends.append(text)
         if !(phone?.engine.activity.boardKeys.values.contains(key) ?? false) { air.violations.append("direct message to a box this phone does not list") }
         for p in air.phones where p.mesh.boxPublicKey == key {
@@ -70,6 +73,8 @@ final class RelayModel {
     var ownerGeneration: Int64 = -1
     var members: [Entry] = []
     var addedBy: [String: String] = [:]
+    /// People a removed coordinator added, taken off with them, whom only the owner can list again.
+    var dropped: Set<String> = []
     private var started = false
     static let maxMembers = 256
 
@@ -84,7 +89,8 @@ final class RelayModel {
         if !started {
             guard let primary, list.contains(where: { $0.key == primary && $0.role == "coordinator" }) else { return 400 }
             if let groupID, let key = Data(base64Encoded: primary), !GroupSecrets(groupID: groupID, channelSecret: Data(), groupKey: Data(), generation: 0).isOwned(by: key) { return 403 }
-            if !list.contains(where: { $0.key == signer && $0.role == "coordinator" }) { return 400 }
+            // Not yet: only the first coordinator registers the group.
+            if signer != primary { return 425 }
             owner = primary
         } else {
             if !members.contains(where: { $0.key == signer && $0.role == "coordinator" }) { return 403 }
@@ -97,9 +103,11 @@ final class RelayModel {
         var order = members.map(\.key)
         var roles = Dictionary(members.map { ($0.key, $0.role) }, uniquingKeysWith: { a, _ in a })
         var addedBy = self.addedBy
-        for m in list where !removed.contains(m.key) {
+        var dropped = self.dropped
+        if ownerFresh { dropped.subtract(list.map(\.key)) }
+        for m in list where !removed.contains(m.key) && !dropped.contains(m.key) {
             if roles[m.key] == nil {
-                let asListed = ownerFresh || (!started && (m.key == owner || m.key == signer))
+                let asListed = ownerFresh || (!started && m.key == owner)
                 roles[m.key] = asListed ? m.role : "member"
                 order.append(m.key)
                 addedBy[m.key] = signer
@@ -112,13 +120,13 @@ final class RelayModel {
             for k in named where !removed.contains(k) {
                 removed.insert(k)
                 if members.contains(where: { $0.key == k && $0.role == "coordinator" }) {
-                    for (key, by) in addedBy where by == k && !listed.contains(key) { roles[key] = nil }
+                    for (key, by) in addedBy where by == k && !listed.contains(key) && roles.removeValue(forKey: key) != nil { dropped.insert(key) }
                 }
             }
         }
-        for k in removed { roles[k] = nil; addedBy[k] = nil }
-        if roles.count > Self.maxMembers || removed.count > 1024 { return 413 }
-        self.owner = owner; self.removed = removed; started = true
+        for k in removed { roles[k] = nil; addedBy[k] = nil; dropped.remove(k) }
+        if roles.count > Self.maxMembers || removed.count > 1024 || dropped.count > 1024 { return 413 }
+        self.owner = owner; self.removed = removed; self.dropped = dropped; started = true
         self.addedBy = addedBy.filter { roles[$0.key] != nil }
         if ownerFresh { ownerGeneration = Int64(g) }
         generation = max(generation, g)
@@ -182,11 +190,20 @@ final class RelayModel {
         return air.phones.filter { $0 !== me && $0.wifi.network == network && $0.wifi.groupID == groupID && groupID != nil }
     }
     var hasPeers: Bool { !peers.isEmpty }
-    func send(_ frame: HelpFrame) async -> String? {
-        guard let air, let me = phone, !peers.isEmpty else { return unavailableReason }
+    /// Runs while a send waits for its receipts, as the real link's do.
+    var whileWaiting: (() async -> Void)?
+    /// Like the real link, a frame counts as sent only if some phone it was for took it in.
+    func send(_ frame: HelpFrame, to only: Set<UInt16>?) async -> String? {
+        let to = peers.filter { p in only.map { $0.contains(p.engine.saved?.me ?? 0) } ?? true }
+        guard let air, let me = phone, !to.isEmpty else { return unavailableReason }
         sent.append(frame)
-        for p in peers where air.keep(frame, me, p) { air.queue.append((me, p, { p.engine.receive(frame, via: .wifi) })) }
-        return nil
+        if let w = whileWaiting { whileWaiting = nil; await w() }
+        var took = false
+        for p in to where air.keep(frame, me, p) {
+            took = true
+            air.queue.append((me, p, { p.engine.receive(frame, via: .wifi) }))
+        }
+        return took ? nil : "No other member's Help&I confirmed it"
     }
 }
 
@@ -410,6 +427,40 @@ final class RelayModel {
         air.keep = { _, _, _ in true }
         await advance(30)
         XCTAssertEqual(caller.request?.status, .seen(responder: responder.engine.saved!.me), "the repeated ack got through")
+    }
+
+    /// Codex NR12: in a group made before responders had their own key, where a position goes as
+    /// direct messages, the caller is told it was sent only if the box took one.
+    func testInAnOlderGroupAPositionIsSentOnlyIfTheBoxTookIt() async {
+        var g = caller.engine.group!
+        g.secrets.responderPublicKey = nil
+        caller.engine.joined(g, as: caller.engine.saved!.me)
+        caller.engine.press(.red)
+        await air.run()
+        caller.mesh.refusesText = true
+        var sent: Bool?
+        caller.engine.sharePosition(latitude: 55.4, longitude: -4.5, accuracy: 10) { sent = $0 }
+        await air.run()
+        XCTAssertEqual(sent, false, "the box turned every one down")
+        caller.mesh.refusesText = false
+        caller.engine.sharePosition(latitude: 55.4, longitude: -4.5, accuracy: 10) { sent = $0 }
+        await air.run()
+        XCTAssertEqual(sent, true)
+        XCTAssertNotNil(responder.engine.activity.inbox.requests[key]?.position)
+    }
+
+    /// Codex NR17: a location fix that comes after another call was made goes with the call it was
+    /// asked for.
+    func testALateLocationFixGoesWithTheCallItWasAskedFor() async {
+        caller.engine.press(.red)
+        await air.run()
+        let first = key
+        caller.engine.press(.amber)
+        await air.run()
+        caller.engine.sharePosition(latitude: 55.4, longitude: -4.5, accuracy: 10, call: first.request)
+        await air.run()
+        XCTAssertNotNil(responder.engine.activity.inbox.requests[first]?.position)
+        XCTAssertNil(responder.engine.activity.inbox.requests[key]?.position, "not the later call")
     }
 
     func testPersonalContentNeverGoesOnTheGroupChannel() async {
@@ -998,5 +1049,7 @@ final class RelayModel {
         caller.engine.setCheckIn(CheckInSchedule(times: [Calendar(identifier: .gregorian).component(.hour, from: clock.now) * 60 + 60]))
         await advance(3600 + 31 * 60)
         XCTAssertTrue(responder.engine.activity.inbox.requests.values.contains { $0.orderedCategories.contains(.missedCheckIn) })
+        // Codex NR11: the caller's own amber says why, not only the one a responder's phone raises.
+        XCTAssertTrue(responder.engine.activity.inbox.requests.values.contains { $0.key.request != 0 && $0.orderedCategories.contains(.missedCheckIn) })
     }
 }

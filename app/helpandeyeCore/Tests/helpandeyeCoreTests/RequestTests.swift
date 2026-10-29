@@ -158,4 +158,16 @@ final class WithdrawnCategoryTests: XCTestCase {
         XCTAssertTrue(pieces.allSatisfy { $0.utf8.count <= 56 })
         XCTAssertEqual(pieces.joined().unicodeScalars.filter { $0 != " " }.count, ("hi" + huge + "there").unicodeScalars.count)
     }
+
+    /// Each note and choice has its own part, numbered to 255; past that none is made, rather than
+    /// one taking the place of another.
+    func testACallsPartsRunOutRatherThanOverwrite() {
+        var r = OutgoingRequest(unit: 5, number: 1, colour: .red, createdAt: Date())
+        for i in 1...254 { XCTAssertNotNil(r.addNote("note \(i)")) }
+        XCTAssertEqual(r.addNotes("two words", pieceBytes: 4), [], "two pieces do not fit in the one part left")
+        XCTAssertEqual(r.addNote("last"), .note(unit: 5, request: 1, part: 255, text: "last"))
+        XCTAssertNil(r.addNote("one more"))
+        XCTAssertEqual(r.partsLeft, 0)
+        XCTAssertEqual(r.notes.count, 255)
+    }
 }

@@ -95,6 +95,20 @@ import XCTest
         XCTAssertFalse(responder.engine.activity.inbox.requests[t.key]!.isOpen)
     }
 
+    /// Codex NR19: a close the caller's profile does not allow, though signed by them (an old or
+    /// altered app), closes nothing on other phones.
+    func testACallersCloseTheirProfileDoesNotAllowCountsNowhere() async {
+        caller.engine.press(.red)
+        await t.air.run()
+        let close = HelpFrame.signing(.callState(unit: t.key.unit, request: t.key.request, state: .closedByCaller, at: UInt32(t.clock.now.timeIntervalSince1970), reason: ""),
+                                      as: caller.engine.saved!.me, identity: caller.identity, group: t.gid)
+        responder.engine.receive(close, via: .internet)
+        XCTAssertTrue(responder.engine.activity.inbox.requests[t.key]!.isOpen)
+        await callerProfile { $0.callerMayClose = true }
+        responder.engine.receive(close, via: .internet)
+        XCTAssertFalse(responder.engine.activity.inbox.requests[t.key]!.isOpen, "allowed now, so the same close counts")
+    }
+
     func testACoordinatorClosesWithConsentOrAReason() async {
         for p in t.air.phones { p.relay.isConfigured = true }
         await t.relaySetUp()

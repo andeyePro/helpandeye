@@ -10,28 +10,43 @@ final class ScreensTests: XCTestCase {
 
     override func setUp() {
         continueAfterFailure = true
-        app.launchArguments += ["-HelpAQuiet"]
+    }
+
+    /// The launch arguments that put a debug simulator build into a state a simulator cannot reach
+    /// on its own; each is in the app, beside what it changes.
+    private func launch(_ extra: String...) {
+        app.launchArguments = ["-HelpAQuiet"] + extra
         app.launch()
         allowSystemAlerts()
     }
 
-    func testEveryScreen() throws {
-        look("welcome")
+    /// A phone that has kept its group from an earlier test is left as it is.
+    private func startGroupIfNew() {
+        if app.buttons["Start a group"].waitForExistence(timeout: 5) { startGroup(shooting: false) }
+    }
+
+    private func startGroup(shooting: Bool) {
+        if shooting { look("welcome") }
         app.buttons["Start a group"].tap()
-        look("start-group")
+        if shooting { look("start-group") }
         type("Group name, such as your street", "Mill Lane")
         tapKeyboardDone()
         type("Your name, as the group will see it", "Sam")
         tapKeyboardDone()
         type("Mobile number (optional)", "07700900111")
-        shoot("start-group-typing")
+        if shooting { shoot("start-group-typing") }
         tapKeyboardDone()
-        // The switch itself sits at the right-hand end of the row.
-        // The switch itself, wherever large text puts it.
-        reveal(app.switches["I may also call for help"]).switches.firstMatch.tap()
+        // Wherever large text puts the switch; if the first tap missed it, the end of the row is it.
+        let row = reveal(app.switches["I may also call for help"])
+        row.switches.firstMatch.tap()
+        if row.value as? String != "1" { row.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap() }
         reveal(app.buttons["Start the group"]).tap()
         allowSystemAlerts()
+    }
 
+    func testEveryScreen() throws {
+        launch()
+        startGroup(shooting: true)
         look("help")
         reveal(app.buttons["Need a hand"]).tap()
         allowSystemAlerts()
@@ -65,6 +80,59 @@ final class ScreensTests: XCTestCase {
         tab("Box")
         look("box")
 
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// A phone removed from its first group but still in another: Respond, and a Group tab that
+    /// offers to start or join one.
+    func testRemovedFromFirstGroup() throws {
+        launch("-HelpAOtherGroupOnly")
+        look("removed-respond")
+        tab("Group")
+        look("removed-group")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// The three messages about where the caller is: still going, sent, and not sent. Shown by
+    /// launch argument, because a simulator has no route to send by and no location fix.
+    func testPositionMessages() throws {
+        launch()
+        startGroupIfNew()
+        for (state, text) in [("Sending", "Sending where you are…"), ("Sent", "Where you are was sent."),
+                              ("Failed", "Where you are could not be sent. Try again, or call 999.")] {
+            app.terminate()
+            launch("-HelpAPosition" + state)
+            let message = app.staticTexts[text]
+            if !message.waitForExistence(timeout: 3) {
+                reveal(app.buttons["Need a hand"]).tap()
+                allowSystemAlerts()
+            }
+            reveal(message)
+            XCTAssert(message.isHittable, "position-\(state.lowercased()): \(text) is not shown")
+            look("position-" + state.lowercased())
+        }
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// A change too big to send to everyone is refused, and the coordinator is told on Profiles
+    /// and on the profile being edited.
+    func testSettingsTooBigToSend() throws {
+        launch("-HelpAOversizedSettings")
+        startGroupIfNew()
+        tab("Group")
+        reveal(app.buttons["Profiles"]).tap()
+        let tooBig = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "too much to send to everyone")).firstMatch
+        XCTAssert(tooBig.waitForExistence(timeout: 5), "no message on Profiles")
+        look("profiles-too-big")
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Standard")).firstMatch.tap()
+        XCTAssert(tooBig.waitForExistence(timeout: 5), "no message on the profile")
+        look("profile-too-big")
         if !problems.isEmpty {
             XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
         }

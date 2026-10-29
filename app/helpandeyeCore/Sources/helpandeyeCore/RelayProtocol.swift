@@ -42,7 +42,7 @@ public enum RelayProtocol {
         public let members: [Entry]
         /// Keys of people removed from the group. Only these ever come off the relay's list.
         public let removed: [String]
-        /// The group's first coordinator, who owns the group on the relay whoever registers it.
+        /// The group's first coordinator, who owns the group on the relay and alone registers it.
         public let primary: String?
     }
 

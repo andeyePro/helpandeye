@@ -12,9 +12,9 @@ import Foundation
     var hasPeers: Bool { get }
     var unavailableReason: String { get }
     func configure(group: GroupState?, me: UInt16?, identity: DeviceIdentity)
-    /// Hands the frame to every other member's phone on the network. Nil once at least one has
-    /// confirmed reading it.
-    func send(_ frame: HelpFrame) async -> String?
+    /// Hands the frame to every other member's phone on the network, or only to those of `only`.
+    /// Nil once at least one has confirmed taking it in.
+    func send(_ frame: HelpFrame, to only: Set<UInt16>?) async -> String?
 }
 
 /// No home Wi-Fi route: a watch, or a test that does not need one.
@@ -24,7 +24,7 @@ import Foundation
     public var hasPeers: Bool { false }
     public var unavailableReason: String { "Not used here" }
     public func configure(group: GroupState?, me: UInt16?, identity: DeviceIdentity) {}
-    public func send(_ frame: HelpFrame) async -> String? { unavailableReason }
+    public func send(_ frame: HelpFrame, to only: Set<UInt16>?) async -> String? { unavailableReason }
 }
 
 /// How phones on one network find and talk to each other.
@@ -35,7 +35,7 @@ public enum LocalWire {
     /// The name a group's phones advertise under: from the group ID, so they find each other, but
     /// say nothing about the group to anyone else on the network.
     public static func serviceName(for group: GroupState) -> String {
-        let hash = SHA256.hash(data: Data("HELPA-LAN-1".utf8) + group.secrets.groupID)
+        let hash = SHA256.hash(data: Data("HELPA-LAN-2".utf8) + group.secrets.groupID)
         return "helpandi-" + hash.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -46,9 +46,12 @@ public enum LocalWire {
     /// which member it is by signing the other's challenge, sealed with the group key. Until that
     /// proof arrives nothing from the other end counts, and a proof from this phone's own member
     /// (its own extension, say) or from anyone not in the group ends the connection: only another
-    /// member's phone ever counts as somewhere a call went. Every frame then carries a number, and
-    /// the other end returns it once it has read and opened the frame, so "sent" means another
-    /// member's Help&I has it, not just that the bytes left.
+    /// member's phone ever counts as somewhere a call went. From the group key and both challenges
+    /// each end then has a key for what it sends and one for what it hears, new for every
+    /// connection. Every frame carries a number, sealed with it, and the other end returns that
+    /// number with a digest of the frame, sealed with its own key, once it has taken the frame in.
+    /// So "sent" means another member's Help&I has that frame: something on the network between
+    /// the two cannot make a receipt up, swap the frame, or hand a phone back its own.
     public struct Session: Sendable {
         public enum Event: Equatable, Sendable {
             /// The other end proved it is this member.
@@ -64,6 +67,12 @@ public enum LocalWire {
         private let me: UInt16
         private let signingKey: Data
         private let myChallenge: Data
+        private var theirChallenge: Data?
+        private var sendKey: SymmetricKey?
+        private var hearKey: SymmetricKey?
+        /// Digests of frames sent and not yet confirmed, and of frames taken in and not yet confirmed.
+        private var unconfirmed: [UInt32: Data] = [:]
+        private var toConfirm: [UInt32: Data] = [:]
         private var buffer = Data()
         public private(set) var peer: UInt16?
         public private(set) var broken = false
@@ -76,15 +85,23 @@ public enum LocalWire {
         /// What this end sends first.
         public var opening: Data { Self.wrap(.challenge, myChallenge) }
 
-        public func message(_ frame: HelpFrame, id: UInt32) -> Data? {
-            guard peer != nil, let box = try? ChaChaPoly.seal(frame.encoded(), using: SymmetricKey(data: group.secrets.groupKey)) else { return nil }
-            return Self.wrap(.frame, Self.u32(id) + box.combined)
+        public mutating func message(_ frame: HelpFrame, id: UInt32) -> Data? {
+            guard let sendKey, let box = try? ChaChaPoly.seal(Self.u32(id) + frame.encoded(), using: sendKey) else { return nil }
+            // Only the latest few wait for a receipt; one that never comes is forgotten.
+            if unconfirmed.count >= 256, let oldest = unconfirmed.keys.min() { unconfirmed[oldest] = nil }
+            unconfirmed[id] = Self.digest(box.combined)
+            return Self.wrap(.frame, box.combined)
         }
 
-        public func receipt(for id: UInt32) -> Data { Self.wrap(.receipt, Self.u32(id)) }
+        /// The receipt for a frame taken in, once; nil for one never heard.
+        public mutating func receipt(for id: UInt32) -> Data? {
+            guard let sendKey, let digest = toConfirm.removeValue(forKey: id),
+                  let box = try? ChaChaPoly.seal(Self.u32(id) + digest, using: sendKey) else { return nil }
+            return Self.wrap(.receipt, box.combined)
+        }
 
         /// Takes bytes from the connection. Returns what happened, and anything to send back.
-        public mutating func take(_ bytes: Data, at now: Date) -> (events: [Event], reply: Data) {
+        public mutating func take(_ bytes: Data) -> (events: [Event], reply: Data) {
             buffer.append(bytes)
             var events: [Event] = [], reply = Data()
             while !broken, buffer.count >= 2 {
@@ -97,19 +114,31 @@ public enum LocalWire {
                 let payload = Data(body.dropFirst())
                 switch kind {
                 case .challenge:
-                    guard payload.count == 16, let proof = proof(answering: payload) else { broken = true; break }
+                    guard theirChallenge == nil, payload.count == 16, let proof = proof(answering: payload) else { broken = true; break }
+                    theirChallenge = payload
                     reply += proof
                 case .proof:
-                    guard peer == nil, let who = check(payload) else { broken = true; break }
+                    guard peer == nil, let theirs = theirChallenge, let who = check(payload) else { broken = true; break }
                     peer = who
+                    sendKey = Self.key(group.secrets.groupKey, from: myChallenge, to: theirs)
+                    hearKey = Self.key(group.secrets.groupKey, from: theirs, to: myChallenge)
                     events.append(.peer(who))
                 case .frame:
-                    guard peer != nil, payload.count > 4 else { broken = true; break }
-                    let id = Self.u32(payload.prefix(4))
-                    if let frame = open(Data(payload.dropFirst(4)), at: now) { events.append(.frame(frame, id: id)) }
+                    guard let hearKey else { broken = true; break }
+                    guard let box = try? ChaChaPoly.SealedBox(combined: payload), let plain = try? ChaChaPoly.open(box, using: hearKey),
+                          plain.count > 4, let frame = HelpFrame(Data(plain.dropFirst(4))) else { break }
+                    let id = Self.u32(plain.prefix(4))
+                    toConfirm[id] = Self.digest(payload)
+                    events.append(.frame(frame, id: id))
                 case .receipt:
-                    guard peer != nil, payload.count == 4 else { broken = true; break }
-                    events.append(.receipt(Self.u32(payload)))
+                    guard let hearKey else { broken = true; break }
+                    guard let box = try? ChaChaPoly.SealedBox(combined: payload), let plain = try? ChaChaPoly.open(box, using: hearKey),
+                          plain.count == 20 else { break }
+                    let id = Self.u32(plain.prefix(4))
+                    if let sent = unconfirmed[id], sent == Data(plain.dropFirst(4)) {
+                        unconfirmed[id] = nil
+                        events.append(.receipt(id))
+                    }
                 }
             }
             if broken { buffer = Data() }
@@ -133,16 +162,17 @@ public enum LocalWire {
             return who
         }
 
-        private func open(_ sealed: Data, at now: Date) -> HelpFrame? {
-            guard let box = try? ChaChaPoly.SealedBox(combined: sealed) else { return nil }
-            for s in group.listening(at: now) {
-                if let plain = try? ChaChaPoly.open(box, using: SymmetricKey(data: s.groupKey)) { return HelpFrame(plain) }
-            }
-            return nil
+        /// The key one end seals with, made from the group key and both ends' challenges, the
+        /// sender's first: each direction of each connection gets its own.
+        static func key(_ groupKey: Data, from sender: Data, to receiver: Data) -> SymmetricKey {
+            HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: groupKey), salt: sender + receiver,
+                                   info: Data("HELPA-LAN-SESSION-1".utf8), outputByteCount: 32)
         }
 
+        static func digest(_ sealed: Data) -> Data { Data(SHA256.hash(data: sealed).prefix(16)) }
+
         static func proofInput(_ group: Data, _ challenge: Data, _ member: UInt16) -> Data {
-            Data("HELPA-LAN-PROOF-1".utf8) + group + challenge + u16(member)
+            Data("HELPA-LAN-PROOF-2".utf8) + group + challenge + u16(member)
         }
 
         static func wrap(_ kind: Kind, _ payload: Data) -> Data {
