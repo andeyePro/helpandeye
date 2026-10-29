@@ -160,8 +160,10 @@ final class ScreensTests: XCTestCase {
     /// screens long.
     @discardableResult
     private func reveal(_ e: XCUIElement) -> XCUIElement {
-        // The Group screen is long: settings, then members, then more.
+        // The Group screen is long: settings, then members, then more. A fast swipe can carry a
+        // button past the screen, so if the bottom comes first, go back up slowly.
         for _ in 0..<15 where !(e.exists && e.isHittable) { app.swipeUp(velocity: .fast) }
+        for _ in 0..<30 where !(e.exists && e.isHittable) { app.swipeDown(velocity: .slow) }
         return e
     }
 
@@ -192,7 +194,10 @@ final class ScreensTests: XCTestCase {
         // does fit and does grow, and a finding on an element with no size and no label is on
         // nothing anyone can see; those are logged as advice and checked by eye on the
         // screenshots, the largest-text ones above all.
-        let bars = (app.navigationBars.allElementsBoundByIndex + app.tabBars.allElementsBoundByIndex).map { $0.frame.insetBy(dx: 0, dy: -60) }
+        // The status bar too: a screen with no title bar scrolls under it, into the same fade.
+        let statusBar = CGRect(x: 0, y: 0, width: app.windows.firstMatch.frame.width, height: 54)
+        let bars = (app.navigationBars.allElementsBoundByIndex.map(\.frame) + app.tabBars.allElementsBoundByIndex.map(\.frame) + [statusBar])
+            .map { $0.insetBy(dx: 0, dy: -60) }
         do { try app.performAccessibilityAudit { issue in
             let frame = issue.element?.frame ?? .zero
             let detail = "\(name): \(issue.compactDescription) – \(issue.element?.label ?? "") \(frame)"

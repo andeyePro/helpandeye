@@ -4,6 +4,8 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-29
 
+- [x] **Screen tests on the build Mac** - first run there (iOS 27, small iPhone): at the largest text every screen passes, after two test fixes. Scrolling to a button now comes back up slowly if a fast swipe carried it past (Profiles was missed), and text scrolled under the status bar on a screen with no title bar counts as being in the bar's fade, as under other bars. The one-column choices at the largest text are confirmed. At normal size the audit still reports contrast on text it reads at another scroll position than the screenshot (TODO, audit findings).
+
 - [x] **Simulator on the build Mac** - Martin ran `sudo xcodebuild -runFirstLaunch` there; its simulators now list and run, so screen tests move off the second Mac, which is in use.
 
 - [x] **Screens for the re-review fixes** - full screen run on the second Mac (3 iPhones and iPads, 2 watches, light and dark, normal and largest text): every iPhone and watch run has no audit issues; the new screens (removed from the first group with the Available tab, the three position messages, settings too big to send) show correctly. The iPad runs fail only on the known invite-code contrast reading (TODO, audit findings), and two runs timed out taking a screenshot. At the largest text the call's choices (Need company, Something else) broke words letter by letter in two columns; they are now one column there.
