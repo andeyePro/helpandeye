@@ -1,7 +1,9 @@
 # Answers @claude mentions in GitHub Discussions. Replies are posted by github-actions[bot] and
 # say they come from Claude: Anthropic's app-token exchange only accepts its own action, which
 # does not handle Discussions. Needs a repository secret CLAUDE_CODE_OAUTH_TOKEN made with
-# `claude setup-token` on a Claude subscription.
+# `claude setup-token` on a Claude subscription. Anyone may ask, within a daily limit for everyone
+# and a smaller one for each person, set by the repository variables CLAUDE_DAILY_LIMIT and
+# CLAUDE_PERSON_LIMIT. Answers worth keeping are suggested for the FAQ in an issue.
 name: Claude in Discussions
 
 on:
@@ -22,10 +24,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
+      actions: read
       contents: read
       discussions: write
+      issues: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check the daily limit
+        id: limit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WHO: ${{ github.event.sender.login }}
+          ROLE: ${{ github.event.comment.author_association || github.event.discussion.author_association }}
+          DAILY: ${{ vars.CLAUDE_DAILY_LIMIT || '20' }}
+          EACH: ${{ vars.CLAUDE_PERSON_LIMIT || '3' }}
+        run: |
+          since=$(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%SZ)
+          # Who started each other run of the last day that asked Claude, or may still.
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/workflows/claude-discussions.yml/runs?created=%3E%3D$since&per_page=100" \
+            --jq ".workflow_runs[] | select(.id != $GITHUB_RUN_ID and .conclusion != \"skipped\") | \"\(.id) \(.triggering_actor.login)\"" \
+            > "$RUNNER_TEMP/runs.txt"
+          : > "$RUNNER_TEMP/asked.txt"
+          while read -r id actor; do
+            spent=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs" \
+              --jq '[.jobs[].steps[]? | select(.name == "Ask Claude" and .conclusion != "skipped")] | length > 0')
+            if [ "$spent" = true ]; then echo "$actor" >> "$RUNNER_TEMP/asked.txt"; fi
+          done < "$RUNNER_TEMP/runs.txt"
+          total=$(grep -c . "$RUNNER_TEMP/asked.txt" || true)
+          mine=$(grep -cxF "$WHO" "$RUNNER_TEMP/asked.txt" || true)
+          echo "Asked in the last day: $total in all, $mine by $WHO."
+          # The repository's own people are held only to the daily limit.
+          case "$ROLE" in OWNER|MEMBER|COLLABORATOR) mine=0 ;; esac
+          if [ "$total" -ge "$DAILY" ] || [ "$mine" -ge "$EACH" ]; then echo "over=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Gather the thread
         id: thread
@@ -68,41 +99,69 @@ jobs:
             echo "discussion_id=$(jq -r .data.repository.discussion.id "$RUNNER_TEMP/thread.json")"
             echo "reply_to=$reply_to"
           } >> "$GITHUB_OUTPUT"
+          # Titles of the other discussions, so an earlier answer can be linked instead of written again.
+          gh api graphql -f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -f query='
+            query($owner:String!,$name:String!){repository(owner:$owner,name:$name){
+              discussions(first:100,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number title url isAnswered}}}}' |
+            jq -r --argjson n "$NUMBER" '.data.repository.discussions.nodes[] | select(.number != $n) |
+              "- [\(.title)](\(.url))\(if .isAnswered then " (answered)" else "" end)"' > "$RUNNER_TEMP/earlier.md"
 
       - name: Ask Claude
+        if: steps.limit.outputs.over != 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           npm install -g --silent @anthropic-ai/claude-code@2.1.310
           {
             cat .github/claude/discussion-prompt.md
-            for f in README.md AGENTS.md CONTRIBUTING.md docs/design-decisions.md docs/app-spec.md; do
+            for f in README.md AGENTS.md CONTRIBUTING.md docs/design-decisions.md docs/app-spec.md docs/FAQ.md; do
               printf '\n\n# Project document: %s\n\n' "$f"; cat "$f"
             done
+            printf '\n\n# The website FAQ, at https://help.andeye.com/#faq (each question links as #faq-<name>)\n\n'
+            sed -n '/<section class="deep" id="faq">/,/<\/section>/p' site/index.html |
+              sed -E 's/.*id="(faq-[a-z-]+)".*<h3>(.*)<\/h3>.*/\n\1: \2/; s/<[^>]*>//g; /^ *$/d'
+            printf '\n\n# Earlier discussions\n\n'; cat "$RUNNER_TEMP/earlier.md"
             printf '\n\n# The discussion thread\n\n'; cat "$RUNNER_TEMP/thread.md"
           } > "$RUNNER_TEMP/prompt.md"
           # Web search and fetch only: no shell or file tools, so nothing in the thread can reach the runner.
           claude -p --model opus --tools "WebSearch,WebFetch" --allowedTools "WebSearch,WebFetch" \
             --strict-mcp-config --max-turns 20 --output-format json \
-            --json-schema '{"type":"object","properties":{"relevant":{"type":"boolean"},"reply":{"type":"string"}},"required":["relevant","reply"],"additionalProperties":false}' \
+            --json-schema '{"type":"object","properties":{"relevant":{"type":"boolean"},"reply":{"type":"string"},"faq":{"type":"string"}},"required":["relevant","reply","faq"],"additionalProperties":false}' \
             < "$RUNNER_TEMP/prompt.md" > "$RUNNER_TEMP/result.json"
-          jq -e '.structured_output.reply | length > 0 and length < 6000' "$RUNNER_TEMP/result.json" > /dev/null
+          jq -e '(.structured_output.reply | length > 0 and length < 6000) and (.structured_output.faq | length < 3000)' "$RUNNER_TEMP/result.json" > /dev/null
 
       - name: Post the reply
         env:
           GH_TOKEN: ${{ github.token }}
           DISCUSSION_ID: ${{ steps.thread.outputs.discussion_id }}
           REPLY_TO: ${{ steps.thread.outputs.reply_to }}
+          OVER: ${{ steps.limit.outputs.over }}
         run: |
-          reply=$(jq -r .structured_output.reply "$RUNNER_TEMP/result.json")
-          if grep -Eq 'sk-ant-|gh[pousr]_[A-Za-z0-9]{20}|github_pat_|eyJ[A-Za-z0-9_-]{20}' <<<"$reply"; then
+          if [ "$OVER" = true ]; then
+            reply="I have answered as many questions as I can for today, so I cannot answer this one now. The [FAQ](https://help.andeye.com/#faq) or the [developer FAQ](https://github.com/andeyePro/helpandeye/blob/main/docs/FAQ.md) may already cover it, and one of the team may reply here. You can ask me again tomorrow."
+            faq=""
+          else
+            reply=$(jq -r .structured_output.reply "$RUNNER_TEMP/result.json")
+            faq=$(jq -r .structured_output.faq "$RUNNER_TEMP/result.json")
+          fi
+          if grep -Eq 'sk-ant-|gh[pousr]_[A-Za-z0-9]{20}|github_pat_|eyJ[A-Za-z0-9_-]{20}' <<<"$reply$faq"; then
             echo "::error::Reply looks like it contains a credential; not posting."; exit 1
           fi
           reply="**Claude** (Anthropic's AI assistant):"$'\n\n'"$reply"
           if [ -n "$REPLY_TO" ]; then
-            gh api graphql -f d="$DISCUSSION_ID" -f r="$REPLY_TO" -f b="$reply" -f query='
-              mutation($d:ID!,$r:ID!,$b:String!){addDiscussionComment(input:{discussionId:$d,replyToId:$r,body:$b}){comment{url}}}'
+            url=$(gh api graphql -f d="$DISCUSSION_ID" -f r="$REPLY_TO" -f b="$reply" --jq .data.addDiscussionComment.comment.url -f query='
+              mutation($d:ID!,$r:ID!,$b:String!){addDiscussionComment(input:{discussionId:$d,replyToId:$r,body:$b}){comment{url}}}')
           else
-            gh api graphql -f d="$DISCUSSION_ID" -f b="$reply" -f query='
-              mutation($d:ID!,$b:String!){addDiscussionComment(input:{discussionId:$d,body:$b}){comment{url}}}'
+            url=$(gh api graphql -f d="$DISCUSSION_ID" -f b="$reply" --jq .data.addDiscussionComment.comment.url -f query='
+              mutation($d:ID!,$b:String!){addDiscussionComment(input:{discussionId:$d,body:$b}){comment{url}}}')
+          fi
+          if [ -n "$faq" ]; then
+            # One open issue collects the suggestions; a maintainer moves the good ones into a FAQ.
+            issue=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search 'in:title "FAQ candidates"' --json number --jq '.[0].number // empty')
+            if [ -z "$issue" ]; then
+              issue=$(gh issue create --repo "$GITHUB_REPOSITORY" --title "FAQ candidates" \
+                --body "Questions Claude answered in Discussions that may come up again. Move the good ones into site/index.html (#faq) or docs/FAQ.md, then tick or close them.")
+              issue=${issue##*/}
+            fi
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "From $url"$'\n\n'"$faq"
           fi

@@ -103,6 +103,7 @@
   .press > div:last-child { flex: 1 1 10rem; min-width: 0; }
   .press strong { display: block; font-size: 1.15rem; }
   .press span { color: var(--muted); }
+  .faq { display: grid; gap: 12px; margin-top: 2rem; }
   ol.route { padding-left: 1.4rem; margin: 1.5rem 0 0; }
   ol.route li { margin-bottom: 0.6rem; font-size: 1.05rem; }
 
@@ -273,6 +274,37 @@
   </div>
 </section>
 
+<section class="deep" id="faq">
+  <div class="wrap">
+    <div class="eyebrow-row"><svg class="eye row-eye" data-bg="#090b11" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" aria-hidden="true"><defs><clipPath id="ape9"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath></defs><g clip-path="url(#ape9)"><circle cx="234.59" cy="149.83" r="49.15" fill="#009A44"/><path d="M224.43,119.36 L244.75,119.36 L244.75,139.68 L265.07,139.68 L265.07,159.99 L244.75,159.99 L244.75,180.31 L224.43,180.31 L224.43,159.99 L204.12,159.99 L204.12,139.68 L224.43,139.68Z" fill="#090b11"/></g><g stroke="#009A44" stroke-width="17" stroke-linecap="round" fill="none"><path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/><path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/><path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/></g></svg><p class="eyebrow">Questions</p></div>
+    <h2>Questions people ask.</h2>
+    <div class="faq measure">
+      <details class="card more" id="faq-available"><summary><h3>Can I get Help&amp;I yet?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>Not yet. It is being built and tested, and nothing here is ready to rely on. <a href="https://contact.andeye.com/?source=help.andeye.com&amp;subject=Help%26I%20waitlist">Join the waitlist</a> to hear when it is.</p></div></details>
+      <details class="card more" id="faq-replace"><summary><h3>Does it replace 999 or my telecare alarm?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>No. Help&amp;I adds to 999, NHS 111, telecare and any lone-working procedure you already have. In an emergency, call 999 first if you can.</p></div></details>
+      <details class="card more" id="faq-box"><summary><h3>Do I need the box?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>No. The app on its own works while your phone has internet or a mobile signal, and at home over your Wi-Fi to the others of your group there. The box adds buttons that work without a phone and keep working in a power cut, and the <a href="#clear">local radio network</a> where there is one.</p></div></details>
+      <details class="card more" id="faq-power-cut"><summary><h3>What happens in a power cut?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>The box runs on its battery and can tell the people you chose that the power is off, long before it runs low. It sends over the local radio network where there is one, or through your phone while the phone has a signal. Without either, a message cannot get out, and the box shows a cross.</p></div></details>
+      <details class="card more" id="faq-who-answers"><summary><h3>Who answers when I press the button?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>The people you chose: family, neighbours, a volunteer rota or your own team. There is no call centre. If the first person does not reply, the request goes to the next. Help only comes if one of them is there to answer.</p></div></details>
+      <details class="card more" id="faq-coming"><summary><h3>How will I know someone is coming?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>You are only told help is coming when one of your people has read your message and said so. If your message could not get through, the screen shows a cross, so you can try again or use another way.</p></div></details>
+      <details class="card more" id="faq-privacy"><summary><h3>What is sent, and who can see it?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>The call for help carries only a code, so a stranger listening cannot tell who needed help. The people who answer see your name from their own list. Anything you choose to add, such as a short message, &ldquo;Fallen&rdquo; or where you are, is locked so that only the people answering can read it.</p></div></details>
+      <details class="card more" id="faq-phones"><summary><h3>Which phones and watches will it work on?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>iPhone and Apple Watch first. Android is planned, and a volunteer Android developer would help it come sooner.</p></div></details>
+      <details class="card more" id="faq-radio"><summary><h3>Is there a local radio network near me?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>Only where local volunteers have set one up. It uses small radio relays that need no licence, on mains power with battery and optional solar backup. A community can build its own; <a href="https://contact.andeye.com/?source=help.andeye.com&amp;subject=Volunteering%20for%20Help%26I&amp;cb=Hardware%20development">tell us</a> if yours would like to.</p></div></details>
+      <details class="card more" id="faq-certified"><summary><h3>Is it certified?</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>Not yet. We are designing it to meet the British standards for lone-worker services and alarm handling, and nothing here should be read as if it were certified.</p></div></details>
+      <details class="card more" id="faq-ask"><summary><h3>I have another question.</h3><span class="open-hint">Answer</span></summary>
+        <div class="detail"><p>Ask in <a href="https://github.com/andeyePro/helpandeye/discussions">Discussions</a>. Mention @claude there for an answer from Claude, Anthropic&rsquo;s AI assistant, or wait for one of the team. People building Help&amp;I can also read the <a href="https://github.com/andeyePro/helpandeye/blob/main/docs/FAQ.md">developer FAQ</a>.</p></div></details>
+    </div>
+  </div>
+</section>
+
 <footer>
   <div class="wrap">
     <p>© 2026 andeye Ltd, registered in Scotland (SC665704).</p>
@@ -281,6 +313,7 @@
       <a href="https://andeye.com/terms/">Terms</a>
       <a href="https://andeye.com/privacy/">Privacy</a>
       <a href="https://github.com/andeyePro/helpandeye">GitHub</a>
+      <a href="#faq">FAQ</a>
       <a href="https://github.com/andeyePro/helpandeye/discussions">Discussions</a>
     </nav>
   </div>

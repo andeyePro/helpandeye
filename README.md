@@ -153,7 +153,8 @@ preview URL on `workers.dev`. Change the site on a branch, merge to `dev` to rev
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). AI agents: read [AGENTS.md](AGENTS.md).
 Questions are welcome in [Discussions](https://github.com/andeyePro/helpandeye/discussions); mention
-@claude there for an answer from Claude, Anthropic's AI assistant.
+@claude there for an answer from Claude, Anthropic's AI assistant. The [developer FAQ](docs/FAQ.md)
+and the [website's FAQ](https://help.andeye.com/#faq) may already answer yours.
 
 ## Licence
 

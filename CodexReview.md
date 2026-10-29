@@ -569,7 +569,7 @@ Any [non-bot discussion author whose text contains `@claude`](https://github.com
 
 **Recommendation:** explicitly choose a public-access budget and enforce a global/per-author limit or maintainer approval for new/untrusted participants. Bound input size and model usage, add a circuit breaker and monitor failures/consumption. Verify external subscription/account limits rather than assuming repository code supplies them. Retain the tool allowlist and bot-loop filter.
 
-O5.5 Response: Martin's decision. Public invocation is intentional (README); whether to limit it to people with a repository association is open. A global concurrency group was not added, because GitHub keeps only one pending run per group and would drop answers.
+O5.5 Fixed: Martin chose to keep it open to anyone, with a limit. Before asking Claude, the workflow counts the runs of the last 24 hours that asked it, including failed and unfinished ones, and refuses with a fixed reply past 20 in all or 3 for one person outside the team (repository variables `CLAUDE_DAILY_LIMIT`, `CLAUDE_PERSON_LIMIT`); if the count cannot be read, the run stops. Repeat questions are cheaper: the bot is given both FAQs and the list of earlier discussions and told to link them rather than answer again. Two runs at the same moment can each pass at the limit, so it can be exceeded by a few. A global concurrency group was not added, because GitHub keeps only one pending run per group and would drop answers.
 
 ### R2 — Automatic blinking lasts beyond five seconds without a page control
 
