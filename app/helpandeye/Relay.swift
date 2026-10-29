@@ -26,7 +26,7 @@ final class Relay: ObservableObject, RelayLink {
         isConfigured = base != nil && group != nil
         poller?.cancel()
         guard isConfigured else { return }
-        Task { await publishPushToken() }
+        registerPushToken()
         // Every 30 seconds while something is open, every two minutes otherwise: each poll costs two
         // of the free tier's daily Durable Object requests, shared by every group.
         poller = Task { [weak self] in
@@ -80,7 +80,7 @@ final class Relay: ObservableObject, RelayLink {
     }
 
     /// Where Apple can push to wake this phone. Sent whenever the relay or group changes.
-    var pushToken: Data? { didSet { Task { await publishPushToken() } } }
+    var pushToken: Data? { didSet { registerPushToken() } }
     /// "watch" on a watch acting for its phone: the relay keeps one token of each per member and
     /// wakes a watch quietly.
     var device = "phone"
@@ -89,18 +89,22 @@ final class Relay: ObservableObject, RelayLink {
     /// (refused until a coordinator's phone has listed this one, or not reached), they are tried
     /// again after a growing pause, for as long as they stay the current ones.
     private var registered: String?
-    private var registering = false
+    private var registration: Task<Void, Never>?
     private var wanted: String? {
         guard let group, let base, let pushToken else { return nil }
         return [group.secrets.groupID.base64EncodedString(), base.absoluteString, pushToken.base64EncodedString()].joined(separator: " ")
     }
 
-    func publishPushToken() async {
-        guard !registering else { return }
-        registering = true
-        defer { registering = false }
+    /// Starts registering now, in place of any attempt waiting out its pause.
+    private func registerPushToken() {
+        guard wanted != registered else { return }
+        registration?.cancel()
+        registration = Task { await publishPushToken() }
+    }
+
+    private func publishPushToken() async {
         var pause: TimeInterval = 60
-        while let group, let pushToken, let wanted, wanted != registered {
+        while !Task.isCancelled, let group, let pushToken, let wanted, wanted != registered {
             #if DEBUG
             let sandbox = true
             #else
@@ -136,7 +140,7 @@ final class Relay: ObservableObject, RelayLink {
             // The group or relay changed while waiting: this page belongs to the old one.
             guard self.group?.secrets.groupID == group.secrets.groupID, self.positionKey == positionKey else { return }
             // Answered, so this phone is listed now: a registration still waiting can go.
-            if registered != wanted { Task { await publishPushToken() } }
+            registerPushToken()
             let outcome = RelayPoll.read(page, from: stored, at: Date(), keys: group.listening(at: Date()))
             for f in outcome.frames { onFrame?(f) }
             UserDefaults.standard.set(try? JSONEncoder().encode(outcome.position), forKey: positionKey)

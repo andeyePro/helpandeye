@@ -116,7 +116,7 @@ import XCTest
 
     /// Two ends of one connection, handing each other what they send, a few bytes at a time.
     private func connect(_ a: inout LocalWire.Session, _ b: inout LocalWire.Session) -> (a: [LocalWire.Session.Event], b: [LocalWire.Session.Event]) {
-        var toA = b.opening, toB = a.opening, seenA: [LocalWire.Session.Event] = [], seenB: [LocalWire.Session.Event] = []
+        var toA = b.opening(), toB = a.opening(), seenA: [LocalWire.Session.Event] = [], seenB: [LocalWire.Session.Event] = []
         while !toA.isEmpty || !toB.isEmpty {
             let inA = toA, inB = toB
             toA = Data(); toB = Data()
@@ -169,6 +169,20 @@ import XCTest
         _ = responder.take(sent)
         XCTAssertEqual(caller.take(try XCTUnwrap(responder2.receipt(for: 8))).events, [])
         XCTAssertEqual(caller.take(try XCTUnwrap(responder.receipt(for: 7))).events, [.receipt(7)], "the real one still counts")
+    }
+
+    /// An end that hears the other's challenge before sending its own sends its challenge first,
+    /// then its proof, so the other end never sees a proof it cannot place.
+    func testTheChallengeAlwaysGoesBeforeTheProof() {
+        let g = t.caller.engine.group!
+        var caller = LocalWire.Session(group: g, me: t.caller.engine.saved!.me, identity: t.caller.identity)
+        var responder = LocalWire.Session(group: g, me: t.responder.engine.saved!.me, identity: t.responder.identity)
+        let first = caller.take(responder.opening())
+        let second = responder.take(first.reply)
+        XCTAssertEqual(second.events, [.peer(t.caller.engine.saved!.me)])
+        XCTAssertEqual(caller.take(second.reply).events, [.peer(t.responder.engine.saved!.me)])
+        XCTAssertTrue(caller.opening().isEmpty, "the challenge went once, with the proof")
+        XCTAssertFalse(caller.broken || responder.broken)
     }
 
     func testThisPhonesOwnOtherHalfNeverCountsAsAnotherPhone() {

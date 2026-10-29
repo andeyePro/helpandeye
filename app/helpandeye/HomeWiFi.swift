@@ -180,7 +180,9 @@ import Network
             Task { @MainActor in
                 guard let self, let p = self.peers[id], p.connection === c else { return }
                 switch state {
-                case .ready: c.send(content: p.session.opening, completion: .idempotent)
+                case .ready:
+                    let opening = p.session.opening()
+                    if !opening.isEmpty { c.send(content: opening, completion: .idempotent) }
                 case .failed, .cancelled: self.drop(id)
                 case .waiting:
                     // Refused or stale, such as this phone's own old name: give up, and dial afresh.

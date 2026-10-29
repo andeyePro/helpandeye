@@ -73,6 +73,7 @@ public enum LocalWire {
         /// Digests of frames sent and not yet confirmed, and of frames taken in and not yet confirmed.
         private var unconfirmed: [UInt32: Data] = [:]
         private var toConfirm: [UInt32: Data] = [:]
+        private var opened = false
         private var buffer = Data()
         public private(set) var peer: UInt16?
         public private(set) var broken = false
@@ -82,8 +83,13 @@ public enum LocalWire {
             myChallenge = randomBytes(16)
         }
 
-        /// What this end sends first.
-        public var opening: Data { Self.wrap(.challenge, myChallenge) }
+        /// What this end sends first: its challenge, once. Empty if it already went, ahead of a
+        /// proof answering the other end's challenge, so the challenge always goes first.
+        public mutating func opening() -> Data {
+            guard !opened else { return Data() }
+            opened = true
+            return Self.wrap(.challenge, myChallenge)
+        }
 
         public mutating func message(_ frame: HelpFrame, id: UInt32) -> Data? {
             guard let sendKey, let box = try? ChaChaPoly.seal(Self.u32(id) + frame.encoded(), using: sendKey) else { return nil }
@@ -116,7 +122,7 @@ public enum LocalWire {
                 case .challenge:
                     guard theirChallenge == nil, payload.count == 16, let proof = proof(answering: payload) else { broken = true; break }
                     theirChallenge = payload
-                    reply += proof
+                    reply += opening() + proof
                 case .proof:
                     guard peer == nil, let theirs = theirChallenge, let who = check(payload) else { broken = true; break }
                     peer = who
@@ -128,6 +134,8 @@ public enum LocalWire {
                     guard let box = try? ChaChaPoly.SealedBox(combined: payload), let plain = try? ChaChaPoly.open(box, using: hearKey),
                           plain.count > 4, let frame = HelpFrame(Data(plain.dropFirst(4))) else { break }
                     let id = Self.u32(plain.prefix(4))
+                    // Frames this end does not keep are never confirmed: only the latest few wait.
+                    if toConfirm.count >= 256, let oldest = toConfirm.keys.min() { toConfirm[oldest] = nil }
                     toConfirm[id] = Self.digest(payload)
                     events.append(.frame(frame, id: id))
                 case .receipt:

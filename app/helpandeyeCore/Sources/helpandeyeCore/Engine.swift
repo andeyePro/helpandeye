@@ -517,8 +517,11 @@ public final class HelpEngine: ObservableObject {
         }
     }
 
-    public func add(_ category: CallCategory) {
-        guard current?.partsLeft ?? 0 > 0, var r = activity.outgoing.popLast() else { return }
+    /// Returns why it could not go, if it could not.
+    @discardableResult
+    public func add(_ category: CallCategory) -> String? {
+        guard current?.partsLeft ?? 0 > 0 else { return "This call cannot take any more messages. If you need help now, call 999." }
+        guard var r = activity.outgoing.popLast() else { return nil }
         let frame = r.add(category)
         activity.outgoing.append(r)
         let gid = groupID
@@ -528,6 +531,7 @@ public final class HelpEngine: ObservableObject {
         } else {
             spawn { await self.sendPersonal(frame, in: gid) }
         }
+        return nil
     }
 
     /// Takes back a category pressed by mistake.
