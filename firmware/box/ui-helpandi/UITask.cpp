@@ -369,14 +369,15 @@ void UITask::draw() {
   _display->setTextSize(1);
   _display->setColor(UIColor::primary_txt);
   char line[40];
-  if (s.provisioned) {
-    snprintf(line, sizeof line, "Help&I  unit %lu", (unsigned long)_group.unit);
-  } else {
-    snprintf(line, sizeof line, "Help&I");
-  }
   _display->setCursor(0, 0);
-  _display->print(line);
-  if (hasConnection()) _display->drawTextRightAlign(w, 0, "phone");
+  _display->print("Help&I");
+  if (hasConnection()) {
+    _display->drawTextRightAlign(w, 0, "phone");
+  } else {
+    // MeshCore's random pairing code, which the phone needs to connect.
+    snprintf(line, sizeof line, "code %lu", (unsigned long)the_mesh.getBLEPin());
+    _display->drawTextRightAlign(w, 0, line);
+  }
 
   if (_buttons.counting()) {
     snprintf(line, sizeof line, "%lu", (unsigned long)_buttons.secondsLeft(millis()));
@@ -396,6 +397,8 @@ void UITask::draw() {
   } else {
     _display->setCursor(0, 14);
     _display->printWordWrap(kSupplementWords, w);
+    snprintf(line, sizeof line, "Unit %lu", (unsigned long)_group.unit);
+    _display->drawTextLeftAlign(0, 40, line);
   }
 
   if (s.mains == PowerMonitor::Mains::off && !_buttons.counting()) {
