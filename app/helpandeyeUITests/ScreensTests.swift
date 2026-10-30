@@ -129,7 +129,7 @@ final class ScreensTests: XCTestCase {
         look("keys-needed-call")
         tab("Group")
         let wifi = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Scan the new code")).firstMatch
-        reveal(wifi)
+        show(wifi)
         // At the largest text it can be taller than the screen, so on screen is enough.
         XCTAssert(wifi.exists && wifi.frame.intersects(app.windows.firstMatch.frame), "keys-needed: Home Wi-Fi does not ask for the new code")
         look("keys-needed-group")
@@ -208,6 +208,14 @@ final class ScreensTests: XCTestCase {
         return e
     }
 
+    /// Scrolls text into view that may be too tall ever to count as tappable.
+    private func show(_ e: XCUIElement) {
+        let window = app.windows.firstMatch.frame
+        for _ in 0..<20 where !(e.exists && e.frame.minY < window.maxY - 150 && e.frame.maxY > window.minY + 150) {
+            if e.exists && e.frame.maxY <= window.minY + 150 { app.swipeDown(velocity: .slow) } else { app.swipeUp(velocity: .slow) }
+        }
+    }
+
     private func type(_ field: String, _ text: String) {
         // Found by the label read out to VoiceOver, which is also shown above the box.
         let f = reveal(app.textFields[field])
@@ -267,13 +275,13 @@ final class ScreensTests: XCTestCase {
         } } catch {
             problems.append("\(name): the audit could not run: \(error)")
         }
-        recheck(contrast)
+        recheck(contrast, bars: bars)
     }
 
     /// The audit can read a list at another scroll position than it reports, so it flags text
     /// that sat in a fade for a moment. Each contrast finding is measured again on a screenshot
     /// once the screen is still: only text below 4.5 to 1 there counts.
-    private func recheck(_ found: [(XCUIElement, String)]) {
+    private func recheck(_ found: [(XCUIElement, String)], bars: [CGRect]) {
         guard !found.isEmpty else { return }
         Thread.sleep(forTimeInterval: 1)
         let shot = XCUIScreen.main.screenshot()
@@ -285,6 +293,8 @@ final class ScreensTests: XCTestCase {
             if now.exists, !now.isHittable {
                 // Scrolled out of a sheet's visible part: what was measured is the dimmed screen behind.
                 print("ADVICE out of sight in a sheet: " + detail)
+            } else if bars.contains(where: { $0.intersects(frame) }) {
+                print("ADVICE under a bar when still: " + detail)
             } else if screen.contains(frame), !frame.isEmpty, let ratio = Self.contrast(in: frame, of: shot, screen: screen), ratio >= 4.5 {
                 print("ADVICE read while moving; \(String(format: "%.1f", ratio)) to 1 when still: " + detail)
             } else {
