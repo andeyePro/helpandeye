@@ -33,6 +33,7 @@ void BoxEngine::provision(const GroupSettings& group, const MemberList& members)
     group_ = group;
     members_ = members;
     provisioned_ = true;
+    revokeAcks();
     canSeal_ = false;
     uint8_t shared[32];
     if (group_.hasRespondersKey() && port_.sharedSecret(shared, group_.respondersKey)) {
@@ -124,6 +125,14 @@ size_t BoxEngine::signFrame(const uint8_t* inner, size_t innerLength, uint8_t* o
     std::memcpy(f.inner, inner, innerLength);
     port_.sign(f.signature, input, n);
     return encode(f, out, cap);
+}
+
+void BoxEngine::revokeAcks() {
+    for (size_t i = 0; i < callCount_; i++)
+        slots_[i].call.revoke([&](uint16_t who) {
+            const Member* m = members_.find(who);
+            return m && canRespond(m->role);
+        });
 }
 
 void BoxEngine::settleSlot(Slot& s, CallState state, uint64_t nowMs, uint32_t wallNow) {
@@ -237,12 +246,7 @@ void BoxEngine::onSigned(const SignedFrame& s) {
     if (!port_.verify(signer->signingKey, s.signature, input, n)) return;
     Frame inner = decode(s.inner, s.innerLength);
     if (inner.kind == FrameKind::memberRemoved && s.signer == group_.firstCoordinator) {
-        if (!members_.remove(inner.memberRemoved.member, inner.memberRemoved.version)) return;
-        for (size_t i = 0; i < callCount_; i++)
-            slots_[i].call.revoke([&](uint16_t who) {
-                const Member* m = members_.find(who);
-                return m && canRespond(m->role);
-            });
+        if (members_.remove(inner.memberRemoved.member, inner.memberRemoved.version)) revokeAcks();
         return;
     }
     // A coordinator closes with the caller's consent or a reason (decision 6); the caller's own

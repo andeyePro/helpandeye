@@ -294,6 +294,22 @@ TEST(aRemovalSignedByTheFirstCoordinatorTakesBackTheAcknowledgement) {
     CHECK(w.port.sent.back().payload[0] == 0x11);
 }
 
+TEST(aNewMemberListFromThePhoneTakesBackADroppedRespondersAcknowledgement) {
+    // The phone sends the list again after every change (0x72): a responder no longer on it, or
+    // now a caller, must not go on reassuring the person at the box.
+    World w;
+    w.box.press(Colour::red, 0, 1000, false);
+    auto good = w.ack(w.responder, 2, 1, 1001);
+    w.box.heard(good.data(), good.size());
+    CHECK(w.box.screen().status == CallerStatus::seen);
+    w.members.members[1].role = Role::caller;
+    w.members.version = 2;
+    w.box.provision(w.group, w.members);
+    CHECK(w.box.screen().status == CallerStatus::waitingForResponder);
+    w.box.tick(30000, 1030);
+    CHECK(w.port.sent.size() == 2);
+}
+
 TEST(imOKClosesTheCallWhereTheProfileSaysAndSendsASignedCloseThatRepeats) {
     World w(true);
     w.box.press(Colour::red, 0, 1000, false);

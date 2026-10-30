@@ -125,6 +125,8 @@ private:
     void sound(Sound s);
     size_t signFrame(const uint8_t* inner, size_t innerLength, uint8_t* out, size_t cap);
     void settleSlot(Slot& s, CallState state, uint64_t nowMs, uint32_t wallNow);
+    // Takes back acknowledgements from anyone no longer a member who can respond.
+    void revokeAcks();
     void onAck(const AckFrame& ack);
     void onSigned(const SignedFrame& s);
     void addReportPart(const uint8_t* inner, size_t innerLength, bool lastWarning, uint64_t nowMs, uint32_t wallNow);
