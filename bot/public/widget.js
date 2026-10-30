@@ -17,6 +17,7 @@
 
   var css = ".sb{color:var(--text,inherit);max-width:var(--measure,720px);line-height:1.55}" +
     ".sb *{box-sizing:border-box}" +
+    ".sb [hidden]{display:none!important}" +
     ".sb-safety{background:var(--panel,rgba(127,127,127,.12));border:1px solid var(--line-soft,rgba(127,127,127,.3));border-left:6px solid var(--accent,#007a36);border-radius:var(--radius,14px);padding:12px 16px;margin:0 0 1rem;font-weight:700}" +
     ".sb-log{display:grid;gap:10px;margin:0 0 1rem}" +
     ".sb-msg{margin:0;padding:12px 16px;border-radius:var(--radius,14px);background:var(--panel,rgba(127,127,127,.12));border:1px solid var(--line-soft,rgba(127,127,127,.3))}" +
@@ -118,7 +119,7 @@
       sitekey: me.siteKey,
       theme: "auto",
       // The normal widget is 300 px wide; a phone in the page's gutters has less.
-      size: check.clientWidth && check.clientWidth < 300 ? "compact" : "flexible",
+      size: box.clientWidth < 300 ? "compact" : "flexible",
       callback: function (t) { token = t; },
       "expired-callback": function () { token = null; },
       "error-callback": function () { token = null; },

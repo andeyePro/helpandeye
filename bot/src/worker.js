@@ -180,14 +180,10 @@ async function readJson(request) {
     if (size > MAX_BODY) throw new BotError(413, "too big");
     chunks.push(chunk);
   }
-  return JSON.parse(new TextDecoder().decode(concat(chunks, size)));
-}
-
-function concat(chunks, size) {
-  const out = new Uint8Array(size);
+  const bytes = new Uint8Array(size);
   let at = 0;
-  for (const c of chunks) { out.set(c, at); at += c.length; }
-  return out;
+  for (const c of chunks) { bytes.set(c, at); at += c.length; }
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 /// Adds a reply's cost to the ledger and emails any alert it raises.

@@ -4,7 +4,7 @@ import config from "../config.js";
 
 // Just enough of a page for the widget: elements, attributes, text and listeners.
 class Node {
-  constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.listeners = {}; this.textContent = ""; this.value = ""; this.disabled = false; }
+  constructor(tag) { this.tag = tag; this.children = []; this.attrs = {}; this.listeners = {}; this.textContent = ""; this.value = ""; this.disabled = false; this.clientWidth = 272; }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   removeAttribute(k) { delete this.attrs[k]; }
   getAttribute(k) { return this.attrs[k] ?? null; }
@@ -59,6 +59,12 @@ test("the widget shows the safety line, labels its fields, checks once, asks, an
   globalThis.turnstile = { render: (el, opts) => { rendered = opts; return 1; }, remove: () => {} };
   globalThis.sbTurnstile();
   assert.equal(rendered.sitekey, "site");
+  // In a 272 px box (a 320 px phone with the page's gutters) the 300 px widget would overflow.
+  assert.equal(rendered.size, "compact");
+  // The buttons' own display rule must not undo `hidden`: a visitor who is not signed in saw
+  // Sign out until it did.
+  assert.ok(box.find((n) => n.tag === "style").textContent.includes(".sb [hidden]{display:none!important}"));
+  assert.equal(box.find((n) => n.tag === "button" && n.textContent === "Sign out").attrs.hidden, "");
 
   // Asking before the check has passed only says to wait.
   const form = box.find((n) => n.attrs.class === "sb-form");
