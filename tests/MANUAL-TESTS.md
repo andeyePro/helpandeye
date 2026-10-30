@@ -433,3 +433,100 @@ Needs a relay of your own deployed with `REQUIRE_PASS` set to `1` and `ISSUER_KE
 
 Pass: in step 2 the internet route says the relay needs a pass for this group and that a coordinator can add one under Group, Internet route; the mesh route is unaffected. In step 3 the pass is saved ("Saved. Members get the pass at once..."), the call goes over the internet route and the acknowledgement comes back. In step 4 phone B shows the pass is good until tomorrow's date, having had it from phone A without scanning anything. In step 5 the internet route says the group's relay pass has run out, and Internet route on both phones says when. Nothing ever says help is coming.
 
+
+## Help&I firmware on the box
+
+Sections 46 to 57 need boxes running Help&I's own firmware (`firmware/build.sh`, environment `heltec_v4_helpandi` on a Heltec WiFi LoRa 32 V4 with the buttons, buzzer and mains divider of `firmware/DESIGN.md` section 5, or `heltec_v4_helpandi_dev` for a plain board). Nothing in them has been run: the firmware has only been compiled. The app side (adding a box to a group over Bluetooth, commands 0x71 and 0x72 in DESIGN.md section 6) is not built, so until it is, provision with a test tool that sends those bytes over the companion link, and say so in the run. "Box A" is a Help&I box in the group as its own member; phone B is a responder with its own stock box. Keep phone A off unless a step says otherwise.
+
+## 46. The box's buttons with no phone
+
+1. On box A, press red once, briefly.
+2. Hold red down for ten seconds.
+3. On phone B, acknowledge.
+
+Pass: box A beeps once and shows "Sending...", then "Sent. Waiting for someone to see it.", and never anything that suggests help is on its way. Phone B alerts within a few seconds. Holding red makes no second call (phone B's list shows one). Only after step 3 does box A show "A responder has seen your call.", with its seen sound, and the LED goes out.
+
+## 47. The cross on the box
+
+1. Take box A's antenna off, or set box A to a frequency outside the UK bands, and press amber.
+
+Pass: box A shows a cross and "Not sent. Nobody may know you need help. If you need help now, call 999.", with its not-sent sound, and the LED blinks. With the frequency outside the bands it sends nothing at all (check with a third board), and MeshCore's own transmit power setting is pulled down to the band's cap within a second of being raised.
+
+## 48. Resends from the box until someone acknowledges
+
+1. Switch phone B's box off. On box A, press red.
+2. After two minutes, switch phone B's box on. Do not touch box A.
+3. On phone B, acknowledge.
+
+Pass: phone B alerts within ten minutes of step 2. Box A shows "seen" only after step 3, and a third board's log shows box A's repeats (at 30 seconds, 1, 2 and 4 minutes, then every 10) stopping after it.
+
+## 49. A second press, and I'm OK on the box
+
+Run once with the box's profile set to "I'm OK closes the call" (A) and once to "stops the urgent repeats" (B), re-provisioning in between.
+
+1. On box A, press red, wait five seconds, then press red again.
+2. Wait five seconds, then press green.
+
+Pass: phone B shows two calls from the box's unit. After step 2 it shows I'm OK for both, quietly. In A both show as closed by the caller and box A says "Your call is closed."; in B they stay open until a responder acknowledges, box A's repeats carry the I'm OK, and box A still says it is waiting for someone.
+
+## 50. Bouncing, stuck and start-up presses
+
+1. Tap red as lightly and quickly as you can, ten times.
+2. Hold red while plugging box A in, keep holding for ten seconds, then let go.
+3. Press red once.
+4. Wait five seconds, then press red, amber and green together with the flat of a hand.
+5. Wait five seconds. Press red, let go, and press green within two seconds.
+
+Pass: in step 1 each tap that beeps makes exactly one call and none makes two. Step 2 makes no call. Step 3 makes one. Step 4 makes a Help and a Need a hand and no I'm OK. Step 5 makes one Help and no I'm OK.
+
+## 51. The countdown on a plain Heltec (development layout)
+
+Needs a board flashed with `heltec_v4_helpandi_dev`.
+
+1. Press PRG briefly, and do nothing for a minute.
+2. Press PRG briefly, then press it again after a few seconds.
+3. Hold PRG for three seconds.
+
+Pass: step 1 counts down from 60 on the screen, beeping every 10 seconds, beeps twice at 30 seconds left, and sends Help at 0. Step 2 stops the countdown, with a short tone, and sends nothing. Step 3 sends I'm OK.
+
+## 52. Sounds, screen and LED for someone with poor sight or hearing
+
+Pass: the press, "seen" and the cross each have a sound that can be told apart from the others across a room, and none is harsh. The screen's words can be read at arm's length, and the screen stays on while a call is open or there is a power cut, going dark two minutes after the last press otherwise. The LED is on while a call waits, blinks when nothing was sent, and is off once a responder has seen it; it can be seen in a dark room.
+
+## 53. A power cut
+
+1. With box A on its mains adapter and battery, and the person's power-cut report turned on at provisioning, switch the adapter off at the wall for one second, then on.
+2. Switch it off and leave it off.
+3. On phone B, acknowledge the power cut.
+
+Pass: step 1 reports nothing. In step 2 box A shows "Power cut" on its bottom line within ten seconds (with the hours once estimated); phone B hears a request from the box's unit marked Power cut within a minute, then battery notes ("About 24 hours of battery left.", and so on) as the estimate passes each mark; red still works throughout. After step 3 only the final battery warning still comes. When the adapter goes back on, phone B gets "Power is back." With the report turned off, box A still shows the power cut but sends nothing.
+
+## 54. Battery life on battery alone
+
+1. Charge box A fully, unplug it, and leave it idle, pressing red once an hour.
+
+Pass: it runs at least 24 hours, every press is heard, and its hours-left estimates are within an hour of the truth near the end. Record the measured average draw: it replaces `HI_DRAW_MA` in `firmware/box/platformio.local.ini`.
+
+## 55. Transmit power and duty cycle
+
+Needs an RF power meter or a calibrated spectrum analyser.
+
+1. Measure box A's output at each band with its antenna type set at provisioning.
+2. Press red, amber and green repeatedly for an hour.
+
+Pass: output is within the band's ERP limit with the antenna's gain. In step 2 the box's own sending stays under the band's duty cycle, and red still goes out after amber and green have used their share. Record the measured amplifier gain: it replaces `HI_AMPLIFIER_GAIN_DB`.
+
+## 56. The box and its phone together
+
+1. With phone A connected to box A and the internet on, press red on the box.
+
+Pass: phone A is told of the call (push 0xA3) and carries it on its own routes once the app side exists; phone B hears the call once, whether by the mesh or the internet, and box A shows "seen" after B acknowledges, by either route.
+
+## 57. Provisioning over Bluetooth
+
+1. With box A unprovisioned, press red.
+2. Send the group (0x71) and members (0x72) over the companion link, then query 0x70.
+3. Press red. Remove the responder from the group on the coordinator's phone, and wait for the repeat of the signed removal.
+4. Send forget (0x75) and press red.
+
+Pass: step 1 shows "Not set up yet. Add this box to a group in the Help&I app." with the not-sent sound. Step 2 answers each command with OK and the info reply shows the unit, member and next request number; the box survives a power cycle still provisioned. In step 3 the call goes, and after the removal the responder's acknowledgement no longer counts (the box goes back to waiting). Step 4 is back to step 1.

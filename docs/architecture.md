@@ -11,8 +11,8 @@ For contributors. What each part does and where its code is. The rules it follow
 | Phone app | `app/helpandeye` | SwiftUI screens, and the real box (`BoardLink`), relay (`Relay`), home Wi-Fi link (`HomeWiFi`), notifications and storage plugged into the engine. |
 | Home Wi-Fi listener | `app/helpandeyeLocalPush` | A local push extension iOS runs on the named home Wi-Fi with the phone locked: it joins the first group's phones as the app does and alerts for a call (decision 19). It confirms only the calls it alerts for, so anything else sent to it goes on by the sender's other routes. Needs a signed build. |
 | Watch app | `app/helpandeyeWatch` | Three buttons and a Help complication. In reach of its phone it sends through the phone. Out of reach it runs its own `HelpEngine` for each of the phone's groups, as the same member, and calls and responds over its own internet connection (`WatchHandover`). |
-| Box | any Heltec LoRa board | MeshCore's standard companion firmware, unchanged. The app writes the group's private channel into it. |
-| Box firmware (groundwork) | `firmware/` | A design for Help&I's own firmware, so the buttons work with no phone, and its portable C++ core with host tests. Not yet on a board. |
+| Box (prototype) | any Heltec LoRa board | MeshCore's standard companion firmware, unchanged. The app writes the group's private channel into it. |
+| Box firmware | `firmware/` | Help&I's own build of MeshCore's companion firmware for the Heltec WiFi LoRa 32 V4 (option A, `firmware/DESIGN.md`): red, amber and green buttons, a buzzer, the screen, resends, acknowledgement checking, I'm OK, the duty-cycle budget and power cap, and a sealed power-cut and battery report, with the box as its own group member. The logic is a portable C++ core (`firmware/core`) with host tests (`make test`); `firmware/box` is the overlay on a pinned MeshCore commit and `firmware/build.sh` builds it. Compiles; not yet run on a board. |
 | Relay | `relay/` | Cloudflare Worker. Stores and forwards sealed messages for the internet route. |
 
 ## A red press

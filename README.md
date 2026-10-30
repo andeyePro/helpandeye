@@ -143,10 +143,14 @@ The app talks over Bluetooth to a Heltec board running MeshCore's standard compa
 
 ## Firmware
 
-`firmware/` is groundwork for Help&I's own box firmware, so the buttons work with no phone:
-`firmware/DESIGN.md` sets out the options, and `firmware/core` is the portable logic (frames,
-resends, buttons, radio time) with tests that run on a computer (`cd firmware && make test`).
-Nothing there has run on a board yet.
+`firmware/` is Help&I's own box firmware, so the buttons work with no phone: MeshCore's
+companion firmware for the Heltec WiFi LoRa 32 V4 with a Help&I layer on top (buttons, buzzer,
+screen, calls and their resends, acknowledgement checking, I'm OK, the duty-cycle budget and
+power cap, power-cut and battery reports). `firmware/DESIGN.md` is the design and the decisions
+behind it; `firmware/core` is the portable logic with tests that run on a computer (`cd firmware
+&& make test`); `firmware/build.sh` fetches MeshCore at a pinned commit, adds the Help&I layer
+and builds it with PlatformIO. It compiles, and nothing in it has run on a board yet:
+`tests/MANUAL-TESTS.md` sections 46 to 57 are the checks to run first.
 
 ## Website
 

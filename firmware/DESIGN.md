@@ -489,7 +489,7 @@ cold start, the power cap, a power-cut report opened as a responder's phone open
 coordinator's close, the changeover, request numbers and forgetting. Still to add: an
 acknowledgement signed by a real phone, checked on a board.
 
-**On a board** (not run): `tests/MANUAL-TESTS.md` sections 45 to 56, which replace "Help&I needs
+**On a board** (not run): `tests/MANUAL-TESTS.md` sections 46 to 57, which replace "Help&I needs
 no firmware of its own" in Before you start once a box has passed them. The sections proposed in
 an earlier version of this file are there now.
 
