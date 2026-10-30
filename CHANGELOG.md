@@ -4,6 +4,8 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-30
 
+- [x] **Home Wi-Fi link tidy-ups** (Codex re-review) - a dropped connection counts what it had not confirmed as not sent at once, rather than after the 4-second wait; a phone that drops before proving itself is dialled again after 2 seconds, doubling to a minute, not in a tight loop; the Local Network message goes once another member is heard; Group counts members, not connections; and it says "Listening on" the Wi-Fi with the phone locked only while iOS runs the listener ("Set to listen" otherwise). Builds; the locked-phone text shows only in a signed build, so has no screenshot yet. MANUAL-TESTS 41 step 7 and 42 step 1 added.
+
 - [x] **Closes are repeated** (Codex re-review) - the phone that closes a call (the caller's, or a coordinator's) sends the close again on the call's resend times, four times over about eight minutes, then stops, so a phone that missed it no longer goes on alerting. The repeats survive a relaunch. Tests: a responder who missed a caller's close, and a coordinator's, hears it on the next repeat. 254 core tests.
 
 ## 2026-10-29

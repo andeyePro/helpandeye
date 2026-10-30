@@ -10,7 +10,7 @@ import Network
 /// open; the local push extension runs the same with the phone locked, and confirms only what it
 /// keeps (`keeps`).
 @MainActor final class HomeWiFi: ObservableObject, LocalLink {
-    /// Other members' phones connected and proven now.
+    /// Other members connected and proven now, however many connections each has.
     @Published private(set) var peerCount = 0
     /// Why the route cannot work at all here, such as Local Network access being turned off.
     @Published private(set) var problem: String?
@@ -33,11 +33,16 @@ import Network
     /// Advertised names that turned out not to be another member (this phone's own extension, a
     /// stranger): not dialled again until the next restart.
     private var refused: Set<String> = []
+    /// Names that dropped before proving themselves, with when to dial them again and the next
+    /// wait, so a phone that keeps failing is not dialled in a tight loop.
+    private var redial: [String: (at: Date, wait: TimeInterval)] = [:]
 
     private final class Peer {
         let connection: NWConnection
         var session: LocalWire.Session
         let name: String?
+        /// Messages sent on this connection still waiting for its receipt.
+        var unconfirmed: Set<UInt32> = []
         init(_ connection: NWConnection, _ session: LocalWire.Session, name: String?) {
             self.connection = connection; self.session = session; self.name = name
         }
@@ -85,6 +90,7 @@ import Network
             waiting[id] = (ready.count, done)
             for p in ready {
                 guard let m = p.session.message(frame, id: id) else { settle(id, confirmed: false); continue }
+                p.unconfirmed.insert(id)
                 p.connection.send(content: m, completion: .contentProcessed { [weak self] error in
                     if error != nil { Task { @MainActor in self?.settle(id, confirmed: false) } }
                 })
@@ -113,8 +119,11 @@ import Network
     private func restart() {
         listener?.cancel(); browser?.cancel()
         for p in peers.values { p.connection.cancel() }
+        let dropped = peers.values
         peers = [:]
         refused = []
+        redial = [:]
+        for p in dropped { for id in p.unconfirmed { settle(id, confirmed: false) } }
         update()
         guard let g = group, me != nil, identity != nil else { return }
         let base = LocalWire.serviceName(for: g)
@@ -165,6 +174,7 @@ import Network
         let base = LocalWire.serviceName(for: g)
         for r in results {
             guard case let .service(name, _, _, _) = r.endpoint, name.hasPrefix(base + "-"), name > myName, !refused.contains(name),
+                  (redial[name]?.at ?? .distantPast) <= Date(),
                   !peers.values.contains(where: { $0.connection.endpoint == r.endpoint }) else { continue }
             add(NWConnection(to: r.endpoint, using: Self.parameters), name: name)
         }
@@ -206,11 +216,15 @@ import Network
                         switch e {
                         case .peer:
                             UserDefaults.standard.set(true, forKey: Self.usedKey)
+                            if let name = p.name { self.redial[name] = nil }
+                            self.problem = nil
                             self.update()
                         case let .frame(frame, mid):
                             if self.keeps(frame), let receipt = p.session.receipt(for: mid) { c.send(content: receipt, completion: .idempotent) }
                             self.onFrame?(frame)
-                        case let .receipt(mid): self.settle(mid, confirmed: true)
+                        case let .receipt(mid):
+                            p.unconfirmed.remove(mid)
+                            self.settle(mid, confirmed: true)
                         }
                     }
                 }
@@ -220,14 +234,25 @@ import Network
         }
     }
 
-    /// Forgets a connection, and dials the group's phones still advertised again.
+    /// Forgets a connection, so what it had not confirmed counts as not sent on it, and dials the
+    /// group's phones still advertised again: at once after a working connection ends, otherwise
+    /// after a wait that doubles each time, up to a minute.
     private func drop(_ id: Int) {
         guard let p = peers.removeValue(forKey: id) else { return }
         p.connection.cancel()
-        if p.session.broken, !p.proven, let name = p.name { refused.insert(name) }
+        for mid in p.unconfirmed { settle(mid, confirmed: false) }
+        if let name = p.name, !p.proven {
+            if p.session.broken { refused.insert(name) }
+            let wait = min((redial[name]?.wait ?? 1) * 2, 60)
+            redial[name] = (Date().addingTimeInterval(wait), wait)
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(wait))
+                if let results = self?.browser?.browseResults { self?.found(results) }
+            }
+        }
         update()
         if let results = browser?.browseResults { found(results) }
     }
 
-    private func update() { peerCount = peers.values.filter(\.proven).count }
+    private func update() { peerCount = Set(peers.values.compactMap(\.session.peer)).count }
 }

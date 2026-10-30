@@ -5,6 +5,8 @@ import SwiftUI
 /// configuration for the home network the owner names, run by the LocalPush extension.
 @MainActor final class HomeWiFiSetup: ObservableObject {
     @Published private(set) var network: String?
+    /// Whether iOS has the listener running now, which it does only on that Wi-Fi.
+    @Published private(set) var running = false
     @Published private(set) var problem: String?
 
     /// The listener can read the group only from a keychain shared with it, which needs a signed
@@ -14,6 +16,7 @@ import SwiftUI
     func load() async {
         let manager = (try? await NEAppPushManager.loadAllFromPreferences())?.first
         network = manager?.isEnabled == true ? manager?.matchSSIDs.first : nil
+        running = network != nil && manager?.isActive == true
     }
 
     func listen(on ssid: String) async {
@@ -27,6 +30,7 @@ import SwiftUI
         do {
             try await manager.saveToPreferences()
             network = name
+            running = false
             problem = nil
         } catch {
             problem = "Could not set it up: \(error.localizedDescription). This needs a signed copy of Help&I."
@@ -38,6 +42,7 @@ import SwiftUI
         do {
             try await manager.removeFromPreferences()
             network = nil
+            running = false
         } catch {
             problem = "Could not stop it: \(error.localizedDescription)."
         }
@@ -59,7 +64,8 @@ struct HomeWiFiSection: View {
             if !setup.canListenLocked {
                 Text("Only while Help&I is open. Listening with this phone locked needs a signed copy of Help&I, which this is not.")
             } else if let network = setup.network {
-                Text("Listening on \(network), even with this phone locked.")
+                Text(setup.running ? "Listening on \(network), even with this phone locked."
+                     : "Set to listen on \(network) with this phone locked. It starts when this phone is on that Wi-Fi.")
                 Button("Stop listening when locked") { Task { await setup.stop() } }
             } else {
                 LabeledField(label: "Your home Wi-Fi's name, to keep listening when locked", text: $ssid)
