@@ -277,7 +277,10 @@ final class ScreensTests: XCTestCase {
             // Found again by its label: the audit's element can keep the frame it had then.
             let now = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", e.label)).firstMatch
             let frame = now.exists ? now.frame : .zero
-            if screen.contains(frame), !frame.isEmpty, let ratio = Self.contrast(in: frame, of: shot, screen: screen), ratio >= 4.5 {
+            if now.exists, !now.isHittable {
+                // Scrolled out of a sheet's visible part: what was measured is the dimmed screen behind.
+                print("ADVICE out of sight in a sheet: " + detail)
+            } else if screen.contains(frame), !frame.isEmpty, let ratio = Self.contrast(in: frame, of: shot, screen: screen), ratio >= 4.5 {
                 print("ADVICE read while moving; \(String(format: "%.1f", ratio)) to 1 when still: " + detail)
             } else {
                 problems.append(detail)

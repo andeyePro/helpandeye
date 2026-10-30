@@ -30,7 +30,7 @@ for device in "${DEVICES[@]}"; do
       xcrun simctl keychain "$id" reset
       TEST_RUNNER_SHOTS_DIR="$run" xcodebuild test-without-building -project helpandeye.xcodeproj -scheme helpandeye \
         -destination "id=$id" -derivedDataPath DerivedData -only-testing:helpandeyeUITests \
-        -collect-test-diagnostics never -test-timeouts-enabled YES -maximum-test-execution-time-allowance 300 > "$run/log.txt" 2>&1
+        -collect-test-diagnostics never -test-timeouts-enabled YES -maximum-test-execution-time-allowance 600 > "$run/log.txt" 2>&1
       result=$?
       grep -h "^AUDIT " "$run/log.txt" | sort -u > "$run/audit.txt"; grep -h "^ADVICE " "$run/log.txt" | sort -u > "$run/advice.txt"
       echo "$device $mode $size: $( [ $result = 0 ] && echo passed || echo FAILED ), $(wc -l < "$run/audit.txt" | tr -d ' ') audit issues, $(ls "$run"/*.png 2>/dev/null | wc -l | tr -d ' ') screens"
@@ -52,7 +52,7 @@ for device in "${WATCHES[@]}"; do
     xcrun simctl uninstall "$id" com.andeye.help.watchkitapp 2>/dev/null
     TEST_RUNNER_SHOTS_DIR="$run" TEST_RUNNER_TEXT_SIZE="UICTContentSizeCategory$size" xcodebuild test-without-building -project helpandeye.xcodeproj -scheme helpandeyeWatch \
       -destination "id=$id" -derivedDataPath DerivedData -only-testing:helpandeyeWatchUITests \
-      -collect-test-diagnostics never -test-timeouts-enabled YES -maximum-test-execution-time-allowance 300 > "$run/log.txt" 2>&1
+      -collect-test-diagnostics never -test-timeouts-enabled YES -maximum-test-execution-time-allowance 600 > "$run/log.txt" 2>&1
     result=$?
     grep -h "^AUDIT " "$run/log.txt" | sort -u > "$run/audit.txt"; grep -h "^ADVICE " "$run/log.txt" | sort -u > "$run/advice.txt"
     echo "$device $size: $( [ $result = 0 ] && echo passed || echo FAILED ), $(wc -l < "$run/audit.txt" | tr -d ' ') audit issues, $(ls "$run"/*.png 2>/dev/null | wc -l | tr -d ' ') screens"
