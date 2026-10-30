@@ -97,8 +97,9 @@ Agreed with Martin, 2026-10-28 ([decision 6](design-decisions.md#d6)).
 - I'm OK pressed while Help or Need a hand is open does one of two things, set per profile:
   it closes the call (A), or it stops the urgent repeats while the call stays open until a
   responder has checked (B). New groups start on B. The words the caller hears are editable.
-- A coordinator's reason is personal, so it goes over the internet only; the mesh carries the
-  close without it.
+- A coordinator's reason is for responders only, so it goes sealed for them, over the internet
+  or home Wi-Fi only ([decision 12](design-decisions.md#d12)); the mesh carries the close without
+  it.
 
 ## Routes
 

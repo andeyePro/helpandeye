@@ -42,7 +42,7 @@ The first 16 kinds used the low nibble up, so later kinds have whole header byte
 
 | Kind | Name | Fields after the first byte | Group channel |
 |---|---|---|---|
-| 0 | for responders | unit u32, request u16, part u8, then a 5-byte salt, the sealed inner frame and its 16-byte tag | yes |
+| 0 | for responders | unit u32, request u16, part u8 (255 for a close with its reason), then a 5-byte salt, the sealed inner frame and its 16-byte tag | yes; a close with its reason, the internet and home Wi-Fi only |
 | 1 | call | unit u32, request u16, colour u8, pressed-at u32 | yes |
 | 2 | follow-up | unit u32, request u16, part u8, category u8 | only a missed check-in or a withdrawal of one; any other category goes inside 0 |
 | 3 | acknowledgement | unit u32, request u16, responder u16, at u32, Ed25519 signature (64) | yes |
@@ -59,7 +59,7 @@ The first 16 kinds used the low nibble up, so later kinds have whole header byte
 | 14 | role change | member u16, role u8, number block u16, version u32 | inside 10, from a coordinator |
 | 15 | member phone | member u16, at u32, length u8, number | no; inside 10, from that member or a coordinator |
 | 0x21 | group settings | signer u16, version u32, length u16, compressed settings (up to 2,048), Ed25519 signature (64) | only when small enough; otherwise the internet and home Wi-Fi |
-| 0x22 | call state | unit u32, request u16, state u8, at u32, length u8, reason (up to 56) | inside 10; with a reason, the internet and home Wi-Fi only, and the radio gets it without |
+| 0x22 | call state | unit u32, request u16, state u8, at u32, length u8, reason (up to 56) | inside 10, without a reason; a coordinator's reason goes inside 0 (signed by the coordinator, sealed for responders) over the internet and home Wi-Fi only, and the radio gets the close without it |
 | 0x23 | change request | member u16, setting u8, at u32, length u8, text (up to 60) | no; inside 10, from that member |
 | 0x24 | changeover ends | generation u32, at u32: when the keys before that generation stop | inside 10, from the first coordinator |
 
@@ -75,10 +75,13 @@ Personal content never goes on the shared group channel (decision 12). What a ca
 chooses (a category such as Fallen) and where they are is signed by the caller and sealed once for
 all responders (kind 0, `ForResponders`) with a key made from the caller's key and the responders'
 public key. That one sealed frame goes on the group channel, the relay and home Wi-Fi alike; only
-the group's responders can open it. Groups made before responders had their own key send these
-plainly over the internet (sealed with the group key) and as MeshCore direct messages to each
-responder's box instead. Member names, phone numbers, settings too big for the radio, reasons for
-closing and change requests go over the internet and home Wi-Fi only. Check-ins go signed over
+the group's responders can open it. A coordinator's reason for closing a call is sealed the same
+way, signed by the coordinator, so responders read it and other members, the caller included, do
+not; it goes over the internet and home Wi-Fi only, and the radio carries the close without it.
+Groups made before responders had their own key send these plainly over the internet (sealed with
+the group key) and as MeshCore direct messages to each responder's box instead, and the reason
+inside the signed close as before. Member names, phone numbers, settings too big for the radio and
+change requests go over the internet and home Wi-Fi only. Check-ins go signed over
 the internet and as direct messages (`HI1:` and the frame in base64), which MeshCore encrypts to
 that box's own key. A direct message counts only if it came from the box of the member whose unit
 it names; box keys are signed by their member.

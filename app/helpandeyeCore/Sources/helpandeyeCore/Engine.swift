@@ -158,7 +158,9 @@ public struct Activity: Codable, Sendable {
 
 public struct CloseRepeat: Codable, Equatable, Sendable {
     public let call: IncomingRequest.Key
-    /// The close with any reason, for the internet and home Wi-Fi, and without it, for the radio.
+    /// Off the air: a coordinator's reason, sealed for responders, or the close with its reason in
+    /// a group made before responders had their own key; otherwise the close itself. On the air:
+    /// the close without a reason.
     public let full: HelpFrame
     public let onAir: HelpFrame
     public let at: Date
@@ -628,7 +630,8 @@ public final class HelpEngine: ObservableObject {
         settleCall(r.unit, r.number, Settled(state: .closedByCaller, by: n, at: now()))
     }
 
-    /// A reason for closing goes over the internet or home Wi-Fi only, never the radio, so needs one.
+    /// A reason for closing goes sealed for responders over the internet or home Wi-Fi only, never
+    /// the radio, so needs one of them.
     public var canSendReason: Bool { canSendOffAir }
 
     /// A coordinator closes someone's call, recording the caller's consent or a reason.
@@ -649,16 +652,22 @@ public final class HelpEngine: ObservableObject {
                         as: n, identity: identity, group: groupID)
     }
 
-    /// Settles a call here and tells everyone, signed. A reason goes over the internet and home
-    /// Wi-Fi only; the radio carries the close without it.
+    /// Settles a call here and tells everyone, signed. A reason is for responders only: it goes
+    /// sealed for them, over the internet and home Wi-Fi only, and the radio carries the close
+    /// without it. In a group made before responders had their own key it goes as before, inside
+    /// the signed close, sealed with the group key every member holds.
     private func settleCall(_ unit: UInt32, _ request: UInt16, _ s: Settled) {
         let key = IncomingRequest.Key(unit: unit, request: request)
         settleCall(key, s, via: nil)
-        guard let n = saved?.me else { return }
+        guard let n = saved?.me, let g = group else { return }
         let at = UInt32(s.at.timeIntervalSince1970)
-        let full = HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: s.reason), as: n, identity: identity, group: groupID)
-        let onAir = s.reason.isEmpty ? full
-            : HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: ""), as: n, identity: identity, group: groupID)
+        let onAir = HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: ""), as: n, identity: identity, group: groupID)
+        var full = onAir
+        if !s.reason.isEmpty {
+            let withReason = HelpFrame.callState(unit: unit, request: request, state: s.state, at: at, reason: s.reason)
+            full = ForResponders.seal(withReason, from: identity, as: n, in: g, at: now()).first
+                ?? HelpFrame.signing(withReason, as: n, identity: identity, group: groupID)
+        }
         if s.state.closes {
             activity.closeRepeats.removeAll { $0.call == key }
             activity.closeRepeats.append(CloseRepeat(call: key, full: full, onAir: onAir, at: now()))
@@ -670,6 +679,8 @@ public final class HelpEngine: ObservableObject {
         let gid = groupID
         spawn {
             _ = await self.sendOffAir(full, in: gid)
+            // Only responders can open the sealed reason: the close itself goes to every member too.
+            if case .forResponders = full { _ = await self.sendOffAir(onAir, in: gid) }
             _ = await self.sendOnMesh(onAir, kind: .optional, in: gid)
         }
     }
@@ -692,7 +703,7 @@ public final class HelpEngine: ObservableObject {
         case .callerOK: log("\(who) said they are OK after \(call)")
         case .closedByCaller: log("\(who) closed \(call)")
         case .closedWithConsent: log("\(who) closed \(call), with the caller's agreement")
-        case .closedWithReason: log("\(who) closed \(call)" + (a.reason.isEmpty ? ", with a reason not sent on the radio" : ": \(a.reason)"))
+        case .closedWithReason: log("\(who) closed \(call)" + (a.reason.isEmpty ? ", with a reason sealed for responders" : ": \(a.reason)"))
         }
     }
 
@@ -1161,7 +1172,8 @@ public final class HelpEngine: ObservableObject {
             followProfileCheckIns()
             return
         case .forResponders:
-            // Only a responder can open it; what is inside is handled as if it came plainly.
+            // Only a responder can open it; what is inside is handled as if it came plainly (a
+            // close with its reason still signed, so the rules for who may close apply).
             guard me?.canRespond == true, let g = group, let inner = ForResponders.open(frame, in: g, at: now()) else { return }
             receive(inner, via: route, opened: true)
             return

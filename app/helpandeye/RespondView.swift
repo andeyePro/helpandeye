@@ -105,7 +105,7 @@ struct CloseCallView: View {
     var body: some View {
         Form {
             Section(header: Header("Close \(engine.name(ofUnit: key.unit))'s call")) {
-                Text("Only close a call you know is dealt with. Everyone in the group sees who closed it and why.")
+                Text("Only close a call you know is dealt with. Everyone in the group sees who closed it; responders also see why.")
                 Button("They agreed to close it") { close(consent: true) }.buttonStyle(.action)
             }
             Section(header: Header("Or write why")) {
@@ -114,7 +114,7 @@ struct CloseCallView: View {
                     Button("Close with this reason") { close(consent: false) }
                         .buttonStyle(.action)
                         .disabled(reason.trimmingCharacters(in: .whitespaces).isEmpty)
-                    Text("The reason goes over the internet only, never the local radio.")
+                    Text("The reason goes sealed for responders only, over the internet or home Wi-Fi, never the local radio.")
                 } else {
                     Text("A reason can only be sent over the internet, which this group has not set up, so close it only with the caller's agreement.")
                 }

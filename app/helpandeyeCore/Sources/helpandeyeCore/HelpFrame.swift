@@ -94,8 +94,8 @@ public enum HelpFrame: Equatable, Sendable {
     /// A member's mobile number, for the ready-written text; empty clears it. `at` orders changes.
     case memberPhone(member: UInt16, phone: String, at: UInt32)
     /// A person settled a call (decision 6). Counts only inside a frame signed by the caller (for
-    /// their own call) or a coordinator. A coordinator's reason is personal, so a frame with one
-    /// goes over the internet only.
+    /// their own call) or a coordinator. A coordinator's reason is for responders only, so a frame
+    /// with one goes sealed for them (`forResponders`), over the internet and home Wi-Fi only.
     case callState(unit: UInt32, request: UInt16, state: CallState, at: UInt32, reason: String)
     /// A person asks the coordinators to change one of their settings (app spec, Profiles), from
     /// their settings page only. Counts only inside a frame signed by that person. What they write
@@ -158,6 +158,13 @@ public enum HelpFrame: Equatable, Sendable {
         case let .followUp(unit, request, part, category) where category != .missedCheckIn: (unit, request, part)
         default: nil
         }
+    }
+
+    /// What goes sealed for responders (ForResponders): a caller's personal content, or a
+    /// coordinator's close with its reason, as part 255, so it never meets a caller's parts.
+    public var forRespondersPart: (UInt32, UInt16, UInt8)? {
+        if case let .callState(unit, request, _, _, reason) = self { return reason.isEmpty ? nil : (unit, request, 255) }
+        return personalPart
     }
 
     /// Makes a note, cutting the text at a character boundary to fit.

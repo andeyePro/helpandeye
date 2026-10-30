@@ -35,7 +35,8 @@ public struct Settled: Equatable, Sendable, Codable {
     public let state: CallState
     public let by: UInt16
     public let at: Date
-    /// A coordinator's reason for closing, heard over the internet; empty otherwise.
+    /// A coordinator's reason for closing, opened from its sealed frame on a responder's phone;
+    /// empty otherwise.
     public let reason: String
 
     public init(state: CallState, by: UInt16, at: Date, reason: String = "") {

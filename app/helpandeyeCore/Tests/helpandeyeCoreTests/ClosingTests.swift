@@ -156,6 +156,78 @@ import XCTest
                        "the reason never goes on the radio")
     }
 
+    /// Decision 12 (Martin, 2026-10-30): a coordinator's reason is read by responders, not by every
+    /// member. It goes sealed for responders; the close itself goes plainly to everyone.
+    func testACoordinatorsReasonIsReadByRespondersOnly() async {
+        for p in t.air.phones { p.relay.isConfigured = true }
+        await t.relaySetUp()
+        caller.engine.press(.red)
+        await t.air.run()
+        let key = t.key
+        let before = coordinator.relay.sent.count
+        XCTAssertTrue(coordinator.engine.close(key, consent: false, reason: "Spoke to them, all well"))
+        await t.air.run()
+        let coord = coordinator.engine.saved!.me
+        XCTAssertEqual(caller.request?.status, .closed(by: coord), "the caller still hears the close")
+        XCTAssertEqual(caller.request?.settled?.reason, "", "but not the reason")
+        XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.settled?.reason, "Spoke to them, all well")
+        let sent = coordinator.relay.sent.dropFirst(before).map(\.0)
+        let sealed = sent.filter { if case .forResponders = $0 { true } else { false } }
+        XCTAssertEqual(sealed.count, 1, "one sealed frame for all responders")
+        XCTAssertFalse(sent.contains { if case let .signed(_, inner, _) = $0, case let .callState(_, _, _, _, r)? = HelpFrame(inner) { return !r.isEmpty }; return false },
+                       "the reason never goes where every member could read it")
+        XCTAssertNil(ForResponders.open(sealed[0], in: caller.engine.group!, at: t.clock.now), "a caller's phone cannot open it")
+        XCTAssertNotNil(ForResponders.open(sealed[0], in: responder.engine.group!, at: t.clock.now), "a responder's can")
+        // A caller sealing a close as if a coordinator closes nothing.
+        let forged = ForResponders.seal(.callState(unit: key.unit, request: key.request, state: .closedWithReason, at: UInt32(t.clock.now.timeIntervalSince1970), reason: "x"),
+                                        from: caller.identity, as: caller.engine.saved!.me, in: caller.engine.group!, at: t.clock.now)
+        XCTAssertEqual(forged.count, 1)
+        XCTAssertNil(ForResponders.open(forged[0], in: responder.engine.group!, at: t.clock.now))
+    }
+
+    /// The sealed reason can arrive before the plain close, or after: the responder keeps it either way.
+    func testTheReasonIsKeptWhicheverOrderTheCloseArrivesIn() async {
+        for p in t.air.phones { p.relay.isConfigured = true }
+        await t.relaySetUp()
+        caller.engine.press(.red)
+        await t.air.run()
+        let key = t.key
+        t.air.keep = { _, _, to in to !== self.responder }
+        XCTAssertTrue(coordinator.engine.close(key, consent: false, reason: "All well"))
+        await t.air.run()
+        let sent = coordinator.relay.sent.map(\.0)
+        let sealed = sent.last { if case .forResponders = $0 { true } else { false } }!
+        let plain = sent.last { if case let .signed(_, inner, _) = $0, case .callState? = HelpFrame(inner) { true } else { false } }!
+        responder.engine.receive(plain, via: .internet)
+        responder.engine.receive(sealed, via: .internet)
+        XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.settled?.reason, "All well")
+        responder.engine.receive(plain, via: .internet)
+        XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.settled?.reason, "All well", "a repeat of the close does not wipe it")
+        XCTAssertFalse(responder.engine.activity.inbox.requests[key]!.isOpen)
+    }
+
+    /// A group made before responders had their own key cannot seal for them: the reason goes
+    /// inside the signed close, sealed with the group key, as it always did.
+    func testAnOlderGroupSendsTheReasonAsBefore() async {
+        for p in t.air.phones {
+            p.relay.isConfigured = true
+            var g = p.engine.group!
+            g.secrets.responderPublicKey = nil
+            g.secrets.responderPrivateKey = nil
+            p.engine.joined(g, as: p.engine.saved!.me)
+        }
+        await t.relaySetUp()
+        caller.engine.press(.red)
+        await t.air.run()
+        let key = t.key
+        XCTAssertTrue(coordinator.engine.close(key, consent: false, reason: "All well"))
+        await t.air.run()
+        XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.settled?.reason, "All well")
+        XCTAssertFalse(responder.engine.activity.inbox.requests[key]!.isOpen)
+        XCTAssertEqual(caller.request?.status, .closed(by: coordinator.engine.saved!.me))
+        XCTAssertFalse(coordinator.relay.sent.contains { if case .forResponders = $0.0 { true } else { false } })
+    }
+
     func testOnlyTheCallerOrACoordinatorCanSettleACall() async {
         caller.engine.press(.red)
         await t.air.run()
@@ -219,7 +291,9 @@ import XCTest
         let f = HelpFrame.callState(unit: 70001, request: 3, state: .closedWithReason, at: 1_793_000_000, reason: "Spoke to them")
         XCTAssertEqual(HelpFrame(f.encoded()), f)
         XCTAssertFalse(f.mayGoOnGroupChannel)
+        XCTAssertEqual(f.forRespondersPart.map { [$0.0, UInt32($0.1), UInt32($0.2)] }, [70001, 3, 255])
         XCTAssertTrue(HelpFrame.callState(unit: 70001, request: 3, state: .callerOK, at: 0, reason: "").mayGoOnGroupChannel)
+        XCTAssertNil(HelpFrame.callState(unit: 70001, request: 3, state: .callerOK, at: 0, reason: "").forRespondersPart)
         XCTAssertLessThanOrEqual(HelpFrame.signing(f, as: 1, identity: DeviceIdentity(), group: Data(count: 16)).encoded().count, HelpFrame.maxPayload)
     }
 }
