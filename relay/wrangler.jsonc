@@ -10,5 +10,12 @@
       { "name": "METER", "class_name": "Meter" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Group", "Meter"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Group", "Meter"] }],
+  // Requests a minute: per address (phones on one care home's Wi-Fi share one), per group (256
+  // phones polling every 30 seconds while a call is open make 512), and new groups per address.
+  "ratelimits": [
+    { "name": "IP_LIMIT", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } },
+    { "name": "GROUP_LIMIT", "namespace_id": "1002", "simple": { "limit": 600, "period": 60 } },
+    { "name": "REGISTER_LIMIT", "namespace_id": "1003", "simple": { "limit": 3, "period": 60 } }
+  ]
 }

@@ -2,21 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { GroupRelay, RelayError } from "../src/relay.js";
+import { MapStorage } from "./storage.js";
 
 // The fuzz test of the app (app/helpandeyeCore, EngineFuzzTests) uses a Swift copy of the relay's
 // membership rules. These are the member-list publishes from some of its runs, with what that copy
 // said; the real relay must say the same and end with the same list.
 // Regenerate: HELPA_RELAY_LOG=<file> HELPA_FUZZ_SEEDS=4 swift test --filter EngineFuzzTests
-
-class MapStorage {
-  constructor() { this.m = new Map(); }
-  async get(k) { return structuredClone(this.m.get(k)); }
-  async put(k, v) { this.m.set(k, structuredClone(v)); }
-  async delete(keys) { for (const k of [].concat(keys)) this.m.delete(k); }
-  async list({ prefix = "" } = {}) {
-    return new Map([...this.m.keys()].filter((k) => k.startsWith(prefix)).sort().map((k) => [k, this.m.get(k)]));
-  }
-}
 
 const runs = readFileSync(new URL("./model-vectors.jsonl", import.meta.url), "utf8").trim().split("\n").map((l) => JSON.parse(l));
 

@@ -11,6 +11,11 @@ export const MAX_KEPT = 2000;
 // Most sealed frames are under 300 characters; the largest, a group's settings with several
 // profiles, is under 3,000. Anything far bigger is not from the app.
 export const MAX_BODY = 4096;
+// Request bodies, checked before they are read. The largest member list the app can send (256
+// members and 1,024 removed keys, every "/" escaped as Swift's JSONEncoder does) is under 122 KB;
+// every other body is under 9 KB.
+export const MAX_MEMBERS_REQUEST = 128 * 1024;
+export const MAX_REQUEST = 16 * 1024;
 // Cloudflare's free plan allows 100,000 Worker requests and 100,000 Durable Object requests a
 // day. Each relay request uses two Durable Object requests (its group and the meter), so the
 // Durable Object allowance runs out first, at 50,000 relay requests. Coordinators are warned well
@@ -22,6 +27,8 @@ export const MAX_POSTS_PER_MINUTE = 20;
 export const MAX_WAKES_PER_MINUTE = 2;
 export const MAX_MEMBERS = 256;
 export const MAX_REMOVED = 1024;
+// Durable Object storage takes at most 128 keys in one delete or put.
+const STORAGE_BATCH = 128;
 
 /// An Ed25519 public key: 32 bytes of base64.
 export function isKey(k) {
@@ -72,6 +79,19 @@ export async function signingInput(method, pathAndQuery, timestamp, body) {
   return enc.encode(`HELPA-RELAY-1\n${method}\n${pathAndQuery}\n${timestamp}\n${hash}`);
 }
 
+/// Checks the clock and signature, which need nothing stored, so the Worker can turn away a bad
+/// request before it reaches a group. Returns the signer's key.
+export async function authenticate({ method, path, key, timestamp, signature, body }, now = Date.now()) {
+  const ts = Number(timestamp);
+  if (!Number.isFinite(ts) || Math.abs(now - ts) > MAX_SKEW_MS) throw new RelayError(401, "stale or missing timestamp");
+  if (!(await verify(key, signature, await signingInput(method, path, timestamp, body)))) throw new RelayError(401, "bad signature");
+  return key;
+}
+
+async function deleteAll(storage, keys) {
+  for (let i = 0; i < keys.length; i += STORAGE_BATCH) await storage.delete(keys.slice(i, i + STORAGE_BATCH));
+}
+
 export async function verify(publicKeyB64, signatureB64, input) {
   try {
     const key = await crypto.subtle.importKey("raw", unb64(publicKeyB64), { name: "Ed25519" }, false, ["verify"]);
@@ -87,13 +107,6 @@ export class GroupRelay {
   constructor(storage, now = () => Date.now()) {
     this.storage = storage;
     this.now = now;
-  }
-
-  async authenticate({ method, path, key, timestamp, signature, body }) {
-    const ts = Number(timestamp);
-    if (!Number.isFinite(ts) || Math.abs(this.now() - ts) > MAX_SKEW_MS) throw new RelayError(401, "stale or missing timestamp");
-    if (!(await verify(key, signature, await signingInput(method, path, timestamp, body)))) throw new RelayError(401, "bad signature");
-    return key;
   }
 
   async members() {
@@ -160,21 +173,28 @@ export class GroupRelay {
     for (const k of removed) { roles.delete(k); addedBy.delete(k); dropped.delete(k); }
     if (roles.size > MAX_MEMBERS || removed.size > MAX_REMOVED || dropped.size > MAX_REMOVED) throw new RelayError(413, "too many members");
     const members = [...roles].map(([key, role]) => ({ key, role }));
-    await this.storage.put("owner", owner);
-    await this.storage.put("removed", [...removed]);
-    await this.storage.put("dropped", [...dropped]);
-    await this.storage.put("addedBy", [...addedBy].filter(([k]) => roles.has(k)));
-    if (ownerFresh) await this.storage.put("ownerGeneration", list.generation);
-    await this.storage.put("members", { generation: Math.max(current?.generation ?? 0, list.generation), members });
-    // Push tokens of anyone no longer listed are deleted, not just ignored.
-    const tokenKeys = [...(await this.storage.list({ prefix: "p:" })).keys(), ...(await this.storage.list({ prefix: "w:" })).keys()];
-    const gone = tokenKeys.filter((k) => !roles.has(k.slice(2)));
-    if (gone.length) await this.storage.delete(gone);
+    // One put, so the list and its bookkeeping change together or not at all.
+    await this.storage.put({
+      owner,
+      removed: [...removed],
+      dropped: [...dropped],
+      addedBy: [...addedBy].filter(([k]) => roles.has(k)),
+      members: { generation: Math.max(current?.generation ?? 0, list.generation), members },
+      ...(ownerFresh ? { ownerGeneration: list.generation } : {}),
+    });
+    // Push tokens and rate records of anyone no longer listed are deleted, not just ignored.
+    const perMember = [];
+    for (const prefix of ["p:", "w:", "r:"]) perMember.push(...(await this.storage.list({ prefix })).keys());
+    await deleteAll(this.storage, perMember.filter((k) => !roles.has(k.slice(2))));
+  }
+
+  async isMember(key) {
+    const current = await this.members();
+    return Boolean(current && current.members.some((m) => m.key === key));
   }
 
   async requireMember(key) {
-    const current = await this.members();
-    if (!current || !current.members.some((m) => m.key === key)) throw new RelayError(403, "not a member of this group");
+    if (!(await this.isMember(key))) throw new RelayError(403, "not a member of this group");
   }
 
   /// A member's phone, or their watch acting for it, tells the relay where to push to wake it.
@@ -190,17 +210,40 @@ export class GroupRelay {
   /// Forgets push tokens APNs says are dead, so they are not tried on every call.
   async dropPushTokens(dead) {
     const all = [...(await this.storage.list({ prefix: "p:" })).entries(), ...(await this.storage.list({ prefix: "w:" })).entries()];
-    const keys = all.filter(([, t]) => dead.includes(t.token)).map(([k]) => k);
-    if (keys.length) await this.storage.delete(keys);
+    await deleteAll(this.storage, all.filter(([, t]) => dead.includes(t.token)).map(([k]) => k));
   }
 
-  /// Push tokens of every current member except the sender, phones and watches.
+  /// Push tokens of every current member except the sender, phones before watches.
   async pushTargets(sender) {
     const current = await this.members();
     if (!current) return [];
     const members = new Set(current.members.map((m) => m.key));
     const tokens = [...(await this.storage.list({ prefix: "p:" })).entries(), ...(await this.storage.list({ prefix: "w:" })).entries()];
     return tokens.filter(([k]) => k.slice(2) !== sender && members.has(k.slice(2))).map(([, t]) => t);
+  }
+
+  /// Keeps the pushes of a call that did not fit in one request, for the group's alarm to send.
+  async queuePushes(seq, job) {
+    await this.storage.put("q:" + String(seq).padStart(12, "0"), job);
+  }
+
+  /// Takes up to `n` queued pushes, oldest call first, to tokens their members still have.
+  async takePushes(n) {
+    const batches = [];
+    for (const [k, job] of await this.storage.list({ prefix: "q:" })) {
+      if (n <= 0) break;
+      const current = new Map((await this.pushTargets(job.sender)).map((t) => [t.token, t]));
+      const now = job.tokens.slice(0, n), rest = job.tokens.slice(n);
+      n -= now.length;
+      batches.push({ kind: job.kind, sealed: job.sealed, targets: now.map((t) => current.get(t)).filter(Boolean) });
+      if (rest.length) await this.storage.put(k, { ...job, tokens: rest });
+      else await this.storage.delete(k);
+    }
+    return batches;
+  }
+
+  async pushesQueued() {
+    return (await this.storage.list({ prefix: "q:", limit: 1 })).size > 0;
   }
 
   /// Each message is its own storage key, so no single value grows with the log.
@@ -263,6 +306,20 @@ export class GroupRelay {
     const old = await this.storage.list({ prefix: "m:", limit: 50 });
     const doomed = [...old.entries()].filter(([, m]) => m.at < cutoff || m.seq <= latest - MAX_KEPT).map(([k]) => k);
     if (doomed.length) await this.storage.delete(doomed);
+  }
+
+  /// Deletes every expired message, without waiting for a post, and returns when the oldest one
+  /// left expires, or null when none are left.
+  async sweep() {
+    const cutoff = this.now() - KEEP_MS;
+    for (;;) {
+      const page = [...(await this.storage.list({ prefix: "m:", limit: STORAGE_BATCH })).entries()];
+      const doomed = page.filter(([, m]) => m.at < cutoff).map(([k]) => k);
+      if (doomed.length) await this.storage.delete(doomed);
+      const left = page.find(([, m]) => m.at >= cutoff);
+      if (left) return left[1].at + KEEP_MS;
+      if (page.length < STORAGE_BATCH) return null;
+    }
   }
 }
 

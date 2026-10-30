@@ -1,18 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS } from "../src/relay.js";
-
-// Behaves like Durable Object storage for the calls the relay makes.
-class MapStorage {
-  constructor() { this.m = new Map(); }
-  async get(k) { return structuredClone(this.m.get(k)); }
-  async put(k, v) { this.m.set(k, structuredClone(v)); }
-  async delete(keys) { for (const k of [].concat(keys)) this.m.delete(k); }
-  async list({ prefix = "", start = "", limit = Infinity } = {}) {
-    const keys = [...this.m.keys()].filter((k) => k.startsWith(prefix) && k >= start).sort().slice(0, limit);
-    return new Map(keys.map((k) => [k, structuredClone(this.m.get(k))]));
-  }
-}
+import { authenticate, b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS } from "../src/relay.js";
+import { MapStorage } from "./storage.js";
 
 async function phone() {
   const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
@@ -30,16 +19,14 @@ const b64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456
 const rejects = (p, status) => assert.rejects(p, (e) => e instanceof RelayError && e.status === status);
 
 test("a signed request authenticates; tampering, replay and stale clocks do not", async () => {
-  let now = 1_793_000_000_000;
-  const relay = new GroupRelay(new MapStorage(), () => now);
+  const now = 1_793_000_000_000;
   const a = await phone();
   const req = await a.sign("POST", "/g/abc/messages", '{"sealed":"AA=="}', now);
-  assert.equal(await relay.authenticate(req), a.key);
-  await rejects(relay.authenticate({ ...req, body: '{"sealed":"AB=="}' }), 401);
-  await rejects(relay.authenticate({ ...req, path: "/g/other/messages" }), 401);
-  await rejects(relay.authenticate({ ...req, key: (await phone()).key }), 401);
-  now += MAX_SKEW_MS + 1;
-  await rejects(relay.authenticate(req), 401);
+  assert.equal(await authenticate(req, now), a.key);
+  await rejects(authenticate({ ...req, body: '{"sealed":"AB=="}' }, now), 401);
+  await rejects(authenticate({ ...req, path: "/g/other/messages" }, now), 401);
+  await rejects(authenticate({ ...req, key: (await phone()).key }, now), 401);
+  await rejects(authenticate(req, now + MAX_SKEW_MS + 1), 401);
 });
 
 test("only members can post and read, and a removed phone is refused at once", async () => {
@@ -289,4 +276,51 @@ test("the log has a name that changes only if the relay's storage is reset", asy
   const reset = new GroupRelay(new MapStorage());
   await reset.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }], primary: coord.key });
   assert.notEqual((await reset.since(coord.key, 0)).epoch, a);
+});
+
+test("expired messages are deleted without anyone posting, and the next expiry is known", async () => {
+  let now = 0;
+  const storage = new MapStorage();
+  const relay = new GroupRelay(storage, () => now);
+  const coord = await phone();
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }], primary: coord.key });
+  for (let i = 0; i < 300; i++) await relay.post(coord.key, "AA==");
+  now = 1000;
+  await relay.post(coord.key, "AQ==");
+  now = KEEP_MS + 1;
+  assert.equal(await relay.sweep(), 1000 + KEEP_MS, "when the one left expires");
+  assert.deepEqual([...storage.m.keys()].filter((k) => k.startsWith("m:")), [GroupRelay.key(301)]);
+  now = KEEP_MS + 1001;
+  assert.equal(await relay.sweep(), null);
+  assert.equal([...storage.m.keys()].some((k) => k.startsWith("m:")), false);
+});
+
+test("a removed member's rate record goes with them", async () => {
+  const storage = new MapStorage();
+  const relay = new GroupRelay(storage);
+  const coord = await phone(), member = await phone();
+  await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }], primary: coord.key });
+  await relay.limit(member.key, false);
+  await relay.limit(coord.key, false);
+  await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }], removed: [member.key] });
+  assert.equal(storage.m.has("r:" + member.key), false);
+  assert.equal(storage.m.has("r:" + coord.key), true);
+});
+
+test("a member list is stored in one write, and removing many members deletes in batches", async () => {
+  const storage = new MapStorage();
+  const relay = new GroupRelay(storage);
+  const coord = await phone();
+  const others = await Promise.all(Array.from({ length: 150 }, phone));
+  const list = (g, members, removed = []) => ({ generation: g, members: [{ key: coord.key, role: "coordinator" }, ...members.map((p) => ({ key: p.key, role: "member" }))], removed: removed.map((p) => p.key), primary: coord.key });
+  await relay.setMembers(coord.key, list(1, others));
+  for (const p of others) {
+    await relay.setPushToken(p.key, { token: "b".repeat(64) });
+    await relay.setPushToken(p.key, { token: "c".repeat(64), device: "watch" });
+    await relay.limit(p.key, false);
+  }
+  const puts = storage.puts;
+  await relay.setMembers(coord.key, list(2, [], others));
+  assert.equal(storage.puts - puts, 1, "one put");
+  assert.equal([...storage.m.keys()].filter((k) => /^[pwr]:/.test(k)).length, 0, "450 keys deleted, at most 128 at a time");
 });

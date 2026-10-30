@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { configured, payload, providerToken, push } from "../src/apns.js";
+import { configured, payload, providerToken, push, TOKEN_LIFE_S } from "../src/apns.js";
 
 async function env() {
   const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
@@ -29,6 +29,23 @@ test("the provider token is an ES256 JWT that verifies with the key", async () =
   assert.deepEqual(dec(c), { iss: "TEAM123456", iat: 1_793_000_000 });
   const ok = await crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, pair.publicKey, Buffer.from(s, "base64url"), new TextEncoder().encode(`${h}.${c}`));
   assert.equal(ok, true);
+});
+
+test("the provider token is signed once and kept for 40 minutes, not made for every push", async () => {
+  const { env: e } = await env();
+  const t = 1_793_100_000;
+  const first = await providerToken(e, t);
+  assert.equal(await providerToken(e, t + TOKEN_LIFE_S - 1), first);
+  const next = await providerToken(e, t + TOKEN_LIFE_S);
+  assert.notEqual(next, first);
+  assert.equal(JSON.parse(Buffer.from(next.split(".")[1], "base64url")).iat, t + TOKEN_LIFE_S);
+  const seen = [];
+  const fetchImpl = async (url, init) => { seen.push(init.headers.authorization); return { status: 200 }; };
+  await push(e, token, "call", { fetchImpl, now: (t + TOKEN_LIFE_S + 60) * 1000 });
+  await push(e, token, "call", { fetchImpl, now: (t + TOKEN_LIFE_S + 120) * 1000 });
+  assert.deepEqual(seen, [`bearer ${next}`, `bearer ${next}`]);
+  const { env: other } = await env();
+  assert.notEqual(await providerToken(other, t + TOKEN_LIFE_S), next, "a new key gets its own token");
 });
 
 test("a call is a visible time-sensitive push that names nobody; quiet only wakes", async () => {

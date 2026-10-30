@@ -18,13 +18,23 @@ async function importKey(pem) {
   return crypto.subtle.importKey("pkcs8", der, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
 }
 
-/// The provider token APNs wants: an ES256 JWT, good for up to an hour.
+// APNs refuses a provider token older than an hour, and one renewed more often than every 20
+// minutes, so one is kept for 40.
+export const TOKEN_LIFE_S = 40 * 60;
+let cached = null;
+
+/// The provider token APNs wants: an ES256 JWT.
 export async function providerToken(env, nowSeconds) {
+  const config = `${env.APNS_KEY_ID}\n${env.APNS_TEAM_ID}\n${env.APNS_KEY}`;
+  const same = cached?.config === config;
+  if (same && nowSeconds >= cached.iat && nowSeconds - cached.iat < TOKEN_LIFE_S) return cached.token;
+  const key = same ? cached.key : await importKey(env.APNS_KEY);
   const header = b64url(enc.encode(JSON.stringify({ alg: "ES256", kid: env.APNS_KEY_ID })));
   const claims = b64url(enc.encode(JSON.stringify({ iss: env.APNS_TEAM_ID, iat: nowSeconds })));
   const input = `${header}.${claims}`;
-  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, await importKey(env.APNS_KEY), enc.encode(input));
-  return `${input}.${b64url(sig)}`;
+  const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc.encode(input));
+  cached = { config, iat: nowSeconds, key, token: `${input}.${b64url(sig)}` };
+  return cached.token;
 }
 
 /// What a push says. The relay cannot read the message, so it cannot say who called; the app
