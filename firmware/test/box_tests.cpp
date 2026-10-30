@@ -694,11 +694,11 @@ TEST(theBoxSleepsOnlyOnBatteryWithNothingToSendAgainAndNoPhone) {
 
 TEST(theHoursLeftAssumeTheBoxSleepsBetweenPolls) {
     // Awake 100 mA, asleep 0.5 mA, awake about 3 s in every 600: just under 1 mA, so 3000 hours.
-    BatteryModel sleeping = batteryModel(BatteryDraw{3000, 100, 500});
+    BatteryModel sleeping = batteryModel(BatteryDraw{3000, 100, 500}, true);
     CHECK(sleeping.capacityMAh == 3000 && sleeping.drawMA == 1);
     CHECK(hoursLeft(4200, sleeping) == 3000);
     // Rounded up to the next milliamp, never down: 1.99 mA counts as 2.
-    CHECK(batteryModel(BatteryDraw{3000, 100, 1500}).drawMA == 2);
+    CHECK(batteryModel(BatteryDraw{3000, 100, 1500}, true).drawMA == 2);
     // A box that never sleeps is the 30 hours the power tests assume.
-    CHECK(hoursLeft(4200, batteryModel(BatteryDraw{3000, 100, 100000})) == 30);
+    CHECK(hoursLeft(4200, batteryModel(BatteryDraw{3000, 100, 100000}, true)) == 30);
 }

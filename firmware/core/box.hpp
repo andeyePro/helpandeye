@@ -69,8 +69,8 @@ struct BatteryDraw {
 // The hours-left model for a box left on battery: the sleeping draw plus the share of each poll
 // it is awake, rounded up to a whole milliamp so the estimate never flatters the battery. A call
 // that keeps the box awake draws more for as long as it stands; the estimate is for the box
-// once it is left alone again.
-BatteryModel batteryModel(const BatteryDraw& draw);
+// once it is left alone again. `mainsSensed` says whether the build has the mains wire.
+BatteryModel batteryModel(const BatteryDraw& draw, bool mainsSensed);
 
 class BoxEngine {
 public:

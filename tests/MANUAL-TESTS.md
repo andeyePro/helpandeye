@@ -501,6 +501,15 @@ Pass: the press, "seen" and the cross each have a sound that can be told apart f
 
 Pass: step 1 reports nothing. In step 2 box A shows "Power cut" on its bottom line within ten seconds (with the hours once estimated); phone B hears a request from the box's unit marked Power cut within a minute, then battery notes ("About 24 hours of battery left.", and so on) as the estimate passes each mark; red still works throughout. After step 3 only the final battery warning still comes. When the adapter goes back on, phone B gets "Power is back." With the report turned off, box A still shows the power cut but sends nothing.
 
+Without the mains wire (a box built with `HI_MAINS_SENSED=0`, or the development build):
+
+4. Charge box A fully on its adapter and leave it on for an hour. Log the battery millivolts once a minute throughout steps 4 to 7 (the info reply, 0x70, over the companion link, or MeshCore's serial console).
+5. Switch the adapter off at the wall for one second, then on. Leave it on for an hour.
+6. Switch the adapter off and leave it off for four hours.
+7. Switch it on again.
+
+Pass: steps 4 and 5 report nothing and show no power cut (a full cell held by its charger never fires). In step 6 box A shows the power cut within half an hour and phone B hears the request; the info reply's mains byte has bit 2 set. In step 7 phone B gets "Power is back." within an hour. From the log, write down the step the charger makes when it finishes (the reading on mains, before and after it stops charging) and how much a full cell falls in its first half hour on battery: `MainsEstimate::kFallMV` in `firmware/core/power.hpp` must stay above the first and `kFlatMV` below the second. Repeat step 6 from a half-charged cell (unplug at about 3.9 V while charging): the power cut shows within about ten minutes.
+
 ## 54. Battery life on battery alone
 
 1. Charge box A fully, unplug it, and leave it idle, pressing red once an hour and having phone B acknowledge each press within a minute.

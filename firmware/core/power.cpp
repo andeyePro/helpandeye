@@ -27,13 +27,66 @@ uint32_t hoursLeft(uint16_t millivolts, const BatteryModel& model) {
     return uint32_t(batteryFraction(millivolts) * model.capacityMAh / model.drawMA);
 }
 
-PowerMonitor::Event PowerMonitor::update(uint64_t nowMs, bool mainsPresent, uint16_t millivolts) {
-    if (!rawSeen_ || mainsPresent != rawMains_) {
-        rawSeen_ = true;
-        rawMains_ = mainsPresent;
-        rawSince_ = nowMs;
+void MainsEstimate::sample(uint64_t nowMs, uint16_t millivolts) {
+    if (count_ && nowMs - lastSampleMs_ < kSampleMs) return;
+    lastSampleMs_ = nowMs;
+    samples_[(head_ + count_) % kHistory] = millivolts;
+    if (count_ < kHistory) {
+        count_++;
+    } else {
+        head_ = (head_ + 1) % kHistory;
     }
-    Mains steady = nowMs - rawSince_ >= kSettleMs ? (rawMains_ ? Mains::on : Mains::off) : Mains::unknown;
+    if (count_ < kLeastBlocks * kBlock) return;
+    Mains now = read();
+    if (now == Mains::unknown || now == mains_) {
+        agreed_ = 0;
+        return;
+    }
+    agreed_ = now == pending_ ? agreed_ + 1 : 1;
+    pending_ = now;
+    if (agreed_ >= kConfirm) mains_ = now;
+}
+
+int MainsEstimate::block(size_t j) const {
+    int sum = 0;
+    size_t end = count_ - j * kBlock;
+    for (size_t i = end - kBlock; i < end; i++) sum += samples_[(head_ + i) % kHistory];
+    return sum / int(kBlock);
+}
+
+Mains MainsEstimate::read() const {
+    size_t blocks = count_ / kBlock;
+    int newest = block(0), high = newest, low = newest;
+    for (size_t j = 1; j < blocks; j++) {
+        int b = block(j);
+        if (b > high) high = b;
+        if (b < low) low = b;
+    }
+    if (high - newest >= kFallMV && block(kFlatBlocks) - newest >= kStillFallingMV) return Mains::off;
+    if (newest - low >= kRiseMV) return Mains::on;
+    int flatHigh = newest, flatLow = newest;
+    for (size_t j = 1; j < kFlatBlocks; j++) {
+        int b = block(j);
+        if (b > flatHigh) flatHigh = b;
+        if (b < flatLow) flatLow = b;
+    }
+    if (flatHigh - flatLow <= kFlatMV && flatLow >= int(kChargedMV)) return Mains::on;
+    return Mains::unknown;
+}
+
+PowerMonitor::Event PowerMonitor::update(uint64_t nowMs, bool mainsPresent, uint16_t millivolts) {
+    Mains steady;
+    if (model_.mainsSensed) {
+        if (!rawSeen_ || mainsPresent != rawMains_) {
+            rawSeen_ = true;
+            rawMains_ = mainsPresent;
+            rawSince_ = nowMs;
+        }
+        steady = nowMs - rawSince_ >= kSettleMs ? (rawMains_ ? Mains::on : Mains::off) : Mains::unknown;
+    } else {
+        estimate_.sample(nowMs, millivolts);
+        steady = estimate_.mains();
+    }
     if (steady != Mains::unknown && steady != mains_) {
         bool wasKnown = mains_ != Mains::unknown;
         mains_ = steady;

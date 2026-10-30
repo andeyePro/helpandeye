@@ -127,7 +127,9 @@ Per unit, on top of the Heltec V4 (OLED version):
 - **Mains sensing**: a divider (say 100 kΩ over 100 kΩ) from the board's 5 V pin, which carries
   USB power, to a GPIO. With the box on a mains USB adapter, 5 V present means mains is on. A
   power bank or UPS between the adapter and the box would hide a power cut, so the setup
-  instructions must say to plug the adapter straight into the wall.
+  instructions must say to plug the adapter straight into the wall. A box built without the
+  divider (`HI_MAINS_SENSED=0`) estimates mains from the battery's
+  trend instead (section 10), later and with less confidence; the wire wins when a build has it.
 - **A LiPo cell** on the board's battery connector, sized for decision 4's 24 hours and more.
 - **A label** saying Help&I does not replace 999 or telecare (decision 13).
 
@@ -445,6 +447,40 @@ before sleep. A copy the checksum and layout do not confirm is a cold start (dec
 power-on, or another build. A report's remaining repeats are not kept, so a reset during them
 loses the rest; the next mark makes the next note.
 
+**Without the mains wire (Martin, 2026-10-30).** A build with `HI_MAINS_SENSED=0` has no divider,
+so `MainsEstimate` in `core/power.hpp` decides from the battery readings alone (the board reads
+the cell once a minute). On mains the charger holds the cell near its charged level; when mains
+goes the cell sags under the box's load and keeps falling; when mains returns the charger lifts
+it, or holds a cell still too full to recharge. The estimate keeps two hours of readings and
+compares five-minute means, so one noisy reading or a transmit burst cannot decide it:
+
+- *Mains probably gone*: the newest mean at least 40 mV under the highest of the two hours, and at
+  least 8 mV under the mean half an hour before it (still falling). A charger finishing, which
+  steps the reading down and then holds it, and a full cell's slow self-discharge on mains, do
+  not pass the second test, so a full cell resting never fires. A cut from a full cell shows
+  about 20 to 30 minutes after it; a cut while the cell was charging, which loses the charging
+  lift at once, within about ten.
+- *Mains probably back*: the newest mean at least 25 mV over the lowest of the two hours (the
+  charger), or half an hour of means within 6 mV of each other at 4.05 V or more (a cell held
+  by its charger; on battery a cell that full falls through half an hour).
+- Any verdict must hold for three minutes running before it counts, and nothing is decided in
+  the first 35 minutes after a start. A box that starts on battery reports the cut once the
+  fall shows; at half charge that can take an hour or more.
+- Asleep on battery (below), the box reads the cell only at its ten-minute wakes, so the
+  readings are ten minutes apart and mains back shows within about an hour and a half of the
+  charger starting, not minutes. Without the wire there is no mains pin to wake it: the mains
+  wake source is left off, so a floating pin cannot wake it either. The estimate's history is
+  part of `PowerMonitor` and so of the retained copy (about 300 bytes of it), so a wake carries
+  on from the readings before the sleep.
+
+The thresholds are a guess at the Heltec V4's charger and the box's draw, to be set from a box's
+own recordings (MANUAL-TESTS 53): the fall must stay above the step the charger makes when it
+finishes, and the flat allowance below what a full cell loses on battery in half an hour. The
+estimate reports with less confidence than the wire: `PowerMonitor::estimated()` is true, the
+info reply's mains byte carries bit 2, and the sealed report and the screen are to say
+"probably" (`BoxEngine::power` and `Screen`, still to do). Everything else, the hours, the marks
+and the acknowledgement, is the same as with the wire.
+
 **The frames.** A report is a request of the box's own, numbered from the same counter as its
 calls, so the responders' existing signed acknowledgement (kind 3) silences it and their phones
 show it as a request from that unit; a follow-up for a request nobody has heard a call for already
@@ -503,7 +539,7 @@ section 6.
 | `core/airtime.hpp` | Time on air, the UK bands, the hourly budget, the transmit power cap | Airtime.swift |
 | `core/buttons.hpp` | Debouncing, press, long press, the countdown and stopping it | HelpCountdown.swift, the watch |
 | `core/seal.hpp` | SHA-256, HKDF, ChaCha20-Poly1305, the responders' key and nonce, the sealed frame | ForResponders.swift |
-| `core/power.hpp` | The ten-second mains rule, hours left, the six marks and the acknowledgement that silences them | decisions 3 and 4 |
+| `core/power.hpp` | The ten-second mains rule, mains from the battery's trend without the wire, hours left, the six marks and the acknowledgement that silences them | decisions 3 and 4 |
 | `core/provision.hpp` | The Help&I companion commands and the flash layout (section 6) | |
 | `core/box.hpp` | The box: presses to calls, resends, acknowledgement checking, I'm OK and closes, removals, the changeover, the cold start and what survives a reset, when the box may sleep, the draw on battery, the power cap, reports, the screen and sounds | Engine.swift |
 
@@ -540,7 +576,7 @@ Ed25519 library (no signature vectors here: none could be made from a phone).
 
 ## 13. Test plan
 
-**Host tests (built, run, passing).** 109 tests in `firmware/test`: the frames byte for byte
+**Host tests (built, run, passing).** 119 tests in `firmware/test`: the frames byte for byte
 against the Swift layout, malformed and stray input, what may go on the group channel, the
 signature inputs, too small a buffer; the resend times, acknowledgement rules, removal, settling,
 I'm OK settling only earlier calls, which share each resend uses, and close repeats; airtime
@@ -551,7 +587,11 @@ long press, all three pressed at once, falling on red and green, I'm OK just aft
 countdown's taps, warning and Help, a late wake, a 300-second countdown, and stopping it,
 including by a press that began just before the end; the sealing primitives against their RFC
 vectors and Poly1305 against TweetNaCl on every length, the nonce and the sealed frame's layout;
-the mains rule, the hours and the marks; the provisioning bytes; and the whole box against a
+the mains rule, mains from the battery's trend alone (charging, a full cell resting for a
+day, a cut from full and from half, the charger lifting the cell and holding one too full to
+charge, a box started on battery, a sleeping box's ten-minute readings, a copied monitor, and
+the wire overriding it all), the hours and the marks; the
+provisioning bytes; and the whole box against a
 fake board with real keys (TweetNaCl, test only): a press, the resends, which acknowledgements
 count, a removal, I'm OK under both profiles, the cross and the phone's routes, the bands and the
 cold start, the power cap, a power-cut report opened as a responder's phone opens it, a

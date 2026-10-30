@@ -85,7 +85,7 @@ constexpr const char* kWarnTune = "warn:d=16,o=6,b=200:c,p,c";
 UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial)
     : AbstractUITask(board, serial),
       _buttons(HI_LAYOUT_PRG_ONLY ? prgOnly() : threeButtons(), wokenBy()),
-      _engine(*this, RadioSettings(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR), batteryModel(kDraw), 1) {}
+      _engine(*this, RadioSettings(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR), batteryModel(kDraw, HI_MAINS_SENSED != 0), 1) {}
 
 uint64_t UITask::now() const { return monoMs() + _monoOffset; }
 
@@ -264,7 +264,7 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     memcpy(out + i, &next, 2);
     i += 2;
     Screen s = _engine.screen();
-    out[i++] = uint8_t(s.mains);
+    out[i++] = uint8_t(uint8_t(s.mains) | (HI_MAINS_SENSED ? 0 : 4));
     memcpy(out + i, &_millivolts, 2);
     i += 2;
     uint16_t hours = uint16_t(s.hoursLeft);
@@ -436,7 +436,9 @@ void UITask::sleep(uint64_t now) {
 #else
   rtc_gpio_pullup_dis(gpio_num_t(HI_PIN_MAINS));
 #endif
+#if HI_MAINS_SENSED
   esp_sleep_enable_ext0_wakeup(gpio_num_t(HI_PIN_MAINS), 1);
+#endif
   esp_sleep_enable_timer_wakeup(uint64_t(kSleepS) * 1000000);
   esp_deep_sleep_start();
 }

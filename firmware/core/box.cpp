@@ -18,10 +18,10 @@ const char* statusWords(CallerStatus s) {
     return "";
 }
 
-BatteryModel batteryModel(const BatteryDraw& draw) {
+BatteryModel batteryModel(const BatteryDraw& draw, bool mainsSensed) {
     double awakeShare = double(kAwakePerWakeMs) / (double(kSleepS) * 1000 + kAwakePerWakeMs);
     double averageUA = draw.asleepUA + (draw.awakeMA * 1000.0 - draw.asleepUA) * awakeShare;
-    return BatteryModel{draw.capacityMAh, uint32_t(std::ceil(averageUA / 1000))};
+    return BatteryModel{draw.capacityMAh, uint32_t(std::ceil(averageUA / 1000)), mainsSensed};
 }
 
 namespace {
