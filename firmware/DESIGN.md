@@ -215,7 +215,7 @@ little-endian; keys are raw bytes; the reply to a command is MeshCore's own `OK`
 
 | Byte 0 | Name | Body |
 |---|---|---|
-| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off), battery mV u16, hours left u16, antenna u8, power cap i8 (-128 when the box must not send), members u8, calls u8 |
+| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off), battery mV u16, hours left u16, antenna u8, power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`) |
 | 0x71 | set group | 94 bytes after the command byte: group ID (16), member u16, unit u32, flags u8 (bit 0 I'm OK closes the call, bit 1 the caller may close, bit 2 report power cuts), antenna u8 (0 the V4's whip, 1 a stub, 2 an external 3 dBi, 3 an external 5 dBi), responders' public key (32, all zero when the group has none), channel secret (16), old channel secret (16, all zero outside a changeover), old secret ends at u32, first coordinator u16 |
 | 0x72 | set members | version u32, index u8, total u8, then up to four of: member u16, role u8 (1 caller, 2 responder, 3 both, 4 coordinator), Ed25519 signing key (32). Index 0 starts a new list; the list replaces the old one when every position up to `total` has arrived. At most 32 members |
 | 0x73 | get calls | nothing. Replies 0xA1 per call: request u16, colour u8, pressed at u32, status u8 (0 sending, 1 waiting for a responder, 2 seen, 3 not sent, 4 closed), acknowledgements u8; then 0xA2 |
@@ -224,7 +224,10 @@ little-endian; keys are raw bytes; the reply to a command is MeshCore's own `OK`
 | 0xA3 | frame (push) | a frame the box made (its call, its signed I'm OK or close, a sealed report), for the phone to carry on its own routes and to show. The phone answers a call with 0x74 |
 
 The box keeps the set-group and set-members bytes in flash as they came (`/hi_group`,
-`/hi_members` on SPIFFS) and its next request number in NVS, written before each use. A phone
+`/hi_members` on SPIFFS) and its next request number in NVS, written before each use. It puts
+the group's channel (and the old one during a changeover) into MeshCore's own channel table
+itself, at provisioning and at every start, since MeshCore decrypts group datagrams only for
+channels it knows: the phone need not set the channel for the box to hear acknowledgements. A phone
 recognises a Help&I box from the firmware version MeshCore's device query returns
 (`v1.18.0-hi1`), then sends 0x70. The app side is not built (TODO.md).
 

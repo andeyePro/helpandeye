@@ -50,6 +50,7 @@ private:
   void play(helpandi::Sound s);
   void loadProvisioning();
   void provisionIfReady();
+  void listenOn(const uint8_t secret[16]);
   bool saveFile(const char* path, const uint8_t* data, size_t length);
   void reply(uint8_t code);
   void applyRadio();
@@ -66,7 +67,7 @@ private:
   helpandi::MemberList _members;
   helpandi::MemberList _building;
   bool _haveGroup = false, _haveMembers = false;
-  unsigned long _nextPower = 0, _nextBattery = 0, _nextDraw = 0, _activeUntil = 0;
+  uint64_t _nextPower = 0, _nextBattery = 0, _nextDraw = 0, _activeUntil = 0;
   uint16_t _millivolts = 0;
   float _freq = 0, _bw = 0;
   uint8_t _sf = 0, _cr = 0;

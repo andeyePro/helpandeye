@@ -4,6 +4,7 @@
 #include <SPIFFS.h>
 #include <Utils.h>
 #include <esp_random.h>
+#include <esp_timer.h>
 #include <target.h>
 
 #include "../MyMesh.h"
@@ -16,8 +17,13 @@ constexpr const char* kGroupFile = "/hi_group";
 constexpr const char* kMembersFile = "/hi_members";
 constexpr const char* kNextRequestKey = "next";
 constexpr uint8_t kFlood = 0xFF;
-constexpr unsigned long kScreenOnMs = 120000;
+constexpr uint64_t kScreenOnMs = 120000;
+constexpr const char* kChannelName = "Help&I";
 const BatteryModel kBattery{HI_BATTERY_MAH, HI_DRAW_MA};
+
+// millis() is 32 bits on the ESP32 and wraps after 49.7 days; the core's resends and its airtime
+// log need a clock that only goes up for as long as the box is on.
+uint64_t monoMs() { return uint64_t(esp_timer_get_time() / 1000); }
 
 RadioSettings radioFrom(const NodePrefs& p) { return RadioSettings(p.freq, p.bw, p.sf, p.cr); }
 
@@ -54,9 +60,9 @@ void UITask::begin(DisplayDriver* display, SensorManager*, NodePrefs* prefs) {
   _engine.setNextRequest(_nvs.getUShort(kNextRequestKey, 1));
   applyRadio();
   // No record of the hour before this start survives a power cut (section 8).
-  _engine.coldStart(millis());
+  _engine.coldStart(monoMs());
   loadProvisioning();
-  _activeUntil = millis() + kScreenOnMs;
+  _activeUntil = monoMs() + kScreenOnMs;
   if (_display) _display->turnOn();
 }
 
@@ -141,7 +147,29 @@ void UITask::loadProvisioning() {
   provisionIfReady();
 }
 
+// MeshCore decrypts a group datagram only for a channel in its own table, so the box puts the
+// group's channel there itself (and the old one during a changeover) rather than wait for a phone
+// to set it: the buttons work with no phone. Not saved: MeshCore reloads its table at start and
+// this runs again from the flash copy of the group.
+void UITask::listenOn(const uint8_t secret[16]) {
+  ChannelDetails ch{};
+  memcpy(ch.channel.secret, secret, kChannelSecretBytes);
+  mesh::Utils::sha256(ch.channel.hash, sizeof ch.channel.hash, ch.channel.secret, kChannelSecretBytes);
+  int idx = the_mesh.findChannelIdx(ch.channel);
+  for (int i = 0; idx < 0 && i < MAX_GROUP_CHANNELS; i++) {
+    ChannelDetails slot;
+    if (the_mesh.getChannel(i, slot) && slot.name[0] == 0) idx = i;
+  }
+  if (idx < 0) return;
+  strcpy(ch.name, kChannelName);
+  the_mesh.setChannel(idx, ch);
+}
+
 void UITask::provisionIfReady() {
+  if (_haveGroup) {
+    listenOn(_group.channelSecret);
+    if (_group.hasOldSecret()) listenOn(_group.oldChannelSecret);
+  }
   if (_haveGroup && _haveMembers) _engine.provision(_group, _members);
 }
 
@@ -159,7 +187,7 @@ void UITask::reply(uint8_t code) {
 bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
   switch (frame[0]) {
   case kCmdInfo: {
-    uint8_t out[32];
+    uint8_t out[64];
     size_t i = 0;
     out[i++] = kRespInfo;
     out[i++] = kHelpandiProtocol;
@@ -184,6 +212,12 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     out[i++] = uint8_t(_engine.powerCap(HI_AMPLIFIER_GAIN_DB, -9, MAX_LORA_TX_POWER, cap) ? int8_t(cap) : int8_t(-128));
     out[i++] = uint8_t(_members.count);
     out[i++] = uint8_t(_engine.callCount());
+    // The box's sealing key, for its memberAdded: the X25519 public key of the same scalar
+    // sharedSecret uses (DESIGN.md, section 6). All zero if the board's key cannot be read.
+    uint8_t prv[PRV_KEY_SIZE];
+    memset(out + i, 0, kKeyBytes);
+    if (the_mesh.self_id.writeTo(prv, sizeof prv) == PRV_KEY_SIZE) Curve25519::eval(out + i, prv, nullptr);
+    i += kKeyBytes;
     _interfaceManager->writeFrame(out, i);
     return true;
   }
@@ -305,7 +339,7 @@ void UITask::applyRadio() {
 }
 
 void UITask::loop() {
-  unsigned long now = millis();
+  uint64_t now = monoMs();
   uint32_t wall = rtc_clock.getCurrentTime();
 
   Event events[ButtonMachine::kMaxEvents];
@@ -380,7 +414,7 @@ void UITask::draw() {
   }
 
   if (_buttons.counting()) {
-    snprintf(line, sizeof line, "%lu", (unsigned long)_buttons.secondsLeft(millis()));
+    snprintf(line, sizeof line, "%lu", (unsigned long)_buttons.secondsLeft(monoMs()));
     _display->setTextSize(3);
     _display->drawTextCentered(w / 2, 14, line);
     _display->setTextSize(1);
