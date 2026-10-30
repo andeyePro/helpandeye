@@ -221,9 +221,10 @@ final class ScreensTests: XCTestCase {
         let f = reveal(app.textFields[field])
         f.tap()
         // At the largest text the keyboard can push the field away under the first tap.
-        for _ in 0..<3 where f.value(forKey: "hasKeyboardFocus") as? Bool != true {
+        for _ in 0..<5 where f.value(forKey: "hasKeyboardFocus") as? Bool != true {
             _ = app.keyboards.firstMatch.waitForExistence(timeout: 2)
             if f.value(forKey: "hasKeyboardFocus") as? Bool == true { break }
+            Thread.sleep(forTimeInterval: 1)
             reveal(f).tap()
         }
         f.typeText(text)
