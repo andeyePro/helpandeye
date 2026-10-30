@@ -1,0 +1,28 @@
+{
+  // A chat bot that answers questions about one website from its own content. One Durable
+  // Object (SQLite) keeps the free-answer counts and the spend windows; widget.js is served as
+  // a static asset. Deploy it on a subdomain of the site (bot.example.com for example.com), so
+  // the session cookie is first-party.
+  "name": "site-bot",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-10-01",
+  "assets": { "directory": "./public" },
+  "durable_objects": {
+    "bindings": [{ "name": "LEDGER", "class_name": "Ledger" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Ledger"] }],
+  // Cloudflare Email Sending, for sign-in links and alerts. Needs a domain enabled for sending:
+  // `npx wrangler email sending enable example.com`.
+  "send_email": [{ "name": "EMAIL" }],
+  "vars": {
+    // Public. The matching secret is TURNSTILE_SECRET_KEY.
+    "TURNSTILE_SITE_KEY": "",
+    "GITHUB_CLIENT_ID": "",
+    "EMAIL_FROM": "",
+    "EMAIL_FROM_NAME": "",
+    "ALERT_EMAIL": "",
+    "MONTHLY_CREDIT_USD": "200",
+    "MODEL": "claude-haiku-5-5",
+    "FREE_ANSWERS_A_DAY": "2"
+  }
+}
