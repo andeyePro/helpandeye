@@ -2,19 +2,20 @@ import CryptoKit
 import Foundation
 
 /// What a coordinator can change for the whole group, under Profiles, Log and Advanced settings:
-/// the profiles and who has which, the log, and the relay's address. It goes to every member at
-/// once, signed and compressed, over the internet and, when it fits, the group channel; the
-/// newest version wins.
+/// the profiles and who has which, the log, and the relay's address and pass. It goes to every
+/// member at once, signed and compressed, over the internet and, when it fits, the group channel;
+/// the newest version wins.
 public struct GroupSettings: Codable, Equatable, Sendable {
     public var policy: GroupState.StoredPolicy
     public var relayURL: String?
+    public var relayPass: String?
 }
 
 extension GroupState {
     /// A short name for keeping a group's things apart on a device (storage, alerts).
     public var tag: String { "g" + secrets.groupID.map { String(format: "%02x", $0) }.joined() }
 
-    public var settings: GroupSettings { GroupSettings(policy: policy, relayURL: relayURL) }
+    public var settings: GroupSettings { GroupSettings(policy: policy, relayURL: relayURL, relayPass: relayPass) }
 
     /// The settings as a signed frame from coordinator `signer`.
     public func settingsFrame(as signer: UInt16, identity: DeviceIdentity) -> HelpFrame? {
@@ -43,6 +44,9 @@ extension GroupState {
             policy = s.policy
         }
         relayURL = s.relayURL
+        // Settings from a phone made before passes carry none: keep the group's, so a coordinator
+        // on an older version changing something else cannot cut the group off the relay.
+        if let pass = s.relayPass { relayPass = pass }
         settingsVersion = version
         settingsSigner = signer
         return true

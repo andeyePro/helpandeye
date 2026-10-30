@@ -131,6 +131,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var policy: StoredPolicy = .init()
     /// The relay for the internet route, such as https://helprelayandeye.example.workers.dev.
     public var relayURL: String?
+    /// The group's pass for a relay that requires one (RelayPass), as pasted in by a coordinator.
+    public var relayPass: String?
     /// Goes up whenever someone joins or leaves, so the relay can tell a newer member list from
     /// an out-of-date phone's older one.
     public var membershipVersion: UInt32 = 1
@@ -180,7 +182,7 @@ public struct GroupState: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, removalsWithoutKeys, keysOutdatedSince, keysEndAt, highestMember, roleVersions
-        case policy, relayURL, membershipVersion, roleBlocksSeen, phoneVersions, settingsVersion, settingsSigner
+        case policy, relayURL, relayPass, membershipVersion, roleBlocksSeen, phoneVersions, settingsVersion, settingsSigner
     }
 
     /// Fields added after the first release are optional when reading, so a group saved by an
@@ -205,6 +207,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         settingsSigner = try c.decodeIfPresent(UInt16.self, forKey: .settingsSigner) ?? 0
         policy = try c.decodeIfPresent(StoredPolicy.self, forKey: .policy) ?? .init()
         relayURL = try c.decodeIfPresent(String.self, forKey: .relayURL)
+        relayPass = try c.decodeIfPresent(String.self, forKey: .relayPass)
         membershipVersion = try c.decodeIfPresent(UInt32.self, forKey: .membershipVersion) ?? 1
         roleBlocksSeen = try c.decodeIfPresent(UInt16.self, forKey: .roleBlocksSeen) ?? 0
     }

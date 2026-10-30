@@ -65,13 +65,16 @@ final class ProfileTests: XCTestCase {
             g.policy.profiles.append(p)
         }
         g.settingsVersion = 1
+        g.relayPass = "1.\(RelayProtocol.id(of: g.secrets.groupID)).1800000000.\(String(repeating: "A", count: 86))"
         guard let frame = g.settingsFrame(as: 1, identity: coordinator) else { return XCTFail("settings too big for a frame") }
         XCTAssertEqual(HelpFrame(frame.encoded()), frame)
         var copy = g
         copy.policy = .init()
         copy.settingsVersion = 0
+        copy.relayPass = nil
         XCTAssertTrue(copy.apply(settings: frame))
         XCTAssertEqual(copy.policy, g.policy)
+        XCTAssertEqual(copy.relayPass, g.relayPass, "the pass travels with the settings")
     }
 
     func testSettingsFromAPhoneBeforeProfilesKeepTheGroupsProfiles() throws {
@@ -81,10 +84,13 @@ final class ProfileTests: XCTestCase {
         ])
         g.policy.profiles.append(Profile(id: 1, name: "Lone worker"))
         g.policy.profileOf[2] = 1
+        let pass = "1.\(RelayProtocol.id(of: g.secrets.groupID)).1800000000.\(String(repeating: "A", count: 86))"
+        g.relayPass = pass
         let plain = Data(#"{"policy":{"useDistance":false,"redInterval":120,"amberInterval":900},"relayURL":"https://new.example"}"#.utf8)
         let sig = try coordinator.signingKey.signature(for: GroupState.settingsInput(group: g.secrets.groupID, signer: 1, version: 1, settings: plain))
         XCTAssertTrue(g.apply(settings: .groupSettings(signer: 1, version: 1, settings: plain, signature: sig)), "an older phone's change still counts")
         XCTAssertEqual(g.relayURL, "https://new.example")
+        XCTAssertEqual(g.relayPass, pass, "settings from before passes do not take the group's away")
         XCTAssertEqual(g.policy.profiles.map(\.name), ["Standard", "Lone worker"])
         XCTAssertEqual(g.policy.profileOf[2], 1)
     }

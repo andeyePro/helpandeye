@@ -1407,11 +1407,14 @@ public final class HelpEngine: ObservableObject {
         if !updateIsNewer {
             merged.policy = current.policy
             merged.relayURL = current.relayURL
+            merged.relayPass = current.relayPass
             merged.settingsVersion = current.settingsVersion
             merged.settingsSigner = current.settingsSigner
         }
         // An update made before the relay address was first set has none: keep this phone's.
         if !updateIsNewer || update.settingsVersion == 0, merged.relayURL == nil { merged.relayURL = current.relayURL }
+        // A pass is only ever replaced, never taken away, so an update without one keeps this phone's.
+        if merged.relayPass == nil { merged.relayPass = current.relayPass }
         changeGroup(edit: false) { $0 = merged }
     }
 
@@ -1436,6 +1439,14 @@ public final class HelpEngine: ObservableObject {
     public func setRelay(_ url: String) {
         let trimmed = url.trimmingCharacters(in: .whitespaces)
         updateGroup { $0.relayURL = trimmed.isEmpty ? nil : trimmed }
+    }
+
+    /// Takes a pasted relay pass, if it reads as one for this group. Returns whether it did.
+    @discardableResult
+    public func setRelayPass(_ token: String) -> Bool {
+        guard let group, let pass = RelayPass(token), pass.isFor(group.secrets) else { return false }
+        updateGroup { $0.relayPass = pass.token }
+        return true
     }
 
     // MARK: Profiles

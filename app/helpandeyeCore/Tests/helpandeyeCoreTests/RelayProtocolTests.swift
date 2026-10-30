@@ -39,6 +39,32 @@ final class RelayProtocolTests: XCTestCase {
         XCTAssertFalse(json.contains("Alex")); XCTAssertFalse(json.contains("07700")); XCTAssertFalse(json.contains("70001"))
     }
 
+    func testAPassIsReadForItsGroupAndExpiryAndSentWithEachRequest() throws {
+        let secrets = GroupSecrets.random()
+        let id = RelayProtocol.id(of: secrets.groupID)
+        let sig = String(repeating: "A", count: 86)
+        guard let pass = RelayPass(" 1.\(id).1800000000.\(sig)\n") else { return XCTFail("not read as a pass") }
+        XCTAssertEqual(pass.token, "1.\(id).1800000000.\(sig)", "trimmed, as pasted")
+        XCTAssertEqual(pass.groupID, id)
+        XCTAssertEqual(pass.expiry, Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertTrue(pass.isFor(secrets)); XCTAssertFalse(pass.isFor(.random()))
+        XCTAssertNil(RelayPass("2.\(id).1800000000.\(sig)"), "another version")
+        XCTAssertNil(RelayPass("1.\(id).soon.\(sig)"))
+        XCTAssertNil(RelayPass("1.\(id).1800000000.\(sig.dropLast())"))
+        XCTAssertNil(RelayPass("1.\(id).1800000000"))
+        var g = GroupState(name: "x", secrets: secrets, members: [])
+        XCTAssertEqual(g.passState(at: Date(timeIntervalSince1970: 1)), .none)
+        g.relayPass = "1.\(RelayProtocol.id(of: GroupSecrets.random().groupID)).1800000000.\(sig)"
+        XCTAssertEqual(g.passState(at: Date(timeIntervalSince1970: 1)), .none, "another group's pass counts for nothing")
+        g.relayPass = pass.token
+        XCTAssertEqual(g.passState(at: Date(timeIntervalSince1970: 1_799_999_999)), .valid(until: pass.expiry))
+        XCTAssertEqual(g.passState(at: pass.expiry), .expired(on: pass.expiry))
+        let me = DeviceIdentity()
+        let with = try RelayProtocol.headers(method: "GET", pathAndQuery: "/g/x/messages", body: Data(), identity: me, now: Date(), pass: pass.token)
+        XCTAssertEqual(with["X-HelpA-Pass"], pass.token)
+        XCTAssertNil(try RelayProtocol.headers(method: "GET", pathAndQuery: "/g/x/messages", body: Data(), identity: me, now: Date())["X-HelpA-Pass"])
+    }
+
     func testIdentityRoundTripsThroughTheKeychainForm() throws {
         let me = DeviceIdentity()
         let back = try DeviceIdentity(rawRepresentation: me.rawRepresentation)

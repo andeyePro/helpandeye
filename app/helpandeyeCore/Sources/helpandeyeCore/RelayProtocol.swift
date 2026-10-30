@@ -12,18 +12,25 @@ public enum RelayProtocol {
         return Data("HELPA-RELAY-1\n\(method)\n\(pathAndQuery)\n\(timestamp)\n\(hash)".utf8)
     }
 
-    public static func headers(method: String, pathAndQuery: String, body: Data, identity: DeviceIdentity, now: Date) throws -> [String: String] {
+    /// `pass` is the group's relay pass (RelayPass), sent with every request for a relay that
+    /// requires one.
+    public static func headers(method: String, pathAndQuery: String, body: Data, identity: DeviceIdentity, now: Date, pass: String? = nil) throws -> [String: String] {
         let ts = String(Int64(now.timeIntervalSince1970 * 1000))
         let sig = try identity.signingKey.signature(for: signingInput(method: method, pathAndQuery: pathAndQuery, timestamp: ts, body: body))
-        return ["X-HelpA-Key": identity.signingPublicKey.base64EncodedString(), "X-HelpA-Time": ts,
-                "X-HelpA-Signature": sig.base64EncodedString(), "Content-Type": "application/json"]
+        var h = ["X-HelpA-Key": identity.signingPublicKey.base64EncodedString(), "X-HelpA-Time": ts,
+                 "X-HelpA-Signature": sig.base64EncodedString(), "Content-Type": "application/json"]
+        if let pass { h["X-HelpA-Pass"] = pass }
+        return h
     }
 
-    /// The path for a group: its ID in URL-safe base64.
-    public static func path(for group: GroupSecrets, _ kind: String) -> String {
-        let id = group.groupID.base64EncodedString().replacingOccurrences(of: "+", with: "-")
+    /// A group's ID as the relay sees it, in URL-safe base64: in the path, and in its pass.
+    public static func id(of groupID: Data) -> String {
+        groupID.base64EncodedString().replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
-        return "/g/\(id)/\(kind)"
+    }
+
+    public static func path(for group: GroupSecrets, _ kind: String) -> String {
+        "/g/\(id(of: group.groupID))/\(kind)"
     }
 
     public static func seal(_ frame: HelpFrame, with secrets: GroupSecrets) throws -> String {

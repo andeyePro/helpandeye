@@ -453,6 +453,30 @@ final class RelayModel {
         XCTAssertNil(caller.engine.group?.relayURL)
     }
 
+    func testACoordinatorsRelayPassReachesEveryoneAndIsNeverTakenAway() async {
+        for p in air.phones { p.relay.isConfigured = true }
+        await relaySetUp()
+        let sig = String(repeating: "B", count: 86)
+        XCTAssertFalse(coordinator.engine.setRelayPass("1.\(RelayProtocol.id(of: GroupSecrets.random().groupID)).1800000000.\(sig)"), "another group's pass")
+        XCTAssertFalse(coordinator.engine.setRelayPass("not a pass"))
+        XCTAssertNil(coordinator.engine.group?.relayPass)
+        let token = "1.\(RelayProtocol.id(of: coordinator.engine.group!.secrets.groupID)).1800000000.\(sig)"
+        XCTAssertTrue(coordinator.engine.setRelayPass(token))
+        XCTAssertEqual(coordinator.engine.activity.lastSettingsChange?.text, "You added a relay pass")
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.relayPass, token)
+        XCTAssertEqual(responder.engine.group?.passState(at: Date(timeIntervalSince1970: 1_799_999_999)), .valid(until: Date(timeIntervalSince1970: 1_800_000_000)))
+        XCTAssertEqual(responder.engine.group?.passState(at: Date(timeIntervalSince1970: 1_800_000_000)), .expired(on: Date(timeIntervalSince1970: 1_800_000_000)))
+        // A key update from a coordinator's phone made before passes carries none: the pass stays.
+        coordinator.engine.updateGroup { $0.remove(self.responder.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        var g = coordinator.engine.group!
+        g.relayPass = nil
+        let update = try! Joining.update(g, for: g.member(caller.engine.saved!.me)!, coordinator: coordinator.identity)
+        caller.engine.applyKeyUpdate(try! Joining.openUpdate(update, current: caller.engine.group!, me: caller.identity))
+        XCTAssertEqual(caller.engine.group?.relayPass, token)
+    }
+
     /// A phone off for days when someone was removed counts the seven days from the removal, as
     /// the first coordinator says, not from when it heard.
     func testAPhoneThatHeardLateStillStopsWhenTheOthersDo() async {
