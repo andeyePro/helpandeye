@@ -34,15 +34,27 @@ not push. The relay cannot read who called, so the push cannot say; the app work
 once awake. Because the push goes to everyone at once, a responder whose turn would come later is
 told early over the internet route: the escalation order still decides the repeated alerts.
 
-The reply to a post is `{"seq": n}`. If a wake was asked for and no push got through (APNs
-answered none of them with success, for whatever reason, including a token it reports as dead or
-a refused provider token), or the sender has asked for more pushes this minute than it may, it is
-`{"seq": n, "woke": false, "reason": "..."}`; a post with the same `wake` then pushes again. The
-reason is for people reading logs, and a client may ignore it. Push tokens APNs reports as dead are
-deleted. A Worker may make only 50 subrequests a request on the free plan, so a post pushes to at
-most 49 phones and watches itself, phones first, and the group's alarm sends the rest straight
-after, 50 at a time; `woke` reports on the first 49. The APNs provider token is signed once and
-kept for 40 minutes.
+The reply to a post is `{"seq": n}`. If a wake was asked for, push is set up, and nobody has been
+woken, it is `{"seq": n, "woke": false, "reason": "..."}`; a post with the same `wake` then pushes
+again. Nobody has been woken when no push got through (APNs answered none with success, for
+whatever reason, including a token it reports as dead or a refused provider token), when there
+was nobody to push to (no other member has a token, or every token was dead), or when the sender
+has asked for more pushes this minute than it may. A `call` has woken someone only when a phone
+took its push: a watch is woken quietly. The reason is for people reading logs, and a client may
+ignore it. Push tokens APNs reports as dead are deleted.
+
+The relay keeps, for each sender and kind of wake, which members' phones and watches its pushes
+reached in the last 15 minutes, counted from the first. A wake asked for again in that time, as on
+a call's resend, goes only to those not reached yet, and is not reported as `woke: false` if
+someone was reached before. Removing a member deletes this record with their tokens.
+
+A Worker may make only 50 subrequests a request on the free plan, so a post pushes to at most 49
+phones and watches itself, phones first. The rest are queued, by member and device rather than
+token, and the group's alarm sends them straight after, 49 at a time (one subrequest is kept for
+the meter), to the tokens those members have when it runs, skipping anyone removed since or
+reached by a resend meanwhile. While pushes that could wake someone (phones, for a call) are still
+queued, the post is not reported as `woke: false`, whatever the first 49 did. The APNs provider
+token is signed once and kept for 40 minutes.
 
 The group's first coordinator owns the group on the relay. The group's ID is made from their key
 (8 random bytes, then the first 8 bytes of SHA-256 over `HELPA-GROUP-1`, those bytes and the
@@ -61,26 +73,41 @@ of them, so a call still open is heard at once and a week of old ones is not.
 
 Each phone may post 20 messages a minute and ask for 2 pushes a minute; past that, posts are
 refused with 429 and pushes are not sent. Leaving someone out of a list does not take them off;
-only `removed` does. When someone is taken off, their push tokens and rate record are deleted.
+only `removed` does. When someone is taken off, their push tokens, rate and wake records are
+deleted.
 
 Cloudflare's rate limiting (`ratelimits` in `wrangler.jsonc`) also refuses, with 429:
 
-- more than 120 requests a minute from one address, before the signature is checked. Phones on
-  one Wi-Fi, such as a care home's, share an address.
-- more than 600 requests a minute from a group's members, enough for 256 phones polling every 30
-  seconds. Only members count, so someone outside the group cannot use up its limit.
-- more than 3 new groups a minute registered from one address.
+- more than 120 requests a minute from one address that fail the time or signature check. A
+  request whose signature checks is never limited by address, so phones sharing one (a care
+  home's Wi-Fi, or a mobile network's shared address) never hold each other back.
+- more than 120 signed requests a minute from one phone's key. A phone and its watch polling twice
+  a minute, up to 5 pages each, make 20. A post asking for a `call` wake is never refused by this
+  limit: only by the 20 posts a minute above.
+- more than 6,000 reads (`GET /messages`) a minute from a group's members. The most a group can
+  need is 256 members, each with a phone and a watch, each polling twice a minute while a call is
+  open, up to 5 pages a poll: 256 × 2 × 2 × 5 = 5,120. Only members count, so someone outside the
+  group cannot use up its limit, and posts are never counted, so one member's reads cannot hold
+  back another's call.
+- more than 3 new groups a minute registered from one address. Only a registration the relay has
+  taken counts; one refused for any reason does not.
 
 These limits are counted at each Cloudflare location separately, so they hold back floods, not
 every request. A limit that is not configured, or that fails, refuses nothing.
 
-Every response carries `X-HelpA-Allowance-Low: 1` once 40,000 relay requests have been made in
-the day, so coordinators hear before the free tier runs out. Only requests that pass the
-signature check are counted. Each relay request uses two Durable Object requests (the group's and
-the meter's), so the free 100,000 Durable Object requests a day are reached at 50,000 relay
-requests, before the Worker limit. The meter is asked after the reply has gone, so a slow or
-failing meter never holds one up, and the header comes from its last answer. A phone polls every 30 seconds while
-a call is open on it and every two minutes otherwise, while Help&I is open.
+Every response carries `X-HelpA-Allowance-Low: 1` once 40,000 requests have been counted in the
+day, so coordinators hear before the free tier runs out. Only requests that pass the signature
+check are counted, and so is each run of a group's alarm. Each counted request uses two Durable
+Object requests: a relay request the group's and the meter's, an alarm run the alarm itself and
+the meter's. So the free 100,000 Durable Object requests a day are reached at 50,000 counted,
+before the 100,000 Worker requests (alarm runs are not Worker requests). A group's alarm runs
+once for each post whose pushes did not fit in one request (more for every further 49), and at
+most once for each message as it expires, so on a steady day there are at most about as many
+alarm runs as posts; for
+example 40,000 relay requests and 10,000 alarm runs make 100,000 Durable Object requests. The
+meter is asked after the reply has gone, so a slow or failing meter never holds one up, and the
+header comes from its last answer. A phone polls every 30 seconds while a call is open on it and
+every two minutes otherwise, while Help&I is open.
 
 ## Run the tests
 

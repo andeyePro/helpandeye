@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { authenticate, b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS } from "../src/relay.js";
+import { authenticate, b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS, RESEND_WINDOW_MS } from "../src/relay.js";
 import { MapStorage } from "./storage.js";
 
 async function phone() {
@@ -93,10 +93,10 @@ test("push tokens belong to current members and the sender is not woken", async 
   await relay.setPushToken(member.key, { token: "b".repeat(64) });
   await rejects(relay.setPushToken(stranger.key, { token: "c".repeat(64) }), 403);
   await rejects(relay.setPushToken(member.key, { token: "not hex" }), 400);
-  assert.deepEqual(await relay.pushTargets(coord.key), [{ token: "b".repeat(64), sandbox: false }]);
+  assert.deepEqual(await relay.pushTargets(coord.key), [{ id: "p:" + member.key, token: "b".repeat(64), sandbox: false }]);
   await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }], removed: [member.key] });
   assert.deepEqual(await relay.pushTargets(coord.key), []);
-  assert.deepEqual(await relay.pushTargets(member.key), [{ token: "a".repeat(64), sandbox: true }]);
+  assert.deepEqual(await relay.pushTargets(member.key), [{ id: "p:" + coord.key, token: "a".repeat(64), sandbox: true }]);
 });
 
 test("a member's watch has its own push token beside the phone's, and goes with the member", async () => {
@@ -105,7 +105,7 @@ test("a member's watch has its own push token beside the phone's, and goes with 
   await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }], primary: coord.key });
   await relay.setPushToken(member.key, { token: "b".repeat(64) });
   await relay.setPushToken(member.key, { token: "d".repeat(64), device: "watch" });
-  assert.deepEqual(await relay.pushTargets(coord.key), [{ token: "b".repeat(64), sandbox: false }, { token: "d".repeat(64), sandbox: false, device: "watch" }]);
+  assert.deepEqual(await relay.pushTargets(coord.key), [{ id: "p:" + member.key, token: "b".repeat(64), sandbox: false }, { id: "w:" + member.key, token: "d".repeat(64), sandbox: false, device: "watch" }]);
   assert.deepEqual(await relay.pushTargets(member.key), [], "a member's own watch is not woken by its own call");
   await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }], removed: [member.key] });
   assert.deepEqual(await relay.pushTargets(coord.key), []);
@@ -295,16 +295,32 @@ test("expired messages are deleted without anyone posting, and the next expiry i
   assert.equal([...storage.m.keys()].some((k) => k.startsWith("m:")), false);
 });
 
-test("a removed member's rate record goes with them", async () => {
+test("a removed member's rate and wake records go with them", async () => {
   const storage = new MapStorage();
   const relay = new GroupRelay(storage);
   const coord = await phone(), member = await phone();
   await relay.setMembers(coord.key, { generation: 1, members: [{ key: coord.key, role: "coordinator" }, { key: member.key, role: "member" }], primary: coord.key });
   await relay.limit(member.key, false);
   await relay.limit(coord.key, false);
+  await relay.markReached(member.key, "call", ["p:" + coord.key]);
   await relay.setMembers(coord.key, { generation: 2, members: [{ key: coord.key, role: "coordinator" }], removed: [member.key] });
   assert.equal(storage.m.has("r:" + member.key), false);
+  assert.equal(storage.m.has("k:" + member.key), false);
   assert.equal(storage.m.has("r:" + coord.key), true);
+});
+
+test("who a wake reached is kept per sender and kind, for a resend's window only", async () => {
+  let now = 0;
+  const relay = new GroupRelay(new MapStorage(), () => now);
+  const a = await phone(), b = await phone();
+  await relay.markReached(a.key, "call", ["p:x"]);
+  now = RESEND_WINDOW_MS - 1;
+  await relay.markReached(a.key, "call", ["w:x"]);
+  assert.deepEqual([...(await relay.reached(a.key, "call"))], ["p:x", "w:x"]);
+  assert.equal((await relay.reached(a.key, "quiet")).size, 0, "a quiet wake is not a call's");
+  assert.equal((await relay.reached(b.key, "call")).size, 0, "nor another phone's");
+  now = RESEND_WINDOW_MS;
+  assert.equal((await relay.reached(a.key, "call")).size, 0, "counted from the first push, a later call wakes everyone again");
 });
 
 test("a member list is stored in one write, and removing many members deletes in batches", async () => {

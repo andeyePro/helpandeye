@@ -17,14 +17,17 @@ export const MAX_BODY = 4096;
 export const MAX_MEMBERS_REQUEST = 128 * 1024;
 export const MAX_REQUEST = 16 * 1024;
 // Cloudflare's free plan allows 100,000 Worker requests and 100,000 Durable Object requests a
-// day. Each relay request uses two Durable Object requests (its group and the meter), so the
-// Durable Object allowance runs out first, at 50,000 relay requests. Coordinators are warned well
-// before that.
+// day. Each relay request uses two Durable Object requests (its group and the meter), and so does
+// each run of a group's alarm (the alarm and the meter); the meter counts both. So the Durable
+// Object allowance runs out first, at 50,000 counted. Coordinators are warned well before that.
 export const FREE_DAILY_REQUESTS = 50_000;
 export const WARN_FRACTION = 0.8;
 // A phone posts a call, its follow-ups and acknowledgements; nothing real needs more than this.
 export const MAX_POSTS_PER_MINUTE = 20;
 export const MAX_WAKES_PER_MINUTE = 2;
+// A wake asked for again within this long, as on a call's resend, goes only to the phones and
+// watches the earlier ones did not reach.
+export const RESEND_WINDOW_MS = 15 * 60 * 1000;
 export const MAX_MEMBERS = 256;
 export const MAX_REMOVED = 1024;
 // Durable Object storage takes at most 128 keys in one delete or put.
@@ -182,9 +185,9 @@ export class GroupRelay {
       members: { generation: Math.max(current?.generation ?? 0, list.generation), members },
       ...(ownerFresh ? { ownerGeneration: list.generation } : {}),
     });
-    // Push tokens and rate records of anyone no longer listed are deleted, not just ignored.
+    // Push tokens, rate and wake records of anyone no longer listed are deleted, not just ignored.
     const perMember = [];
-    for (const prefix of ["p:", "w:", "r:"]) perMember.push(...(await this.storage.list({ prefix })).keys());
+    for (const prefix of ["p:", "w:", "r:", "k:"]) perMember.push(...(await this.storage.list({ prefix })).keys());
     await deleteAll(this.storage, perMember.filter((k) => !roles.has(k.slice(2))));
   }
 
@@ -213,30 +216,61 @@ export class GroupRelay {
     await deleteAll(this.storage, all.filter(([, t]) => dead.includes(t.token)).map(([k]) => k));
   }
 
-  /// Push tokens of every current member except the sender, phones before watches.
+  /// Push tokens of every current member except the sender, phones before watches. Each carries
+  /// the `id` it is stored under: "p:" for a phone or "w:" for a watch, then the member's key.
   async pushTargets(sender) {
     const current = await this.members();
     if (!current) return [];
     const members = new Set(current.members.map((m) => m.key));
     const tokens = [...(await this.storage.list({ prefix: "p:" })).entries(), ...(await this.storage.list({ prefix: "w:" })).entries()];
-    return tokens.filter(([k]) => k.slice(2) !== sender && members.has(k.slice(2))).map(([, t]) => t);
+    return tokens.filter(([k]) => k.slice(2) !== sender && members.has(k.slice(2))).map(([id, t]) => ({ id, ...t }));
   }
 
-  /// Keeps the pushes of a call that did not fit in one request, for the group's alarm to send.
+  /// The target ids that `sender`'s wakes of this kind reached within RESEND_WINDOW_MS.
+  async reached(sender, kind) {
+    const r = (await this.storage.get("k:" + sender))?.[kind];
+    return new Set(r && this.now() - r.at < RESEND_WINDOW_MS ? r.ids : []);
+  }
+
+  async markReached(sender, kind, ids) {
+    if (!ids.length) return;
+    const record = (await this.storage.get("k:" + sender)) ?? {};
+    const r = record[kind] && this.now() - record[kind].at < RESEND_WINDOW_MS ? record[kind] : { at: this.now(), ids: [] };
+    record[kind] = { at: r.at, ids: [...new Set([...r.ids, ...ids])] };
+    await this.storage.put("k:" + sender, record);
+  }
+
+  /// Keeps the pushes of a call that did not fit in one request, as target ids, for the group's
+  /// alarm to send with whatever tokens those members have then.
   async queuePushes(seq, job) {
     await this.storage.put("q:" + String(seq).padStart(12, "0"), job);
   }
 
-  /// Takes up to `n` queued pushes, oldest call first, to tokens their members still have.
+  /// The target ids still queued for `sender`'s wakes of this kind.
+  async queued(sender, kind) {
+    const ids = new Set();
+    for (const job of (await this.storage.list({ prefix: "q:" })).values()) {
+      if (job.sender === sender && job.kind === kind) for (const id of job.targets) ids.add(id);
+    }
+    return ids;
+  }
+
+  /// Takes up to `n` queued pushes, oldest call first, with the tokens their members have now.
+  /// Members removed since, and anyone a resend has reached meanwhile, are left out.
   async takePushes(n) {
     const batches = [];
     for (const [k, job] of await this.storage.list({ prefix: "q:" })) {
       if (n <= 0) break;
-      const current = new Map((await this.pushTargets(job.sender)).map((t) => [t.token, t]));
-      const now = job.tokens.slice(0, n), rest = job.tokens.slice(n);
+      const now = job.targets.slice(0, n), rest = job.targets.slice(n);
       n -= now.length;
-      batches.push({ kind: job.kind, sealed: job.sealed, targets: now.map((t) => current.get(t)).filter(Boolean) });
-      if (rest.length) await this.storage.put(k, { ...job, tokens: rest });
+      const done = await this.reached(job.sender, job.kind);
+      const targets = [];
+      for (const id of now) {
+        const token = done.has(id) ? null : await this.storage.get(id);
+        if (token) targets.push({ id, ...token });
+      }
+      batches.push({ sender: job.sender, kind: job.kind, sealed: job.sealed, targets });
+      if (rest.length) await this.storage.put(k, { ...job, targets: rest });
       else await this.storage.delete(k);
     }
     return batches;

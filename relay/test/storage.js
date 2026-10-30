@@ -16,6 +16,7 @@ export class MapStorage {
     const keys = [...this.m.keys()].filter((k) => k.startsWith(prefix) && k >= start).sort().slice(0, limit);
     return new Map(keys.map((k) => [k, structuredClone(this.m.get(k))]));
   }
+  async deleteAll() { this.m.clear(); }
   async getAlarm() { return this.alarm; }
   async setAlarm(t) { this.alarm = t; }
 }

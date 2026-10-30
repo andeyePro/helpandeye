@@ -162,20 +162,43 @@ test("a failing or slow meter neither fails nor holds up a reply, and its last a
   await w.settle();
 });
 
-test("requests are limited per address before any group is reached", async () => {
+test("only requests that fail the signature check are limited by address", async () => {
   const ip = limiter(new Set(["203.0.113.9"]));
   const w = worker({ IP_LIMIT: ip });
   const owner = await phone();
   const path = `/g/${await groupId(owner)}/members`;
-  assert.equal((await w.fetch(await owner.request("PUT", path, firstList(owner), { headers: { "CF-Connecting-IP": "203.0.113.9" } }))).status, 429);
+  const from = (ip) => ({ headers: { "CF-Connecting-IP": ip } });
+  const signed = await owner.request("PUT", path, firstList(owner), from("203.0.113.9"));
+  const forged = (ip) => {
+    const headers = new Headers(signed.headers);
+    headers.set("CF-Connecting-IP", ip);
+    return new Request(signed.url, { method: "PUT", headers, body: firstList(owner) + " " });
+  };
+  assert.equal((await w.fetch(forged("203.0.113.9"))).status, 429, "failures from a busy address");
+  assert.equal((await w.fetch(forged("203.0.113.10"))).status, 401);
   assert.equal(w.reached.groups, 0);
-  assert.equal((await w.fetch(await owner.request("PUT", path, firstList(owner), { headers: { "CF-Connecting-IP": "203.0.113.10" } }))).status, 200);
-  assert.deepEqual(ip.asked, ["203.0.113.9", "203.0.113.10"]);
+  // A care home's phones share an address: one phone's bad requests never hold back another's.
+  assert.equal((await w.fetch(signed)).status, 200);
+  assert.deepEqual(ip.asked, ["203.0.113.9", "203.0.113.10"], "a signed request is not counted");
 });
 
-test("a group's limit counts its members only, so outsiders cannot use it up", async () => {
+test("signed requests are limited per key, but never a post that wakes others for a call", async () => {
+  const keys = limiter();
+  const w = worker({ KEY_LIMIT: keys });
+  const owner = await phone();
+  const id = await groupId(owner);
+  const path = (kind) => `/g/${id}/${kind}`;
+  assert.equal((await w.fetch(await owner.request("PUT", path("members"), firstList(owner)))).status, 200);
+  keys.refused.add(owner.key);
+  assert.equal((await w.fetch(await owner.request("GET", path("messages"), ""))).status, 429);
+  assert.equal((await w.fetch(await owner.request("POST", path("messages"), '{"sealed":"AA=="}'))).status, 429);
+  assert.equal((await w.fetch(await owner.request("POST", path("messages"), '{"sealed":"AA==","wake":"call"}'))).status, 200);
+  assert.deepEqual(keys.asked, [owner.key, owner.key, owner.key], "a call is not even counted");
+});
+
+test("a group's limit counts its members' reads only, and never holds back a post", async () => {
   const groupLimit = limiter();
-  const { member, group, path } = await setup({ GROUP_LIMIT: groupLimit });
+  const { owner, member, group, path } = await setup({ GROUP_LIMIT: groupLimit });
   const id = path("").split("/")[2];
   const stranger = await phone();
   const asked = groupLimit.asked.length;
@@ -184,6 +207,11 @@ test("a group's limit counts its members only, so outsiders cannot use it up", a
   assert.equal((await group.fetch(await member.request("GET", path("messages"), ""))).status, 200);
   groupLimit.refused.add(id);
   assert.equal((await group.fetch(await member.request("GET", path("messages"), ""))).status, 429);
+  const before = groupLimit.asked.length;
+  assert.equal((await group.fetch(await member.request("POST", path("messages"), '{"sealed":"AA==","wake":"call"}'))).status, 200, "a call goes through");
+  assert.equal((await group.fetch(await owner.request("POST", path("messages"), '{"sealed":"AA=="}'))).status, 200);
+  assert.equal((await group.fetch(await member.request("PUT", path("push"), JSON.stringify({ token: "b".repeat(64) })))).status, 200);
+  assert.equal(groupLimit.asked.length, before, "only reads are counted");
 });
 
 test("each address may register only a few new groups", async () => {
@@ -197,6 +225,22 @@ test("each address may register only a few new groups", async () => {
   assert.equal((await w.fetch(await owner.request("PUT", path, firstList(owner), from("203.0.113.10")))).status, 200);
   assert.equal((await w.fetch(await owner.request("PUT", path, firstList(owner, second), from("203.0.113.9")))).status, 200, "a change to a group is not");
   assert.deepEqual(register.asked, ["203.0.113.9", "203.0.113.10"]);
+  const refused = await phone();
+  const refusedPath = `/g/${await groupId(refused)}/members`;
+  assert.equal((await w.fetch(await refused.request("PUT", refusedPath, firstList(refused), from("203.0.113.9")))).status, 429);
+  assert.equal((await w.fetch(await refused.request("GET", refusedPath.replace("members", "messages"), ""))).status, 403, "a refused registration leaves nothing behind");
+});
+
+test("a registration is counted against its address only once the list is taken", async () => {
+  const register = limiter();
+  const w = worker({ REGISTER_LIMIT: register });
+  const owner = await phone(), other = await phone();
+  const path = `/g/${await groupId(owner)}/members`;
+  assert.equal((await w.fetch(await other.request("PUT", path, firstList(other), { headers: { "CF-Connecting-IP": "203.0.113.9" } }))).status, 403, "not this group's owner");
+  assert.equal((await w.fetch(await owner.request("PUT", path, '{"generation":1,"members":[]}', { headers: { "CF-Connecting-IP": "203.0.113.9" } }))).status, 400);
+  assert.deepEqual(register.asked, []);
+  assert.equal((await w.fetch(await owner.request("PUT", path, firstList(owner), { headers: { "CF-Connecting-IP": "203.0.113.9" } }))).status, 200);
+  assert.deepEqual(register.asked, ["203.0.113.9"]);
 });
 
 test("the post says when no wake got through, and a resend wakes again", async (t) => {
@@ -244,25 +288,112 @@ test("a dead token is dropped and not tried again, and nobody was woken by it", 
   t.mock.method(globalThis, "fetch", async () => ({ status: 400, json: async () => ({ reason: "BadDeviceToken" }) }));
   const post = async () => (await (await group.fetch(await owner.request("POST", path("messages"), '{"sealed":"AA==","wake":"call"}'))).json());
   assert.equal((await post()).woke, false);
-  await post();
+  assert.deepEqual(await post(), { seq: 2, woke: false, reason: "no phone to wake" }, "with no token left, still nobody woken");
   assert.equal(globalThis.fetch.mock.callCount(), 1);
 });
 
-test("pushes beyond one request's subrequests are sent by the group's alarm", async (t) => {
+test("a call wakes someone only when a phone takes its push, and a resend skips whoever was reached", async (t) => {
   const env = await apnsEnv();
+  const { owner, member, group, path } = await setup(env);
+  // Each in a new minute, as the app's resends are, so the limit on wakes is not reached.
+  const post = async (wake) => {
+    await group.state.storage.delete("r:" + owner.key);
+    return (await (await group.fetch(await owner.request("POST", path("messages"), JSON.stringify({ sealed: "AA==", wake })))).json());
+  };
+  assert.deepEqual(await post("call"), { seq: 1, woke: false, reason: "no phone to wake" }, "nobody has registered");
+  await group.fetch(await member.request("PUT", path("push"), JSON.stringify({ token: "d".repeat(64), device: "watch" })));
+  t.mock.method(globalThis, "fetch", async (url) => ({ status: url.endsWith("b".repeat(64)) ? 503 : 200, json: async () => ({}) }));
+  assert.equal((await post("call")).reason, "no phone to wake", "a watch alone is woken quietly");
+  assert.equal((await post("quiet")).woke, undefined, "but a quiet wake has reached it");
+  await group.fetch(await member.request("PUT", path("push"), JSON.stringify({ token: "b".repeat(64) })));
+  const tried = () => globalThis.fetch.mock.calls.map((c) => c.arguments[0].split("/").pop());
+  const before = tried().length;
+  assert.equal((await post("call")).reason, "no push got through", "the watch took it, the phone did not");
+  assert.deepEqual(tried().slice(before), ["b".repeat(64)], "the watch, reached by the call before, is not pushed again");
+  t.mock.method(globalThis, "fetch", async () => ({ status: 200 }));
+  assert.equal((await post("call")).woke, undefined);
+  assert.equal(globalThis.fetch.mock.callCount(), 1, "only the phone not reached yet");
+  assert.equal((await post("call")).woke, undefined, "reached already");
+  assert.equal(globalThis.fetch.mock.callCount(), 1, "nobody pushed twice");
+});
+
+// A group with `n` members besides its owner, each with a phone token.
+async function crowd(n, env) {
   const { owner, group, storage, path } = await setup(env);
-  const others = await Promise.all(Array.from({ length: PUSH_BATCH + 11 }, phone));
+  const others = await Promise.all(Array.from({ length: n }, phone));
   await group.fetch(await owner.request("PUT", path("members"), JSON.stringify({ generation: 2, members: [{ key: owner.key, role: "coordinator" }, ...others.map((p) => ({ key: p.key, role: "member" }))] })));
   others.forEach((p, i) => storage.m.set("p:" + p.key, { token: i.toString(16).padStart(64, "0"), sandbox: false }));
+  const call = async (sender, sealed = "AA==") => (await (await group.fetch(await sender.request("POST", path("messages"), JSON.stringify({ sealed, wake: "call" })))).json());
+  return { owner, others, group, storage, path, call };
+}
+
+test("pushes beyond one request's subrequests are sent by the group's alarm, queued by member", async (t) => {
+  const env = await apnsEnv();
+  const { others, group, storage, call, owner } = await crowd(PUSH_BATCH + 11, env);
   const pushed = new Set();
   t.mock.method(globalThis, "fetch", async (url) => { pushed.add(url.split("/").pop()); return { status: 200 }; });
-  assert.deepEqual(await (await group.fetch(await owner.request("POST", path("messages"), '{"sealed":"AA==","wake":"call"}'))).json(), { seq: 1 });
+  assert.deepEqual(await call(owner), { seq: 1 });
   assert.equal(pushed.size, PUSH_BATCH);
+  const queued = [...storage.m].find(([k]) => k.startsWith("q:"))[1];
+  assert.deepEqual(queued.targets, others.map((p) => "p:" + p.key).sort().slice(PUSH_BATCH), "member and device, not tokens");
   assert.ok(storage.alarm <= Date.now(), "the alarm is due now");
   await group.alarm();
   assert.equal(pushed.size, others.length, "every other phone woken");
   assert.equal(globalThis.fetch.mock.callCount(), others.length, "each once");
   assert.ok(storage.alarm > Date.now() + KEEP_MS - 60_000, "next, when the message expires");
+});
+
+test("while pushes are still queued, a failed first batch is not reported as nobody woken", async (t) => {
+  const env = await apnsEnv();
+  const { others, group, call, owner } = await crowd(PUSH_BATCH + 3, env);
+  let status = 503;
+  t.mock.method(globalThis, "fetch", async () => ({ status, json: async () => ({}) }));
+  assert.deepEqual(await call(owner), { seq: 1 }, "the alarm still has phones to try");
+  status = 200;
+  await group.alarm();
+  assert.equal(globalThis.fetch.mock.callCount(), others.length);
+});
+
+test("the alarm pushes to the tokens members have when it runs, and not to anyone removed", async (t) => {
+  const env = await apnsEnv();
+  const { others, group, storage, path, call, owner } = await crowd(PUSH_BATCH + 2, env);
+  t.mock.method(globalThis, "fetch", async () => ({ status: 200 }));
+  await call(owner);
+  const [gone, moved] = [...storage.m].find(([k]) => k.startsWith("q:"))[1].targets.map((id) => others.find((p) => "p:" + p.key === id));
+  await group.fetch(await owner.request("PUT", path("members"), JSON.stringify({ generation: 3, members: others.filter((p) => p !== gone).map((p) => ({ key: p.key, role: "member" })).concat({ key: owner.key, role: "coordinator" }), removed: [gone.key] })));
+  await group.fetch(await moved.request("PUT", path("push"), JSON.stringify({ token: "e".repeat(64) })));
+  const before = globalThis.fetch.mock.callCount();
+  await group.alarm();
+  assert.deepEqual(globalThis.fetch.mock.calls.slice(before).map((c) => c.arguments[0].split("/").pop()), ["e".repeat(64)], "the new token, and not the removed member");
+});
+
+test("several calls queued at once each reach everyone once", async (t) => {
+  const env = await apnsEnv();
+  const { others, group, storage, call, owner } = await crowd(PUSH_BATCH + 20, env);
+  const pushes = new Map();
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    const k = JSON.parse(init.body).sealed + url.split("/").pop();
+    pushes.set(k, (pushes.get(k) ?? 0) + 1);
+    return { status: 200 };
+  });
+  // The push carries the sealed message, so each call is told apart by its own.
+  const callers = [owner, others[0], others[1]];
+  for (const [i, sender] of callers.entries()) assert.deepEqual(Object.keys(await call(sender, b64([i]))), ["seq"]);
+  assert.equal([...storage.m.keys()].filter((k) => k.startsWith("q:")).length, 3);
+  for (let runs = 0; await group.relay.pushesQueued(); runs++) {
+    assert.ok(runs < 10);
+    await group.alarm();
+  }
+  // The owner has no token, so the other two calls reach one phone fewer.
+  assert.equal(pushes.size, others.length + 2 * (others.length - 1), "everyone but the caller, for each call");
+  assert.ok([...pushes.values()].every((n) => n === 1), "and once only");
+});
+
+test("each run of the group's alarm is counted by the meter", async () => {
+  let added = 0;
+  const { group } = await setup({ METER: { idFromName: (n) => n, get: () => ({ fetch: async () => { added += 1; return Response.json({ low: false }); } }) } });
+  await group.alarm();
+  assert.equal(added, 1);
 });
 
 test("the group's alarm deletes expired messages without anyone posting", async () => {
