@@ -181,4 +181,11 @@ final class SignedFrameTests: XCTestCase {
         XCTAssertEqual(HelpFrame.signedInput(signer: 5, inner: ok.encoded(), group: group),
                        Data("HELPA-SIGNED-2".utf8) + group + Data([0x05, 0x00]) + ok.encoded())
     }
+
+    func testTheChangeoverEndFrame() {
+        let f = HelpFrame.changeoverEnds(generation: 3, at: 1_793_600_000)
+        XCTAssertEqual(f.encoded().count, 9)
+        XCTAssertEqual(HelpFrame(f.encoded()), f)
+        XCTAssertTrue(f.mayGoOnGroupChannel)
+    }
 }

@@ -101,6 +101,9 @@ public enum HelpFrame: Equatable, Sendable {
     /// their settings page only. Counts only inside a frame signed by that person. What they write
     /// is personal, so it goes over the internet only.
     case changeRequest(member: UInt16, setting: Profile.Setting?, at: UInt32, text: String)
+    /// From the first coordinator, signed: when the keys before `generation` stop working (the end
+    /// of the seven days after a removal), so a phone that heard of the removal late still knows.
+    case changeoverEnds(generation: UInt32, at: UInt32)
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
@@ -109,6 +112,7 @@ public enum HelpFrame: Equatable, Sendable {
     static let settingsHeader: UInt8 = 0x21
     static let callStateHeader: UInt8 = 0x22
     static let changeRequestHeader: UInt8 = 0x23
+    static let changeoverHeader: UInt8 = 0x24
     /// Room for what someone writes in a change request inside a signed frame.
     public static let maxRequestBytes = 60
     /// Room for a coordinator's reason inside a signed frame.
@@ -209,6 +213,8 @@ public enum HelpFrame: Equatable, Sendable {
         case let .callState(unit, request, state, at, reason):
             let bytes = Data(MeshText.fit(reason, bytes: Self.maxReasonBytes).utf8)
             w.u8(Self.callStateHeader); w.u32(unit); w.u16(request); w.u8(state.rawValue); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
+        case let .changeoverEnds(generation, at):
+            w.u8(Self.changeoverHeader); w.u32(generation); w.u32(at)
         case let .changeRequest(member, setting, at, text):
             let bytes = Data(MeshText.fit(text, bytes: Self.maxRequestBytes).utf8)
             let code = setting.flatMap { Profile.Setting.allCases.firstIndex(of: $0) }.map { UInt8($0 + 1) } ?? 0
@@ -232,6 +238,11 @@ public enum HelpFrame: Equatable, Sendable {
             guard let signer = r.u16(), let version = r.u32(), let n = r.u16(), n <= Self.maxSettingsBytes, let settings = r.take(Int(n)),
                   let sig = r.take(64) else { return nil }
             self = .groupSettings(signer: signer, version: version, settings: Data(settings), signature: Data(sig))
+            return
+        }
+        if head == Self.changeoverHeader {
+            guard let generation = r.u32(), let at = r.u32() else { return nil }
+            self = .changeoverEnds(generation: generation, at: at)
             return
         }
         if head == Self.changeRequestHeader {
@@ -366,7 +377,7 @@ public enum HelpFrame: Equatable, Sendable {
         case let .availability(who, _, _, _) where who == signer: return frame
         case let .noticeAck(_, by, _) where by == signer: return frame
         // The caller of this checks that the signer is a coordinator.
-        case .memberAdded, .memberRemoved, .memberName, .memberRole: return frame
+        case .memberAdded, .memberRemoved, .memberName, .memberRole, .changeoverEnds: return frame
         // The caller of this checks that the signer is the member or a coordinator.
         case .memberPhone: return frame
         // The caller of this checks that the signer owns the unit.

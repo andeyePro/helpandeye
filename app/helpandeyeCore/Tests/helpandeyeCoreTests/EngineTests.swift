@@ -453,6 +453,24 @@ final class RelayModel {
         XCTAssertNil(caller.engine.group?.relayURL)
     }
 
+    /// A phone off for days when someone was removed counts the seven days from the removal, as
+    /// the first coordinator says, not from when it heard.
+    func testAPhoneThatHeardLateStillStopsWhenTheOthersDo() async {
+        air.keep = { _, _, to in to !== self.caller }
+        coordinator.engine.updateGroup { $0.remove(self.responder.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        let end = coordinator.engine.group!.previousUntil!
+        await advance(5 * 86_400)
+        air.keep = { _, _, _ in true }
+        coordinator.engine.resetMembershipRepeatForTesting()
+        coordinator.engine.tick()
+        await air.run()
+        XCTAssertNotNil(caller.engine.keysEndAt)
+        XCTAssertEqual(caller.engine.keysEndAt!.timeIntervalSince1970, end.timeIntervalSince1970, accuracy: 1, "the coordinator's date, not five days later")
+        await advance(2 * 86_400 + 60)
+        XCTAssertTrue(caller.engine.keysExpired)
+    }
+
     func testRemovingACallerHoldsNothingBack() {
         var g = responder.engine.group!
         g.apply(membership: .memberRemoved(member: caller.engine.saved!.me, version: g.membershipVersion + 1))

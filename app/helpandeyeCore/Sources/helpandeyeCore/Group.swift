@@ -110,6 +110,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// When this phone first heard of a removal it has no new keys for, whoever was removed. Seven
     /// days on, the others stop listening on the old keys, so this phone can no longer reach them.
     public var keysOutdatedSince: Date?
+    /// When the first coordinator said this phone's keys stop working, if it has said.
+    public var keysEndAt: Date?
     public var highestMember: UInt16 = 0
     /// The membership version of each member's last role change, so an old one replayed is ignored.
     public var roleVersions: [UInt16: UInt32] = [:]
@@ -177,7 +179,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, removalsWithoutKeys, keysOutdatedSince, highestMember, roleVersions
+        case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, removalsWithoutKeys, keysOutdatedSince, keysEndAt, highestMember, roleVersions
         case policy, relayURL, membershipVersion, roleBlocksSeen, phoneVersions, settingsVersion, settingsSigner
     }
 
@@ -195,6 +197,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         removedKeys = try c.decodeIfPresent(Set<Data>.self, forKey: .removedKeys) ?? []
         removalsWithoutKeys = try c.decodeIfPresent(Set<UInt16>.self, forKey: .removalsWithoutKeys) ?? []
         keysOutdatedSince = try c.decodeIfPresent(Date.self, forKey: .keysOutdatedSince)
+        keysEndAt = try c.decodeIfPresent(Date.self, forKey: .keysEndAt)
         highestMember = try c.decodeIfPresent(UInt16.self, forKey: .highestMember) ?? 0
         roleVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .roleVersions) ?? [:]
         phoneVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .phoneVersions) ?? [:]
@@ -276,6 +279,12 @@ public struct GroupState: Codable, Equatable, Sendable {
         secrets = secrets.rotated()
     }
 
+    /// While a changeover is on: when the old keys stop, for phones that have not scanned yet.
+    public func changeoverFrame(at now: Date) -> HelpFrame? {
+        guard previousSecrets != nil, let until = previousUntil, until > now else { return nil }
+        return .changeoverEnds(generation: secrets.generation, at: UInt32(until.timeIntervalSince1970))
+    }
+
     /// The secrets to listen with: the current ones, and the previous ones during a changeover.
     public func listening(at now: Date) -> [GroupSecrets] {
         guard let p = previousSecrets, let until = previousUntil, now < until else { return [secrets] }
@@ -332,6 +341,11 @@ public struct GroupState: Codable, Equatable, Sendable {
             roleBlocksSeen = max(roleBlocksSeen, block)
             roleVersions[number] = version
             membershipVersion = max(membershipVersion, version)
+        case let .changeoverEnds(generation, at) where generation > secrets.generation:
+            // Two removals on, the keys this phone holds have already stopped.
+            let end = generation > secrets.generation + 1 ? now : Date(timeIntervalSince1970: TimeInterval(at))
+            keysEndAt = min(keysEndAt ?? end, end)
+            if keysOutdatedSince == nil { keysOutdatedSince = now }
         case let .memberName(number, name):
             guard let i = members.firstIndex(where: { $0.number == number }), !name.isEmpty else { return }
             members[i].name = name

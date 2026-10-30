@@ -38,7 +38,7 @@ For contributors. What each part does and where its code is. The rules it follow
 `app/helpandeyeCore/Sources/helpandeyeCore/HelpFrame.swift` is the reference; this table follows
 it. Every frame starts with one byte: format version 1 in the high nibble, kind in the low nibble.
 The first 16 kinds used the low nibble up, so later kinds have whole header bytes of their own
-(0x21 to 0x23). Integers are little-endian.
+(0x21 to 0x24). Integers are little-endian.
 
 | Kind | Name | Fields after the first byte | Group channel |
 |---|---|---|---|
@@ -61,6 +61,7 @@ The first 16 kinds used the low nibble up, so later kinds have whole header byte
 | 0x21 | group settings | signer u16, version u32, length u16, compressed settings (up to 2,048), Ed25519 signature (64) | only when small enough; otherwise the internet and home Wi-Fi |
 | 0x22 | call state | unit u32, request u16, state u8, at u32, length u8, reason (up to 56) | inside 10; with a reason, the internet and home Wi-Fi only, and the radio gets it without |
 | 0x23 | change request | member u16, setting u8, at u32, length u8, text (up to 60) | no; inside 10, from that member |
+| 0x24 | changeover ends | generation u32, at u32: when the keys before that generation stop | inside 10, from the first coordinator |
 
 Every signature (kinds 3, 9, 10 and 0x21) also covers the group's ID, so one made in one group is
 worthless in another.

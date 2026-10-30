@@ -328,6 +328,7 @@ public final class HelpEngine: ObservableObject {
         }.flatMap { $0 }
         let frames = (added.sorted() + theirs.sorted()).compactMap { g.addedFrame($0) }
             + removed.sorted().map { HelpFrame.memberRemoved(member: $0, version: g.membershipVersion) }
+            + (removed.isEmpty ? [] : [g.changeoverFrame(at: now())].compactMap { $0 })
             + roles.sorted().compactMap { g.roleFrame($0) }
         for f in frames {
             let signed = HelpFrame.signing(f, as: me, identity: identity, group: gid)
@@ -458,7 +459,11 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// When this phone's keys stop reaching the group, if it has not scanned its update by then.
-    public var keysEndAt: Date? { group?.keysOutdatedSince?.addingTimeInterval(GroupState.changeoverPeriod) }
+    public var keysEndAt: Date? {
+        guard let g = group, let heard = g.keysOutdatedSince else { return nil }
+        let guess = heard.addingTimeInterval(GroupState.changeoverPeriod)
+        return g.keysEndAt.map { min($0, guess) } ?? guess
+    }
     /// Past that, only a text the caller sends reaches anyone, so every other route shows the cross.
     public var keysExpired: Bool { keysEndAt.map { now() >= $0 } ?? false }
     public static let keysExpiredReason = "Scan the new code from your coordinator, under Group"
@@ -982,6 +987,7 @@ public final class HelpEngine: ObservableObject {
             for n in g.removedMembers.sorted() {
                 await sendToAll(.signing(.memberRemoved(member: n, version: g.membershipVersion), as: myNumber, identity: identity, group: gid), in: gid)
             }
+            if let f = g.changeoverFrame(at: now()) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: gid), in: gid) }
         }
     }
 
@@ -1072,7 +1078,7 @@ public final class HelpEngine: ObservableObject {
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
                 activity.outgoing[i].receive(frame)
             }
-        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .callState, .changeRequest:
+        case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .callState, .changeRequest, .changeoverEnds:
             // Counted only when signed (below), so a removed phone cannot fake them.
             return
         case let .signed(signer, _, _):
@@ -1109,12 +1115,12 @@ public final class HelpEngine: ObservableObject {
             case let .memberAdded(n, _, _, _, _, _) where n == saved?.me && signer == group?.primaryCoordinator:
                 // The first coordinator lists this phone: the whole group knows it is in.
                 if var s = saved, !s.confirmed { s.confirmed = true; saved = s; store.save(s); activity.notices[.unconfirmed] = nil }
-            case .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone:
+            case .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .changeoverEnds:
                 // Any coordinator can add people; only the first can remove people or change roles,
                 // so the group can never be split onto different keys or numbers.
                 let allowed: Bool
                 switch inner {
-                case .memberRemoved, .memberRole: allowed = signer == group?.primaryCoordinator
+                case .memberRemoved, .memberRole, .changeoverEnds: allowed = signer == group?.primaryCoordinator
                 // Members keep their own number up to date.
                 case let .memberPhone(n, _, _): allowed = signer == n || sender.role == .coordinator
                 // Another coordinator adds only callers and responders, from their own block of
@@ -1384,6 +1390,7 @@ public final class HelpEngine: ObservableObject {
         merged.removedMembers.formUnion(current.removedMembers)
         merged.removalsWithoutKeys = current.removalsWithoutKeys.subtracting(update.removedMembers)
         merged.keysOutdatedSince = current.removedMembers.isSubset(of: update.removedMembers) ? nil : current.keysOutdatedSince
+        merged.keysEndAt = merged.keysOutdatedSince == nil ? nil : current.keysEndAt
         merged.members.removeAll { merged.removedMembers.contains($0.number) }
         merged.membershipVersion = max(update.membershipVersion, current.membershipVersion)
         merged.highestMember = max(update.highestMember, current.highestMember)
