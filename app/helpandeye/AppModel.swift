@@ -193,7 +193,16 @@ final class AppModel: ObservableObject {
         }
     }
     #endif
-    func leave() { engine.leave() }
+    func leave() {
+        engine.leave()
+        forgetSaves("")
+    }
+
+    /// A group left can no longer fail to save, so its warning goes.
+    private func forgetSaves(_ tag: String) {
+        failedSaves.subtract(["state" + tag, "activity" + tag])
+        if saveFailed == failedSaves.isEmpty { saveFailed = !failedSaves.isEmpty }
+    }
     func setRelay(_ url: String) { engine.setRelay(url) }
     func setOwn(_ change: (inout Profile) -> Void) { engine.setOwn(change) }
 
@@ -203,7 +212,7 @@ final class AppModel: ObservableObject {
     }
     func closeMyCall() { engine.closeMyCall() }
     func add(_ category: CallCategory) -> String? { engine.add(category) }
-    func withdraw(_ category: CallCategory) { engine.withdraw(category) }
+    func withdraw(_ category: CallCategory) -> String? { engine.withdraw(category) }
     func addNote(_ text: String) -> String? { engine.addNote(text) }
     func sharePosition(latitude: Double, longitude: Double, accuracy: Double, call: UInt16?, sent: ((Bool) -> Void)? = nil) {
         engine.sharePosition(latitude: latitude, longitude: longitude, accuracy: accuracy, call: call, sent: sent)
@@ -264,6 +273,7 @@ final class AppModel: ObservableObject {
         other.engine.leave()
         hub.remove(Data(other.tag.utf8))
         Store.forget(group: other.tag)
+        forgetSaves(other.tag)
         Store.otherGroups.removeAll { $0 == other.tag }
         others.removeAll { $0.tag == other.tag }
     }

@@ -44,6 +44,14 @@ import XCTest
         XCTAssertEqual(t.caller.request?.status, .notSent)
     }
 
+    /// A caller's phone never confirms personal detail, sealed or (in an older group) plain.
+    func testOnlyAResponderConfirmsPersonalDetail() {
+        let note = HelpFrame.note(unit: 70001, request: 1, part: 1, text: "Back door")
+        XCTAssertFalse(t.caller.engine.takes(note))
+        XCTAssertTrue(t.responder.engine.takes(note))
+        XCTAssertFalse(t.responder.engine.takes(.forResponders(unit: 70001, request: 1, part: 1, sealed: Data(count: 40))), "one it cannot open")
+    }
+
     func testWithWiFiAndTheRelayBothWorkingEachCallIsHeardOnce() async {
         for p in t.air.phones { p.relay.isConfigured = true }
         await t.relaySetUp()

@@ -36,6 +36,13 @@ enum Store {
         }
     }
 
+    /// False only before the phone's first unlock after a restart, when the keychain cannot be read
+    /// at all. A locked phone after that can read everything Help&I keeps.
+    static var readable: Bool {
+        if case .failure(errSecInteractionNotAllowed) = read("identity") { return false }
+        return true
+    }
+
     /// On a watch: the owner's keys, from their paired phone (WatchHandover).
     static func handedOverIdentity() -> DeviceIdentity? {
         guard case let .success(raw) = read("handover.identity") else { return nil }

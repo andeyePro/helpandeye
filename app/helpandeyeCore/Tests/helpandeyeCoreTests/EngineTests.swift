@@ -436,6 +436,23 @@ final class RelayModel {
         }
     }
 
+    /// Today's review: a key update made after the coordinator turned the internet route off
+    /// keeps it off on a phone that missed that change.
+    func testAKeyUpdateKeepsTheInternetRouteOffWhenItWasTurnedOff() async {
+        coordinator.engine.setRelay("https://relay.example")
+        await air.run()
+        air.keep = { _, _, to in to !== self.caller }
+        coordinator.engine.setRelay("")
+        coordinator.engine.updateGroup { $0.remove(self.responder.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        air.keep = { _, _, _ in true }
+        XCTAssertEqual(caller.engine.group?.relayURL, "https://relay.example", "missed the change")
+        let g = coordinator.engine.group!
+        let update = try! Joining.update(g, for: g.member(caller.engine.saved!.me)!, coordinator: coordinator.identity)
+        caller.engine.applyKeyUpdate(try! Joining.openUpdate(update, current: caller.engine.group!, me: caller.identity))
+        XCTAssertNil(caller.engine.group?.relayURL)
+    }
+
     func testRemovingACallerHoldsNothingBack() {
         var g = responder.engine.group!
         g.apply(membership: .memberRemoved(member: caller.engine.saved!.me, version: g.membershipVersion + 1))

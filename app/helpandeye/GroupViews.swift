@@ -379,7 +379,7 @@ struct ReceiveUpdateSection: View {
                     message = "That code did not work. Ask your coordinator to show it again."; return
                 }
                 model.engine.applyKeyUpdate(updated)
-                message = "Done. Everything you send goes again."
+                message = "Done. What you type, choose or share is sent again from now on."
             }
             if let message { Text(message) }
         }

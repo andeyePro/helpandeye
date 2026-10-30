@@ -151,9 +151,11 @@ final class Relay: ObservableObject, RelayLink {
             case .some((403, _)): lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return
             case .some((401, _)):
                 // Usually the phone's clock: the relay takes only requests made in the last five minutes.
-                lastProblem = clockOff.map { abs($0) > 240 } == true
-                    ? "This phone's clock is wrong by about \(Int(abs(clockOff!) / 60)) minutes, so the relay turns it away. Set the date and time automatically in Settings, General, Date & Time."
-                    : "The relay turned this phone away (401)."
+                if let off = clockOff, abs(off) > 240 {
+                    lastProblem = "This phone's clock is wrong by about \(Int(abs(off) / 60)) minutes, so the relay turns it away. Set the date and time automatically in Settings, General, Date & Time."
+                } else {
+                    lastProblem = "The relay turned this phone away (401)."
+                }
                 return
             case let .some((status, _)) where status != 200: lastProblem = "Could not read the relay (\(status))."; return
             default: break

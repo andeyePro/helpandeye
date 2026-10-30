@@ -205,7 +205,7 @@ struct FollowUps: View {
                     let chosen = request.categories.contains(c)
                     // Pressed again, a choice is taken back: one pressed by mistake is not stuck.
                     Button {
-                        if chosen { model.withdraw(c); return }
+                        if chosen { problem = model.withdraw(c); return }
                         problem = model.add(c)
                         // "Something else" asks what: the keyboard's microphone takes speech too.
                         if c == .other, model.canSendPersonal { typing = true }

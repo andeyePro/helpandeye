@@ -150,6 +150,22 @@ final class SecondReviewTests: XCTestCase {
         XCTAssertTrue(back.notices.isEmpty)
     }
 
+    /// Saved by an earlier version, before today's fields: everything still loads.
+    func testWhatAnEarlierVersionSavedStillLoads() throws {
+        let g = GroupState(name: "Mill Lane", secrets: .random(), members: [])
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(SavedState(group: g, me: 1))) as! [String: Any]
+        json["lastWatchRequest"] = nil
+        var group = json["group"] as! [String: Any]
+        for k in ["removalsWithoutKeys", "keysOutdatedSince", "settingsSigner"] { group[k] = nil }
+        json["group"] = group
+        let back = try JSONDecoder().decode(SavedState.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(back.group.name, "Mill Lane")
+        XCTAssertFalse(back.group.needsKeyUpdate)
+        var a = try JSONSerialization.jsonObject(with: JSONEncoder().encode(Activity())) as! [String: Any]
+        for k in ["closeRepeats", "lastMembershipRepeat"] { a[k] = nil }
+        XCTAssertNoThrow(try JSONDecoder().decode(Activity.self, from: JSONSerialization.data(withJSONObject: a)))
+    }
+
     func testAtMostFourCheckInsADay() {
         XCTAssertEqual(CheckInSchedule(times: [60, 120, 180, 240, 300]).times, [60, 120, 180, 240])
     }

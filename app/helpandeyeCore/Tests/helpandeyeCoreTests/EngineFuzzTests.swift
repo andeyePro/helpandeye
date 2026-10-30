@@ -255,13 +255,13 @@ import XCTest
         for p in w.phones where orphan(p) && !w.gone.contains(ObjectIdentifier(p)) {
             XCTAssertTrue(p.engine.showing(.unconfirmed), "seed \(seed): member \(p.engine.saved!.me) was never told it may not be in the group")
         }
-        let versions = Set(stayed.map { $0.engine.group!.membershipVersion })
         let orphans = Set(w.phones.filter(orphan).map { $0.engine.saved!.me })
         let rosters = Set(stayed.map { Set($0.engine.group!.members.map(\.number)).subtracting(orphans) })
         // A phone that heard a coordinator add someone before hearing that coordinator was removed
         // holds that later version; the first coordinator never heard it. The orphans themselves
-        // are told they may not be in the group (above), so only then may versions differ.
-        XCTAssertTrue(versions.count == 1 || !orphans.isEmpty, "seed \(seed): phones disagree on the membership version: "
+        // are told they may not be in the group (above). Every other phone agrees.
+        let clean = stayed.filter { Set($0.engine.group!.members.map(\.number)).isDisjoint(with: orphans) }
+        XCTAssertLessThanOrEqual(Set(clean.map { $0.engine.group!.membershipVersion }).count, 1, "seed \(seed): phones disagree on the membership version: "
                        + stayed.map { "\($0.engine.saved!.me)\($0.engine.isPrimaryCoordinator ? "*" : "")=v\($0.engine.group!.membershipVersion) gen\($0.engine.group!.secrets.generation) n\($0.engine.group!.members.count)" }.joined(separator: " ")
                        + "\n" + w.log.suffix(30).joined(separator: "\n"))
         // For relay/test/model.test.js: the member-list publishes this run made, with what the model

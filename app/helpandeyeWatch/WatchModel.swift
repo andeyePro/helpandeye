@@ -376,6 +376,7 @@ final class WatchModel: NSObject, ObservableObject {
     }
 
     private func stopCountdown() {
+        warning = nil
         countdown = nil
         countdownTimer?.invalidate()
         countdownTimer = nil
@@ -400,6 +401,7 @@ final class WatchModel: NSObject, ObservableObject {
     /// reach. Two copies of one person's acknowledgement are one acknowledgement.
     func acknowledge(_ r: Open) {
         problem = nil
+        warning = nil
         let mine = engine(forGroup: r.group)?.acknowledge(r.key) == true
         lastAck = mine ? (r.group, r.key) : nil
         guard phoneInReach else {

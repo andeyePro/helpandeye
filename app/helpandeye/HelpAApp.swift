@@ -20,9 +20,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     private var token: Data?
 
     func application(_ app: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        if app.isProtectedDataAvailable { start() } else { Launch.shared.waited = true }
+        if Store.readable { start() } else { Launch.shared.waited = true }
         NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.start() }
+            MainActor.assumeIsolated { if Store.readable { self?.start() } }
         }
         app.registerForRemoteNotifications()
         return true

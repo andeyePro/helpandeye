@@ -580,12 +580,16 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// Takes back a category pressed by mistake.
-    public func withdraw(_ category: CallCategory) {
-        guard var r = activity.outgoing.popLast() else { return }
+    @discardableResult
+    public func withdraw(_ category: CallCategory) -> String? {
+        // Taken back here but not there would leave responders acting on it.
+        if let keyProblem { return keyProblem }
+        guard var r = activity.outgoing.popLast() else { return nil }
         let frame = r.withdraw(category)
         activity.outgoing.append(r)
         let gid = groupID
         if let frame { spawn { await self.sendPersonal(frame, in: gid) } }
+        return nil
     }
 
     // MARK: Settling a call (decision 6)
@@ -715,8 +719,11 @@ public final class HelpEngine: ObservableObject {
     /// message for responders only if this member responds and it is not their own.
     public func takes(_ frame: HelpFrame) -> Bool {
         switch frame {
-        case let .call(unit, _, _, _), let .forResponders(unit, _, _, _): me?.canRespond == true && unit != me?.unit
-        default: me != nil
+        case let .call(unit, _, _, _): me?.canRespond == true && unit != me?.unit
+        // Sealed for responders: only one that can open it holds it.
+        case .forResponders: me?.canRespond == true && group.flatMap { ForResponders.open(frame, in: $0, at: now()) } != nil
+        // Personal detail sent plainly (an older group) is for responders only, too.
+        default: frame.personalPart != nil ? me?.canRespond == true : me != nil
         }
     }
 
@@ -1222,7 +1229,8 @@ public final class HelpEngine: ObservableObject {
     /// Never before the call was pressed, so a responder whose clock is slow is still counted by
     /// the caller, who takes only acknowledgements made after the press.
     private func ackTime(_ key: IncomingRequest.Key) -> Date {
-        max(now(), activity.inbox.requests[key]?.sentAt ?? .distantPast)
+        // A call frame anyone in the group could forge cannot push an acknowledgement into the future.
+        min(max(now(), activity.inbox.requests[key]?.sentAt ?? .distantPast), now().addingTimeInterval(OutgoingRequest.clockAllowance))
     }
 
     private func sendAck(_ frame: HelpFrame, for key: IncomingRequest.Key) {
@@ -1395,7 +1403,8 @@ public final class HelpEngine: ObservableObject {
             merged.settingsVersion = current.settingsVersion
             merged.settingsSigner = current.settingsSigner
         }
-        if merged.relayURL == nil { merged.relayURL = current.relayURL }
+        // An update made before the relay address was first set has none: keep this phone's.
+        if !updateIsNewer || update.settingsVersion == 0, merged.relayURL == nil { merged.relayURL = current.relayURL }
         changeGroup(edit: false) { $0 = merged }
     }
 

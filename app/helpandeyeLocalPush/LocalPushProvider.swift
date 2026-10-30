@@ -49,13 +49,18 @@ final class LocalPushProvider: NEAppPushProvider {
     private var alerted: [IncomingRequest.Key: Date] = [:]
     private var calmed: Set<IncomingRequest.Key> = []
     private var done: Set<IncomingRequest.Key> = []
+    /// When each call was pressed: the same numbers with another press time are a new call (a new
+    /// watch, or a restored phone), so what was known of the old one goes.
+    private var pressed: [IncomingRequest.Key: UInt32] = [:]
 
     @MainActor private func alert(for frame: HelpFrame, saved: SavedState) {
         guard let me = saved.group.member(saved.me), me.canRespond else { return }
         let center = UNUserNotificationCenter.current()
         switch frame {
-        case let .call(unit, request, colour, _) where colour != .green && unit != me.unit:
+        case let .call(unit, request, colour, sentAt) where colour != .green && unit != me.unit:
             let key = IncomingRequest.Key(unit: unit, request: request)
+            if let before = pressed[key], before != sentAt { alerted[key] = nil; calmed.remove(key); done.remove(key) }
+            pressed[key] = sentAt
             guard !done.contains(key), !calmed.contains(key), Date().timeIntervalSince(alerted[key] ?? .distantPast) >= 60 else { return }
             alerted[key] = Date()
             let who = saved.group.member(unit: unit)?.name ?? "Unit \(unit)"

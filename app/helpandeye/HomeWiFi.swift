@@ -99,7 +99,7 @@ import Network
                 guard let m = p.session.message(frame, id: id) else { settle(id, confirmed: false); continue }
                 p.unconfirmed.insert(id)
                 p.connection.send(content: m, completion: .contentProcessed { [weak self] error in
-                    if error != nil { Task { @MainActor in self?.settle(id, confirmed: false) } }
+                    if error != nil { Task { @MainActor in p.unconfirmed.remove(id); self?.settle(id, confirmed: false) } }
                 })
             }
             // A phone that has the bytes but not Help&I running (suspended, say) never confirms.
