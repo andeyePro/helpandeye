@@ -436,7 +436,7 @@ Pass: in step 2 the internet route says the relay needs a pass for this group an
 
 ## Help&I firmware on the box
 
-Sections 46 to 57 need boxes running Help&I's own firmware (`firmware/build.sh`, environment `heltec_v4_helpandi` on a Heltec WiFi LoRa 32 V4 with the buttons, buzzer and mains divider of `firmware/DESIGN.md` section 5, or `heltec_v4_helpandi_dev` for a plain board). Nothing in them has been run: the firmware has only been compiled. The app side (adding a box to a group over Bluetooth, commands 0x71 and 0x72 in DESIGN.md section 6) is not built, so until it is, provision with a test tool that sends those bytes over the companion link, and say so in the run. "Box A" is a Help&I box in the group as its own member; phone B is a responder with its own stock box. Keep phone A off unless a step says otherwise.
+Sections 46 to 58 need boxes running Help&I's own firmware (`firmware/build.sh`, environment `heltec_v4_helpandi` on a Heltec WiFi LoRa 32 V4 with the buttons, buzzer and mains divider of `firmware/DESIGN.md` section 5, or `heltec_v4_helpandi_dev` for a plain board). Nothing in them has been run: the firmware has only been compiled. The app side (adding a box to a group over Bluetooth, commands 0x71 and 0x72 in DESIGN.md section 6) is not built, so until it is, provision with a test tool that sends those bytes over the companion link, and say so in the run. "Box A" is a Help&I box in the group as its own member; phone B is a responder with its own stock box. Keep phone A off unless a step says otherwise.
 
 ## 46. The box's buttons with no phone
 
@@ -491,7 +491,7 @@ Pass: step 1 counts down from 60 on the screen, beeping every 10 seconds, beeps 
 
 ## 52. Sounds, screen and LED for someone with poor sight or hearing
 
-Pass: the press, "seen" and the cross each have a sound that can be told apart from the others across a room, and none is harsh. The screen's words can be read at arm's length, and the screen stays on while a call is open or there is a power cut, going dark two minutes after the last press otherwise. The LED is on while a call waits, blinks when nothing was sent, and is off once a responder has seen it; it can be seen in a dark room.
+Pass: the press, "seen" and the cross each have a sound that can be told apart from the others across a room, and none is harsh. The screen's words can be read at arm's length, and the screen stays on while a call is open, going dark two minutes after the last press otherwise (a power cut shows on its bottom line while it is on, and on battery the box then sleeps: section 58). The LED is on while a call waits, blinks when nothing was sent, and is off once a responder has seen it; it can be seen in a dark room.
 
 ## 53. A power cut
 
@@ -503,9 +503,10 @@ Pass: step 1 reports nothing. In step 2 box A shows "Power cut" on its bottom li
 
 ## 54. Battery life on battery alone
 
-1. Charge box A fully, unplug it, and leave it idle, pressing red once an hour.
+1. Charge box A fully, unplug it, and leave it idle, pressing red once an hour and having phone B acknowledge each press within a minute.
+2. With a meter in the battery lead, read the draw while a call is open (awake) and once the box has gone quiet (asleep), and time how long it stays awake after one of its ten-minute wakes.
 
-Pass: it runs at least 24 hours, every press is heard, and its hours-left estimates are within an hour of the truth near the end. Record the measured average draw: it replaces `HI_DRAW_MA` in `firmware/box/platformio.local.ini`.
+Pass: it runs at least 24 hours, every press is heard, each press wakes the box at once, and its hours-left estimates are within an hour of the truth near the end. Record the measured draws: they replace `HI_DRAW_AWAKE_MA` and `HI_DRAW_ASLEEP_UA` in `firmware/box/platformio.local.ini`, and the awake time per wake replaces `kAwakePerWakeMs` in `firmware/core/box.hpp` if it is far from three seconds.
 
 ## 55. Transmit power and duty cycle
 
@@ -530,3 +531,15 @@ Pass: phone A is told of the call (push 0xA3) and carries it on its own routes o
 4. Send forget (0x75) and press red.
 
 Pass: step 1 shows "Not set up yet. Add this box to a group in the Help&I app." with the not-sent sound. Step 2 answers each command with OK and the info reply shows the unit, member and next request number; the box survives a power cycle still provisioned. In step 3 the call goes, and after the removal the responder's acknowledgement no longer counts (the box goes back to waiting). Step 4 is back to step 1.
+
+## 58. Sleeping and waking on battery
+
+Needs box A on battery with its mains adapter off (on a plain board, ground GPIO 4 to stage a power cut: the development layout pulls that pin up) and a third board logging the channel.
+
+1. Press red, have phone B acknowledge, and leave the box for three minutes.
+2. Tap red, letting go at once.
+3. Have phone B acknowledge, wait three minutes, then plug the adapter in (or unground GPIO 4).
+4. Unplug it again, wait three minutes, connect phone A over Bluetooth, then disconnect it and wait three minutes.
+5. Press the board's reset button, then press red, amber and green as in section 55 for half an hour, press reset again, and keep pressing for the rest of the hour.
+
+Pass: after step 1 the screen is dark, the LED is off, the box is no longer visible over Bluetooth and the third board hears nothing more from it. Step 2 sends Help within two seconds of the tap, with the press sound, and the screen comes on: the press that woke the box counts. After step 3 "Power is back." reaches phone B and the box stays awake (visible over Bluetooth). In step 4 the box is visible again within a minute of the adapter going off (it wakes every ten minutes to read the battery, for a few seconds), the phone connects and keeps it awake, and after the disconnect it sleeps again. In step 5 the screen still shows the last call as seen, phone B hears no new power-cut report, and the third board's log shows the box's own sending stay under the band's duty cycle across the reset, as if there had been none.

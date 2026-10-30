@@ -342,8 +342,9 @@ new call, as the app does. The box keeps its last eight calls; the oldest makes 
 fresh hour. A board that lost power has no record of the hour before, so after a cold start the
 box counts the optional half of the hour's allowance as used (`BoxEngine::coldStart`): for that
 hour, calls and their resends still go (their shares are 90% and 70%) and only I'm OK repeats,
-closes and reports wait. Keeping the log in RTC memory, so a plain reset does not count as a
-cold start, is still to do.
+closes and reports wait. The log is kept in the board's RTC memory with the rest of what the box
+retains (section 10), so a plain reset or a wake from deep sleep carries the hour on; only a
+start with no valid copy (a power-on, or another build) is a cold start.
 
 **Transmit power.** `maxRadioPowerSetting` turns the band's ERP limit into the highest SX1262
 setting, given the antenna's gain and the amplifier's gain, and refuses to send at all if even
@@ -370,6 +371,14 @@ late would delay their alerts. So the box must never claim a later time than the
 the newest time it can justify, and only raises it from the phone, or from a frame signed by a
 current member (an acknowledgement, a membership repeat), never from unsigned traffic.
 
+**The monotonic clock across sleep and resets.** The core's schedule and airtime run on a
+monotonic clock in milliseconds (section 7). On the board it is the 64-bit `monoMs()` (ESP-IDF's
+microsecond timer, which never wraps) plus an offset (`UITask::now`). The retained copy (section 10) carries the clock it was taken at and the system
+time beside it; after a wake from deep sleep the offset adds the time asleep, measured as the
+system time's advance, which ESP-IDF keeps through deep sleep and nothing can set meanwhile.
+After a plain reset the copy is at most a second old and the clock carries on from it, so the
+retained calls' times and the airtime log's stamps stay in the past, never in the future.
+
 ## 10. Power cuts and battery (decisions 3 and 4)
 
 A power cut at someone's home is personal, so the report is sealed for responders like any other
@@ -380,9 +389,61 @@ choice (Martin, 2026-10-30). `core/power.hpp` and `BoxEngine::power`:
   the same way. The screen's bottom line says "Power cut: about 12 h" (or "Power cut" before an
   estimate) whether or not it reports.
 - Battery: hours left from the cell's resting voltage (a piecewise-linear curve from 4.2 V to the
-  board's 3.4 V shutdown) and the box's average draw (`HI_BATTERY_MAH`, `HI_DRAW_MA`, build
-  flags until measured), reported as the estimate passes 24, 12, 6, 3, 2 and 1 hours. A
-  responder's acknowledgement of the report silences all but the final warning.
+  board's 3.4 V shutdown) and the box's average draw on battery, reported as the estimate passes
+  24, 12, 6, 3, 2 and 1 hours. A responder's acknowledgement of the report silences all but the
+  final warning. The draw (`batteryModel`) is the deep-sleep draw (`HI_DRAW_ASLEEP_UA`) plus the
+  awake draw (`HI_DRAW_AWAKE_MA`) for the share of each ten minutes the box is up to read the
+  battery (about three seconds, `kAwakePerWakeMs`), rounded up to a whole milliamp so the
+  estimate never flatters the cell; `HI_BATTERY_MAH` and both draws are build flags until section
+  54 of the manual tests measures them. A call keeps the box awake, at the awake draw, for as long
+  as it stands; the estimate is for the box left alone again, which is how it spends a power cut,
+  and `PowerMonitor` takes its draw once, at construction, so the estimate does not switch
+  while a call is open.
+
+**Deep sleep on battery.** MeshCore's companion build never sleeps on an ESP32: every pass of
+its `loop()` runs the mesh (the SX1262 left in continuous receive, the outbound queue), the
+Bluetooth serial interface (advertising whenever no phone is connected), the sensors, the UI
+task and the clock; only its nRF52 build light-sleeps between passes. Awake, the V4 draws tens
+of milliamps, which is what `HI_DRAW_AWAKE_MA` stands for, and decision 4's day on battery
+would need a large cell. So on battery the box deep-sleeps whenever nothing needs it awake. The
+core decides (`BoxEngine::canSleep`, host-tested): the mains have been off for the ten seconds
+(on mains it never sleeps, and never while the mains are not yet known), no call is still being
+resent (a Help or Need a hand nobody has acknowledged, or one the radio could not send, is
+resent until a person settles it, so the box stays up for it; an I'm OK is left after its four
+repeats), no close or report is still being repeated, and no phone is connected (the box is that
+phone's radio). The UI task adds what only it knows: nothing queued for the radio or on air
+(`hasPendingWork`, `isInRecvMode`), no countdown, no sound playing, and the screen's two
+minutes after a press over.
+
+Going to sleep (`UITask::sleep`, after the board's own `enterDeepSleep` and `powerOff`, which
+cannot be called because they clear every wake source), the box puts the SX1262 to sleep and
+holds its chip select, switches the amplifier's supply off, turns the screen off (and with it
+Vext) and sets the wake sources, with the RTC peripherals left powered so the pull-ups hold: the
+three buttons through EXT1, any low (PRG on a plain board; all RTC pins, section 5); the mains
+pin through EXT0, high, so mains returning wakes it; and a timer of ten minutes (`kSleepS`) to
+read the battery. Waking, MeshCore starts as from power-on. The UI task gives `ButtonMachine`
+the buttons that woke it (`esp_sleep_get_ext1_wakeup_status`), so the waking press counts even
+if it was let go in the second the board took to start; resumes the retained copy (below); and
+after a timer wake keeps the screen dark and sleeps again as soon as the battery has been read,
+unless a mark has passed and its note's repeats keep it up. Bluetooth advertises again at every
+wake, so a phone nearby may see the box come and go; one that connects keeps it awake.
+
+**What a sleeping box misses.** Deep sleep stops the radio, so a sleeping box hears nothing:
+calls from others (this is a caller's box, not a responder's; it never answers them),
+acknowledgements (none can be due: it sleeps only with no call open), a coordinator's close
+(nothing open to close), and the signed membership repeats. A removal it misses is applied when
+its phone next sends the member list; until then a removed responder's acknowledgement would
+still count on this box. That is the trade-off taken for the battery: the person's own call is
+what the box is for, and every one of them keeps it awake until a person settles it.
+
+**What survives** (`BoxEngine::retain`, `resume`; `kRetainedBytes`, about 5 KB). The hour's
+airtime log, the power monitor (so a wake is not a new power cut and the hour marks are not
+reported again), the eight calls, and the open report's number and part count, as the struct's
+own bytes with a checksum and a layout number, in RTC slow memory (`RTC_NOINIT_ATTR`, which a
+reset leaves alone and a power-on leaves as it was), written every second while awake and again
+before sleep. A copy the checksum and layout do not confirm is a cold start (decision 8): a
+power-on, or another build. A report's remaining repeats are not kept, so a reset during them
+loses the rest; the next mark makes the next note.
 
 **The frames.** A report is a request of the box's own, numbered from the same counter as its
 calls, so the responders' existing signed acknowledgement (kind 3) silences it and their phones
@@ -424,8 +485,9 @@ section 6.
   commands (section 6).
 - `firmware/build.sh` clones MeshCore at the commit named in the script, copies the overlay and
   the core in, applies the patch and runs `pio run`. One MeshCore tree, reused.
-- The UI task does not yet pass the wake cause to the buttons (section 7): the companion build
-  never deep-sleeps, so there is none. Deep sleep on battery is later work.
+- The UI task passes the buttons that woke the board to `ButtonMachine` (section 7), keeps the
+  core's retained copy in RTC memory and deep-sleeps on battery (section 10); the ESP32 calls are
+  in `UITask::begin`, `keep` and `sleep`.
 - The app's side is not started: recognising a Help&I box from the firmware version, sending
   0x71 and 0x72 at join and after every membership or settings change, carrying the box's calls
   (0xA3) on its own routes and answering with 0x74, and setting the antenna type (TODO.md).
@@ -443,7 +505,7 @@ section 6.
 | `core/seal.hpp` | SHA-256, HKDF, ChaCha20-Poly1305, the responders' key and nonce, the sealed frame | ForResponders.swift |
 | `core/power.hpp` | The ten-second mains rule, hours left, the six marks and the acknowledgement that silences them | decisions 3 and 4 |
 | `core/provision.hpp` | The Help&I companion commands and the flash layout (section 6) | |
-| `core/box.hpp` | The box: presses to calls, resends, acknowledgement checking, I'm OK and closes, removals, the changeover, the cold start, the power cap, reports, the screen and sounds | Engine.swift |
+| `core/box.hpp` | The box: presses to calls, resends, acknowledgement checking, I'm OK and closes, removals, the changeover, the cold start and what survives a reset, when the box may sleep, the draw on battery, the power cap, reports, the screen and sounds | Engine.swift |
 
 Run the host tests from `firmware/`:
 
@@ -478,7 +540,7 @@ Ed25519 library (no signature vectors here: none could be made from a phone).
 
 ## 13. Test plan
 
-**Host tests (built, run, passing).** 102 tests in `firmware/test`: the frames byte for byte
+**Host tests (built, run, passing).** 109 tests in `firmware/test`: the frames byte for byte
 against the Swift layout, malformed and stray input, what may go on the group channel, the
 signature inputs, too small a buffer; the resend times, acknowledgement rules, removal, settling,
 I'm OK settling only earlier calls, which share each resend uses, and close repeats; airtime
@@ -493,10 +555,13 @@ the mains rule, the hours and the marks; the provisioning bytes; and the whole b
 fake board with real keys (TweetNaCl, test only): a press, the resends, which acknowledgements
 count, a removal, I'm OK under both profiles, the cross and the phone's routes, the bands and the
 cold start, the power cap, a power-cut report opened as a responder's phone opens it, a
-coordinator's close, the changeover, request numbers and forgetting. Still to add: an
-acknowledgement signed by a real phone, checked on a board.
+coordinator's close, the changeover, request numbers and forgetting; the retained copy through a
+fake RTC store (the hour's airtime, the power cut and its part numbers and the calls carried on,
+a corrupted or empty copy refused), when the box may sleep, and the hours left with the box
+asleep between polls. Still to add: an acknowledgement signed by a real phone, checked on a
+board.
 
-**On a board** (not run): `tests/MANUAL-TESTS.md` sections 46 to 57, which replace "Help&I needs
+**On a board** (not run): `tests/MANUAL-TESTS.md` sections 46 to 58, which replace "Help&I needs
 no firmware of its own" in Before you start once a box has passed them. The sections proposed in
 an earlier version of this file are there now.
 
@@ -518,7 +583,8 @@ an earlier version of this file are there now.
 7. The development layout with only PRG: a press starts a 60-second countdown, a second press
    stops it, as on the watch.
 8. After a cold start with no record of the last hour, the optional half of the airtime counts as
-   used for an hour.
+   used for an hour. (Now that the record survives a reset and deep sleep in RTC memory, a cold
+   start is a start with no valid copy there: a power-on, or another build; section 10.)
 9. Power-cut and battery reports are sealed for responders like other personal content; a power
    cut at a home is personal.
 10. Flash encryption and secure boot on boxes that go to homes, as long as they do not hurt

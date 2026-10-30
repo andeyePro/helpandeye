@@ -3,8 +3,11 @@
 #include <Curve25519.h>
 #include <SPIFFS.h>
 #include <Utils.h>
+#include <driver/rtc_io.h>
 #include <esp_random.h>
+#include <esp_sleep.h>
 #include <esp_timer.h>
+#include <sys/time.h>
 #include <target.h>
 
 #include "../MyMesh.h"
@@ -19,7 +22,48 @@ constexpr const char* kNextRequestKey = "next";
 constexpr uint8_t kFlood = 0xFF;
 constexpr uint64_t kScreenOnMs = 120000;
 constexpr const char* kChannelName = "Help&I";
-const BatteryModel kBattery{HI_BATTERY_MAH, HI_DRAW_MA};
+const BatteryDraw kDraw{HI_BATTERY_MAH, HI_DRAW_AWAKE_MA, HI_DRAW_ASLEEP_UA};
+
+// The buttons that wake the board from deep sleep, all RTC pins (section 5). Inside the box PRG
+// cannot be reached, so it is a wake source only on a plain board.
+struct WakeButton {
+  int pin;
+  Input input;
+};
+#if HI_LAYOUT_PRG_ONLY
+constexpr WakeButton kWakeButtons[] = {{PIN_USER_BTN, Input::prg}};
+#else
+constexpr WakeButton kWakeButtons[] = {{HI_PIN_RED, Input::red}, {HI_PIN_AMBER, Input::amber}, {HI_PIN_GREEN, Input::green}};
+#endif
+
+// The buttons that woke the board, as ButtonMachine takes them: that press counts even if it was
+// let go before the core first ran.
+uint8_t wokenBy() {
+  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT1) return 0;
+  uint64_t pins = esp_sleep_get_ext1_wakeup_status();
+  uint8_t woke = 0;
+  for (const WakeButton& b : kWakeButtons)
+    if (pins >> b.pin & 1) woke |= uint8_t(1 << uint8_t(b.input));
+  return woke;
+}
+
+// The core's copy of what survives deep sleep and a reset, with the clock it was taken at, in
+// RTC memory that a reset leaves alone and a power-on leaves as it was: the core's checksum
+// tells the two apart, and the clock is written with the copy. The system clock keeps running
+// through deep sleep, and nothing can set it meanwhile, so it measures the time asleep.
+struct RetainedCopy {
+  uint64_t monoMs;
+  int64_t wallUs;
+  uint8_t state[BoxEngine::kRetainedBytes];
+};
+RTC_NOINIT_ATTR RetainedCopy retained;
+static_assert(sizeof retained <= 6144, "the ESP32-S3 has 8 KB of RTC slow memory, part of it ESP-IDF's");
+
+int64_t wallUs() {
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  return int64_t(tv.tv_sec) * 1000000 + tv.tv_usec;
+}
 
 // millis() is 32 bits on the ESP32 and wraps after 49.7 days; the core's resends and its airtime
 // log need a clock that only goes up for as long as the box is on.
@@ -40,30 +84,49 @@ constexpr const char* kWarnTune = "warn:d=16,o=6,b=200:c,p,c";
 
 UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial)
     : AbstractUITask(board, serial),
-      _buttons(HI_LAYOUT_PRG_ONLY ? prgOnly() : threeButtons()),
-      _engine(*this, RadioSettings(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR), kBattery, 1) {}
+      _buttons(HI_LAYOUT_PRG_ONLY ? prgOnly() : threeButtons(), wokenBy()),
+      _engine(*this, RadioSettings(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR), batteryModel(kDraw), 1) {}
+
+uint64_t UITask::now() const { return monoMs() + _monoOffset; }
 
 void UITask::begin(DisplayDriver* display, SensorManager*, NodePrefs* prefs) {
   _display = display;
   _prefs = prefs;
+  bool slept = esp_reset_reason() == ESP_RST_DEEPSLEEP;
+  if (slept) {
+    // Back from the RTC controller to ordinary GPIO, as HeltecV4Board::begin does for DIO1.
+    for (const WakeButton& b : kWakeButtons) rtc_gpio_deinit(gpio_num_t(b.pin));
+    rtc_gpio_deinit(gpio_num_t(HI_PIN_MAINS));
+  }
 #if !HI_LAYOUT_PRG_ONLY
   pinMode(HI_PIN_RED, INPUT_PULLUP);
   pinMode(HI_PIN_AMBER, INPUT_PULLUP);
   pinMode(HI_PIN_GREEN, INPUT_PULLUP);
+  pinMode(HI_PIN_MAINS, INPUT);
+#else
+  // A plain board has no mains divider: pulled up it reads mains on, and grounding the pin
+  // stages a power cut (MANUAL-TESTS 58).
+  pinMode(HI_PIN_MAINS, INPUT_PULLUP);
 #endif
   pinMode(PIN_USER_BTN, INPUT_PULLUP);
-  pinMode(HI_PIN_MAINS, INPUT);
   pinMode(HI_PIN_LED, OUTPUT);
   _buzzer.begin();
   _buzzer.quiet(false);
   _nvs.begin("helpandi", false);
   _engine.setNextRequest(_nvs.getUShort(kNextRequestKey, 1));
   applyRadio();
-  // No record of the hour before this start survives a power cut (section 8).
-  _engine.coldStart(monoMs());
+  if (_engine.resume(retained.state)) {
+    _monoOffset = retained.monoMs + (slept ? uint64_t(wallUs() - retained.wallUs) / 1000 : 0) - monoMs();
+  } else {
+    // No record of the hour before this start survives a power cut (section 8).
+    _engine.coldStart(now());
+  }
   loadProvisioning();
-  _activeUntil = monoMs() + kScreenOnMs;
-  if (_display) _display->turnOn();
+  // A wake to read the battery shows nothing: the box goes back to sleep in a moment.
+  bool quiet = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
+  _activeUntil = quiet ? now() : now() + kScreenOnMs;
+  if (_display && quiet) _display->turnOff();
+  if (_display && !quiet) _display->turnOn();
 }
 
 // BoxPort
@@ -338,8 +401,48 @@ void UITask::applyRadio() {
   }
 }
 
+void UITask::keep(uint64_t now) {
+  retained.monoMs = now;
+  retained.wallUs = wallUs();
+  _engine.retain(retained.state);
+}
+
+// Deep sleep until a button, the mains coming back or the next battery reading (section 10).
+// As ESP32Board::enterDeepSleep and HeltecV4Board::powerOff leave the board, with the wake
+// sources added; neither can be called, as both clear every wake source before sleeping.
+void UITask::sleep(uint64_t now) {
+  keep(now);
+  if (_display) _display->turnOff();
+  digitalWrite(HI_PIN_LED, LOW);
+  radio_driver.powerOff();
+  digitalWrite(P_LORA_NSS, HIGH);
+  rtc_gpio_hold_en(gpio_num_t(P_LORA_NSS));
+  digitalWrite(P_LORA_PA_POWER, LOW);
+  rtc_gpio_hold_en(gpio_num_t(P_LORA_PA_POWER));
+  Serial.flush();
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+  // The RTC peripherals stay powered so the pull-ups hold and the mains pin can be watched.
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+  uint64_t buttons = 0;
+  for (const WakeButton& b : kWakeButtons) {
+    rtc_gpio_pullup_en(gpio_num_t(b.pin));
+    rtc_gpio_pulldown_dis(gpio_num_t(b.pin));
+    buttons |= 1ULL << b.pin;
+  }
+  esp_sleep_enable_ext1_wakeup(buttons, ESP_EXT1_WAKEUP_ANY_LOW);
+  rtc_gpio_pulldown_dis(gpio_num_t(HI_PIN_MAINS));
+#if HI_LAYOUT_PRG_ONLY
+  rtc_gpio_pullup_en(gpio_num_t(HI_PIN_MAINS));
+#else
+  rtc_gpio_pullup_dis(gpio_num_t(HI_PIN_MAINS));
+#endif
+  esp_sleep_enable_ext0_wakeup(gpio_num_t(HI_PIN_MAINS), 1);
+  esp_sleep_enable_timer_wakeup(uint64_t(kSleepS) * 1000000);
+  esp_deep_sleep_start();
+}
+
 void UITask::loop() {
-  uint64_t now = monoMs();
+  uint64_t now = this->now();
   uint32_t wall = rtc_clock.getCurrentTime();
 
   Event events[ButtonMachine::kMaxEvents];
@@ -365,6 +468,7 @@ void UITask::loop() {
     }
     _engine.power(now, wall, digitalRead(HI_PIN_MAINS) == HIGH, _millivolts);
     applyRadio();
+    keep(now);
   }
 
   for (Sound s = _engine.takeSound(); s != Sound::none; s = _engine.takeSound()) {
@@ -379,14 +483,22 @@ void UITask::loop() {
   bool blink = s.hasCall && s.status == CallerStatus::notSent;
   digitalWrite(HI_PIN_LED, open && (!blink || (now / 500) % 2) ? HIGH : LOW);
 
-  if (_display == nullptr) return;
-  bool wanted = open || _buttons.counting() || s.mains == PowerMonitor::Mains::off || now < _activeUntil;
-  if (wanted && !_display->isOn()) _display->turnOn();
-  if (!wanted && _display->isOn()) _display->turnOff();
-  if (_display->isOn() && now >= _nextDraw) {
-    _nextDraw = now + 250;
-    draw();
+  if (_display) {
+    // Not for a power cut on its own: on battery the box sleeps, and a wake to read the battery
+    // must not light the screen.
+    bool wanted = open || _buttons.counting() || now < _activeUntil;
+    if (wanted && !_display->isOn()) _display->turnOn();
+    if (!wanted && _display->isOn()) _display->turnOff();
+    if (_display->isOn() && now >= _nextDraw) {
+      _nextDraw = now + 250;
+      draw();
+    }
   }
+
+  // Nothing of MeshCore's own may be waiting either: a frame queued for the radio, or one on air.
+  if (_engine.canSleep(hasConnection()) && !_buttons.counting() && !_buzzer.isPlaying() && now >= _activeUntil &&
+      !the_mesh.hasPendingWork() && radio_driver.isInRecvMode())
+    sleep(now);
 }
 
 void UITask::drawCross(int x, int y, int size) {
@@ -414,7 +526,7 @@ void UITask::draw() {
   }
 
   if (_buttons.counting()) {
-    snprintf(line, sizeof line, "%lu", (unsigned long)_buttons.secondsLeft(monoMs()));
+    snprintf(line, sizeof line, "%lu", (unsigned long)_buttons.secondsLeft(now()));
     _display->setTextSize(3);
     _display->drawTextCentered(w / 2, 14, line);
     _display->setTextSize(1);
