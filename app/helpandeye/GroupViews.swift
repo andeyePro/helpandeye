@@ -208,7 +208,7 @@ struct GroupView: View {
                     ForEach(model.group?.members ?? []) { m in
                         let row = VStack(alignment: .leading) {
                             Text(m.name + (m.number == model.saved?.me ? " (you)" : "")).font(.headline)
-                            Text(memberWords(m))
+                            Text(memberWords(m) + standIn(m))
                         }
                         // A coordinator opens a member to set the antenna on their box.
                         Group {
@@ -234,6 +234,15 @@ struct GroupView: View {
                         NavigationLink("Profiles") { ProfilesView() }
                         NavigationLink("Log") { LogView() }
                         NavigationLink("Advanced settings") { AdvancedSettingsView() }
+                        if model.engine.isPrimaryCoordinator {
+                            NavigationLink("If your phone is lost") { DeputyView() }
+                        } else if let first = model.group?.primaryCoordinator {
+                            NavigationLink("If \(model.name(ofMember: first))'s phone is lost") { TakeoverView() }
+                            if let heard = model.saved?.primaryHeardAt, Date().timeIntervalSince(heard) > 2 * 86_400 {
+                                Text("Nothing heard from \(model.name(ofMember: first))'s phone since \(heard.formatted(date: .long, time: .omitted)).")
+                                    .foregroundStyle(Color.warning)
+                            }
+                        }
                         ForEach(model.engine.activity.changeRequests, id: \.at) { r in
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("\(model.name(ofMember: r.member)) asks to change \(r.setting?.words ?? "a setting")" + (r.text.isEmpty ? "." : ": \(r.text)"))
@@ -279,6 +288,12 @@ struct GroupView: View {
         }
     }
 
+    /// Who stands in for whom if the first coordinator's phone is lost, shown to everyone.
+    private func standIn(_ m: Member) -> String {
+        if m.number == model.group?.primaryCoordinator { return ", first coordinator" }
+        if m.number == model.group?.currentDeputy { return ", deputy to the first coordinator" }
+        return ""
+    }
 }
 
 func memberWords(_ m: Member) -> String {
@@ -404,6 +419,93 @@ struct InviteView: View {
 }
 
 /// After a phone is removed, every remaining member needs the new secrets.
+/// The first coordinator names the coordinator who may take over at once if their phone is lost
+/// (decision 20).
+struct DeputyView: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        let others = (model.group?.members ?? []).filter { $0.role == .coordinator && $0.number != model.saved?.me }
+        Form {
+            Section {
+                Text("If your phone is lost or broken, another coordinator can take over running the group. The one you name here can do it straight away. Otherwise it takes two coordinators together, or one after a week without word from your phone.")
+            }
+            Section(header: Header("Your deputy")) {
+                if others.isEmpty {
+                    Text("Make someone a coordinator first, under Members.")
+                } else {
+                    Picker("Deputy", selection: Binding(get: { model.group?.currentDeputy ?? 0 }, set: { model.engine.nameDeputy($0 == 0 ? nil : $0) })) {
+                        Text("No one").tag(UInt16(0))
+                        ForEach(others) { m in Text(m.name).tag(m.number) }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    Text("Everyone in the group sees who your deputy is.")
+                }
+            }
+        }
+        .navigationTitle("If your phone is lost")
+    }
+}
+
+/// A coordinator takes over from a first coordinator whose phone is lost (decision 20): how long
+/// it has been silent, which way is open, and what taking over does.
+struct TakeoverView: View {
+    @EnvironmentObject var model: AppModel
+    @State private var confirming = false
+
+    var body: some View {
+        let first = model.group?.primaryCoordinator.map { model.name(ofMember: $0) } ?? "The first coordinator"
+        let others = (model.group?.members ?? []).filter {
+            $0.role == .coordinator && $0.number != model.saved?.me && $0.number != model.group?.primaryCoordinator
+        }
+        Form {
+            Section {
+                if let heard = model.saved?.primaryHeardAt {
+                    Text("Last heard from \(first)'s phone: \(heard.formatted(.relative(presentation: .named))).")
+                }
+                Text(model.group?.currentDeputy.map { "\(first)'s deputy is \(model.name(ofMember: $0))." } ?? "\(first) has not named a deputy.")
+            }
+            Section(header: Header("Taking over")) {
+                Text("If \(first)'s phone is lost or broken, you can take over running the group. Their phone is removed from the group, and the group gets new keys. You then show each member their update code, as after any removal.")
+                switch model.engine.takeoverPath {
+                case .deputy:
+                    Text("\(first) named you as deputy, so you can take over now.")
+                case let .agreed(by):
+                    Text("\(model.name(ofMember: by)) agreed, so you can take over now.")
+                case .silence:
+                    Text("Nothing has been heard from \(first)'s phone for a week, so you can take over now.")
+                case nil:
+                    Text("You can take over once another coordinator agrees"
+                         + (model.engine.takeoverOpensAt.map { ", or on your own from \($0.formatted(date: .long, time: .shortened))." } ?? "."))
+                }
+                if model.engine.takeoverPath != nil {
+                    Button("Take over from \(first)") { confirming = true }
+                }
+            }
+            if !others.isEmpty {
+                Section(header: Header("Agree to another coordinator taking over")) {
+                    Text("If you know \(first)'s phone is lost, you can agree that another coordinator takes over. They can then do it straight away.")
+                    ForEach(others) { m in
+                        if model.engine.activity.takeoverAgreed.contains(m.number) {
+                            Text("You agreed that \(m.name) may take over.")
+                        } else {
+                            Button("Agree that \(m.name) may take over") { model.engine.agreeToTakeover(by: m.number) }
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("If \(first)'s phone is lost")
+        .confirmationDialog("Take over from \(first)?", isPresented: $confirming, titleVisibility: .visible) {
+            Button("Take over") { model.engine.takeOver() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only do this if \(first)'s phone is lost or broken. It is removed from the group, and you show everyone a new code.")
+        }
+    }
+}
+
 struct KeyUpdatesSection: View {
     @EnvironmentObject var model: AppModel
     @State private var shown: Member?
@@ -441,7 +543,7 @@ struct ReceiveUpdateSection: View {
             }
             CodeReader(prompt: "If your coordinator shows you a new code, scan it here") { code in
                 guard let g = model.group, let w = try? Joining.decode(Joining.Welcome.self, from: code),
-                      let updated = try? Joining.openUpdate(w, current: g, me: model.identity) else {
+                      let updated = try? Joining.openUpdate(w, current: g, me: model.identity, primarySilent: model.engine.primaryIsSilent) else {
                     message = "That code did not work. Ask your coordinator to show it again."; return
                 }
                 model.engine.applyKeyUpdate(updated)

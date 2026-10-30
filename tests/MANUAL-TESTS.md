@@ -575,3 +575,29 @@ Needs a Heltec V4 nobody needs afterwards: the eFuses are one-way. Keys as in `f
 5. Write `release/firmware.bin` back to 0x10000 and power-cycle.
 
 Pass: step 2 boots to the pairing code, provisions and sends the call like any box. In step 3 the summary shows SECURE_BOOT_EN, SPI_BOOT_CRYPT_CNT 7 and the two keys, and the read is refused. Step 4 does not boot (a plain image on an encrypted box); step 5 boots again. Say in the run which esptool version was used.
+
+## 60. A coordinator takes over from a lost phone
+
+Needs phone B as the first coordinator, phones C and D as coordinators (section 23) and phone A as a
+caller, all with boxes and the internet route.
+
+1. On phone B, open Group, If your phone is lost, and choose phone C's person. On phone A, open
+   Group.
+2. Turn phone B and its box off. On phone C, open Group, If B's phone is lost, and tap Take over,
+   then Take over again to confirm. Show phone A and phone D their update codes under New keys to
+   hand out, and scan them.
+3. Press Help on phone A and acknowledge on phone D. Then turn phone B and its box on again, and
+   on phone B try to acknowledge the call and to remove phone D.
+4. Start again with no deputy. With phone B off, on phone D open If B's phone is lost and tap Agree
+   that C may take over; then take over on phone C.
+5. Start again with no deputy and phone B off, and on phone C open If B's phone is lost (with the
+   clock moved on six days, then eight).
+
+Pass: in step 1 phone A lists C's person as "deputy to the first coordinator" and B's as "first
+coordinator". In step 2 phone C's screen says when phone B was last heard from and that it can take
+over now as deputy; afterwards every phone lists C's person as first coordinator and phone B's
+person is gone, and each phone's Log says who took over, from whom and how. In step 3 phone A shows
+phone D's person as having seen the call; phone B's acknowledgement and removal change nothing on
+phone A or D, and the relay refuses phone B. In step 4 phone C's screen says D agreed, and the
+takeover goes through at once. In step 5 phone C cannot take over at six days (the screen says
+from when it can), and can at eight. No screen says or suggests that help is coming.
