@@ -57,3 +57,23 @@ public func alertTimes(turnAt: Date, every: TimeInterval, quick: Int, later: Tim
     let tail = (skipped..<(skipped + count)).map { tailStart.addingTimeInterval(TimeInterval($0) * later) }
     return Array((early + tail).prefix(count))
 }
+
+/// How many of the phone's pending notifications each call gets, in the order given (most urgent
+/// first): an equal share, with what one call does not need going to the others, never more than
+/// it has times for. iOS keeps at most 64 for the whole app and drops the rest without a word.
+public func shareAlerts(wanted: [Int], slots: Int) -> [Int] {
+    var given = wanted.map { _ in 0 }
+    var left = max(slots, 0)
+    while left > 0 {
+        let short = wanted.indices.filter { given[$0] < wanted[$0] }
+        guard !short.isEmpty else { break }
+        let each = max(left / short.count, 1)
+        for i in short where left > 0 {
+            let n = min(each, wanted[i] - given[i], left)
+            given[i] += n
+            left -= n
+        }
+    }
+    return given
+}
+

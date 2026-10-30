@@ -69,8 +69,10 @@ final class Relay: ObservableObject, RelayLink {
             // Kept on the relay, but Apple could not wake anyone yet: not counted as sent, so the
             // next resend asks for the wake again.
             case let .some((200, data)) where (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["woke"] as? Bool == false:
-                result = "On the relay, but no phone could be woken yet"
+                result = "Trying again"
             case .some((200, _)): result = nil
+            // Busy or briefly unreachable: the next resend tries again.
+            case let .some((status, _)) where status == 429 || status >= 500: result = "Trying again"
             case let .some((status, _)): result = "Relay refused it (\(status))"
             case .none: result = lastProblem ?? "No internet"
             }

@@ -33,9 +33,14 @@ import UserNotifications
         let now = Date()
         plans = plans.filter { $0.value.times.contains { $0 > now } }
         guard !plans.isEmpty else { return }
-        let each = max(64 - checkIns - forCaller, plans.count) / plans.count
+        // Urgent calls first, then the soonest due, so if there are too few to go round, those keep theirs.
+        let order = plans.values.sorted { a, b in
+            let ua = a.content.interruptionLevel == .timeSensitive, ub = b.content.interruptionLevel == .timeSensitive
+            return ua != ub ? ua : (a.times.first { $0 > now } ?? .distantFuture) < (b.times.first { $0 > now } ?? .distantFuture)
+        }
+        let shares = shareAlerts(wanted: order.map { min($0.times.filter { $0 > now }.count, 64) }, slots: 64 - checkIns - forCaller)
         let center = UNUserNotificationCenter.current()
-        for plan in plans.values {
+        for (plan, each) in zip(order, shares) {
             center.removePendingNotificationRequests(withIdentifiers: Array(plan.ids.prefix(64)))
             for (id, at) in zip(plan.ids, plan.times.filter { $0 > now }.prefix(each)) {
                 center.add(UNNotificationRequest(identifier: id, content: plan.content,

@@ -79,6 +79,14 @@ final class SecondReviewTests: XCTestCase {
         XCTAssertNil(r.nextResend, "and no next time is shown for it")
     }
 
+    func testCallsShareThePhonesNotificationsFairly() {
+        XCTAssertEqual(shareAlerts(wanted: [58, 58], slots: 56), [28, 28])
+        XCTAssertEqual(shareAlerts(wanted: [5, 58], slots: 56), [5, 51], "what one does not need goes to the other")
+        XCTAssertEqual(shareAlerts(wanted: [10, 10, 10], slots: 56), [10, 10, 10])
+        XCTAssertEqual(shareAlerts(wanted: [58, 58, 58], slots: 56).reduce(0, +), 56, "never more than iOS keeps")
+        XCTAssertEqual(shareAlerts(wanted: [3, 3, 3], slots: 2), [1, 1, 0], "too many calls: the first, most urgent, keep theirs")
+    }
+
     func testAlertTailStretchesForHours() {
         let times = alertTimes(turnAt: t0, every: 60, quick: 10, later: 600, from: t0, count: 30)
         XCTAssertEqual(times.count, 30)
