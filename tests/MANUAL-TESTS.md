@@ -554,3 +554,15 @@ Needs box A on battery with its mains adapter off (on a plain board, ground GPIO
 5. Press the board's reset button, then press red, amber and green as in section 55 for half an hour, press reset again, and keep pressing for the rest of the hour.
 
 Pass: after step 1 the screen is dark, the LED is off, the box is no longer visible over Bluetooth and the third board hears nothing more from it. Step 2 sends Help within two seconds of the tap, with the press sound, and the screen comes on: the press that woke the box counts. After step 3 "Power is back." reaches phone B and the box stays awake (visible over Bluetooth). In step 4 the box is visible again within a minute of the adapter going off (it wakes every ten minutes to read the battery, for a few seconds), the phone connects and keeps it awake, and after the disconnect it sleeps again. In step 5 the screen still shows the last call as seen, phone B hears no new power-cut report, and the third board's log shows the box's own sending stay under the band's duty cycle across the reset, as if there had been none.
+
+## 59. A release box
+
+Needs a Heltec V4 nobody needs afterwards: the eFuses are one-way. Keys as in `firmware/DESIGN.md` section 16, in a directory outside any repository.
+
+1. `firmware/build.sh --release` with `HI_RELEASE_KEYS` set, then the flash, key and eFuse commands it prints, in that order.
+2. Power-cycle the board. Provision it (section 57, steps 2 and 3) and press red.
+3. `espefuse.py --chip esp32s3 --port PORT summary`, then `esptool.py --chip esp32s3 --port PORT read_flash 0x10000 0x1000 out.bin`.
+4. Write the plain `.pio/build/heltec_v4_helpandi/firmware.bin` to 0x10000 with `esptool.py write_flash` and power-cycle.
+5. Write `release/firmware.bin` back to 0x10000 and power-cycle.
+
+Pass: step 2 boots to the pairing code, provisions and sends the call like any box. In step 3 the summary shows SECURE_BOOT_EN, SPI_BOOT_CRYPT_CNT 7 and the two keys, and the read is refused. Step 4 does not boot (a plain image on an encrypted box); step 5 boots again. Say in the run which esptool version was used.

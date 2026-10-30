@@ -262,9 +262,10 @@ secrets or (later) the names; without them, a box in a shared house is a readabl
 group's channel. Against: a box with secure boot takes only firmware signed with the project's
 key, so a contributor cannot flash their own build onto it, a field update needs the signed
 image and the signing key becomes something the project must guard, and a flash-encryption
-mistake on a box in a home means a box that will not start. Both are set by eFuse at provisioning
-time, not in this build: `build.sh` makes a plain image. Enabling them is a release step, to be
-written up with the update path before any box goes out.
+mistake on a box in a home means a box that will not start. Both are set by eFuse on each box,
+not in the build: `build.sh` makes a plain image, and `build.sh --release` signs and encrypts it
+for the eFuse steps a person runs. Section 16 has the path, what it protects, what it does not
+yet, and what is untested.
 
 ## 7. Calls, resends and acknowledgements on the board
 
@@ -529,7 +530,8 @@ section 6.
   `Listener::onUnhandledCmdFrame` hook, six lines, so the UI task answers the Help&I companion
   commands (section 6).
 - `firmware/build.sh` clones MeshCore at the commit named in the script, copies the overlay and
-  the core in, applies the patch and runs `pio run`. One MeshCore tree, reused.
+  the core in, applies the patch and runs `pio run`. One MeshCore tree, reused. `--release` then
+  signs and encrypts the images (section 16).
 - The UI task passes the buttons that woke the board to `ButtonMachine` (section 7), keeps the
   core's retained copy in RTC memory and deep-sleeps on battery (section 10); the ESP32 calls are
   in `UITask::begin`, `keep` and `sleep`.
@@ -639,7 +641,8 @@ an earlier version of this file are there now.
 9. Power-cut and battery reports are sealed for responders like other personal content; a power
    cut at a home is personal.
 10. Flash encryption and secure boot on boxes that go to homes, as long as they do not hurt
-    uptime or adoption; the trade-off is in section 6; not in development builds.
+    uptime or adoption; the trade-off is in section 6; not in development builds. The release
+    path is section 16.
 11. Assume the V4's standard whip for now. The coordinator sets each unit's antenna type in the
     app and the box takes its transmit-power cap from it (sections 6 and 8); the app side is
     separate work.
@@ -662,3 +665,85 @@ here, were fixed in the app in commit a9f5267, which also gave resends their 70%
    own member avoids this.
 5. ForResponders' nonce puts unit and request in big-endian, while every frame is little-endian.
    Not wrong, but worth a comment for anyone reimplementing it on a board.
+
+## 16. Release: flash encryption and secure boot
+
+For boxes that go to homes (Martin, 2026-10-30; section 6). Nothing here has run on a board.
+
+**What the toolchain gives.** PlatformIO's espressif32 platform (6.11.0) builds Arduino-ESP32
+2.0.17 from prebuilt libraries: their `sdkconfig` for the ESP32-S3 has `CONFIG_SECURE_BOOT`,
+`CONFIG_SECURE_FLASH_ENC_ENABLED` and NVS encryption all off, and the bootloader is prebuilt the
+same way. So no build flag turns either feature on, and `platformio.local.ini` has none. What
+the chip allows regardless: the images signed and encrypted on the host with esptool's
+`espsecure.py`, the keys and settings burned into eFuses with `espefuse.py` (both in PlatformIO's
+`tool-esptoolpy` package, 4.5.1), and the encrypted images written with `esptool.py`. The ROM
+then checks the bootloader's signature and decrypts flash as it reads it.
+
+**Keys.** Made once with `espsecure.py`, kept in a directory outside every repository (on
+Martin's machine, with an offline backup), never in git, named to `build.sh` as
+`HI_RELEASE_KEYS`:
+
+```
+espsecure.py generate_signing_key --version 2 --scheme rsa3072 secure_boot_signing_key.pem
+espsecure.py generate_flash_encryption_key --keylen 256 flash_encryption_key.bin
+```
+
+The signing key is the project's one. Give each box its own flash key (a directory per box,
+each with the one signing key and its own `flash_encryption_key.bin`): a key got out of one box
+then opens no other, and `build.sh --release` is run once per box, since each image is
+encrypted for its box. The project must keep every box's key for the box's life: a field
+update over USB needs it (below).
+
+**The build.** `firmware/build.sh --release [tree] [environment]` builds `heltec_v4_helpandi` as
+it is, then signs `bootloader.bin` and `firmware.bin` for secure boot v2 and encrypts the four
+images for the addresses they are flashed at (0x0 bootloader, 0x8000 partition table, 0xe000
+`boot_app0`, 0x10000 app), into `.pio/build/<environment>/release/`. Without `HI_RELEASE_KEYS`
+it builds and prints every step: a dry run. It never touches a board.
+
+**Each box, by hand**, with the commands `build.sh --release` prints: write the four encrypted
+images with `esptool.py write_flash`; burn the flash key (`burn_key BLOCK_KEY0 ...
+XTS_AES_128_KEY`) and the signing key's digest (`burn_key_digest BLOCK_KEY1 ...
+SECURE_BOOT_DIGEST0`); then in one `burn_efuse`: `SECURE_BOOT_EN`, the two unused digest slots
+revoked, `SPI_BOOT_CRYPT_CNT 7` (flash encryption on for good), `DIS_DOWNLOAD_MANUAL_ENCRYPT`,
+`DIS_DOWNLOAD_ICACHE`, `DIS_DOWNLOAD_DCACHE`, `DIS_DIRECT_BOOT`, `DIS_USB_JTAG`, `HARD_DIS_JTAG`
+and `ENABLE_SECURITY_DOWNLOAD`. eFuses are one-way: a wrong one is a box to throw away, so the
+first run is on a development board nobody needs (MANUAL-TESTS 59). The eFuse names were
+checked against esptool 4.5.1's ESP32-S3 table; the set follows ESP-IDF's release-mode guidance
+for the S3 and is to be read against the docs for the esptool version in use before the first
+box.
+
+**Field updates.** `release/firmware-signed.bin` is the signed app. Over USB, the box's secure
+download mode still takes `write_flash`, so an update is that image encrypted for 0x10000 with
+the box's flash key (what `build.sh --release` makes as `release/firmware.bin` for that box's
+key directory) and written there. Over the air there is no route yet: this build does not
+include MeshCore's OTA environment; when it does, the device encrypts what the OTA writes
+itself, and the image to send is the signed one.
+
+**What it protects, and what it does not yet.** With the eFuses burned, the app's code cannot be
+read as code and a plain image will not run, the bootloader must carry the project's signature,
+JTAG is off and USB reads of flash are refused. Not yet:
+
+- *The app's signature is not checked.* The prebuilt bootloader was built without secure boot,
+  so it boots any app that decrypts; keeping a replaced app out rests on flash encryption alone.
+- *The keys and names are not encrypted.* Flash encryption covers the bootloader, partition
+  table and app partitions only. MeshCore keeps its identity (the box's signing and sealing key)
+  and contacts in SPIFFS, with the group file (channel secrets) and member list beside them, and
+  SPIFFS cannot sit on an encrypted partition; the names and the next request number are in NVS,
+  which needs NVS encryption, not in the prebuilt core. Over USB they are unreadable once the
+  eFuses are burned; with the flash chip taken off the board they are plain.
+
+Both need an Arduino core built for it (`esp32-arduino-lib-builder`, or ESP-IDF with Arduino as
+a component) with secure boot v2, flash encryption in release mode and NVS encryption on, and
+the identity, group and members moved to NVS or to LittleFS on a partition flagged `encrypted`.
+Until then the names should stay on the phone: the app side (TODO.md) should not send 0x76 to
+a box in a home, and section 6's names are a feature behind that gate.
+
+**Untested.** Everything on a board: that the signed prebuilt bootloader boots under secure boot
+and reads encrypted flash (it was built without `CONFIG_SECURE_FLASH_ENC_ENABLED`; reads through
+the cache should decrypt regardless); `boot_app0` and the OTA data under encryption; SPIFFS on a
+chip with encryption on (its partition is not flagged, so plain reads should still work); the
+eFuse set. The `espsecure.py` commands themselves could not be run on the build Mac: PlatformIO's
+python there has no `cryptography` module (`python3 -m pip install --user cryptography` gives it
+one). The dry run was run (`build.sh --release` without keys, which built the box image and
+printed the steps).
+
