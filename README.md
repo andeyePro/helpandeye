@@ -141,6 +141,13 @@ cd app/helpandeyeCore && swift test
 The app talks over Bluetooth to a Heltec board running MeshCore's standard companion firmware.
 `tests/MANUAL-TESTS.md` lists the checks that need real phones and boards.
 
+## Firmware
+
+`firmware/` is groundwork for Help&I's own box firmware, so the buttons work with no phone:
+`firmware/DESIGN.md` sets out the options, and `firmware/core` is the portable logic (frames,
+resends, buttons, radio time) with tests that run on a computer (`cd firmware && make test`).
+Nothing there has run on a board yet.
+
 ## Website
 
 `site/` is plain HTML with no build step. Cloudflare serves it as a Worker with static assets,

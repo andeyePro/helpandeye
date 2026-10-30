@@ -12,6 +12,7 @@ For contributors. What each part does and where its code is. The rules it follow
 | Home Wi-Fi listener | `app/helpandeyeLocalPush` | A local push extension iOS runs on the named home Wi-Fi with the phone locked: it joins the first group's phones as the app does and alerts for a call (decision 19). It confirms only the calls it alerts for, so anything else sent to it goes on by the sender's other routes. Needs a signed build. |
 | Watch app | `app/helpandeyeWatch` | Three buttons and a Help complication. In reach of its phone it sends through the phone. Out of reach it runs its own `HelpEngine` for each of the phone's groups, as the same member, and calls and responds over its own internet connection (`WatchHandover`). |
 | Box | any Heltec LoRa board | MeshCore's standard companion firmware, unchanged. The app writes the group's private channel into it. |
+| Box firmware (groundwork) | `firmware/` | A design for Help&I's own firmware, so the buttons work with no phone, and its portable C++ core with host tests. Not yet on a board. |
 | Relay | `relay/` | Cloudflare Worker. Stores and forwards sealed messages for the internet route. |
 
 ## A red press
