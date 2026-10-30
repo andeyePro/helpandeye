@@ -85,10 +85,12 @@ it names; box keys are signed by their member.
 
 The group's phones on one network find each other by Bonjour, under a name made from the group ID
 that says nothing about the group, and keep a TCP connection open. Each end sends a random
-challenge, then proves which member it is by signing the other's challenge, sealed with the group
-key; a proof from this phone's own member or from anyone not in the group ends the connection.
-Each end then derives two keys from the group key and both challenges, one for what it sends and
-one for what it hears, new for each connection. Every frame is sealed with the sender's key and
+challenge and a one-off X25519 key share, then proves which member it is by signing the other's
+challenge and both shares, sealed with the group key; a proof from this phone's own member or from
+anyone not in the group ends the connection. Each end then derives two keys from the group key, the
+shares' secret and both challenges, one for what it sends and one for what it hears, new for each
+connection; as the shares are signed, not even another member passing the messages along can learn
+them. Every frame is sealed with the sender's key and
 numbered; a receipt returns that number with a digest of the sealed frame, sealed with the
 receiver's key, once the receiver has taken it in. So a frame counts as sent only when another
 member's Help&I has that frame, and nothing between the two phones can make up a receipt. A frame

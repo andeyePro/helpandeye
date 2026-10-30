@@ -187,6 +187,21 @@ import XCTest
         XCTAssertEqual(caller.take(try XCTUnwrap(responder.receipt(for: 7))).events, [.receipt(7)], "the real one still counts")
     }
 
+    /// Full review: another member between two phones, swapping a key share for their own so as to
+    /// learn the link's keys, breaks the proofs, so neither phone counts the other.
+    func testAMemberInTheMiddleCannotSwapAKeyShare() {
+        let g = t.caller.engine.group!
+        var caller = LocalWire.Session(group: g, me: t.caller.engine.saved!.me, identity: t.caller.identity)
+        var responder = LocalWire.Session(group: g, me: t.responder.engine.saved!.me, identity: t.responder.identity)
+        var middle = LocalWire.Session(group: g, me: t.coordinator.engine.saved!.me, identity: t.coordinator.identity)
+        let real = caller.opening(), theirs = middle.opening()
+        // The caller's challenge, with the middle's key share in place of the caller's.
+        let swapped = real.prefix(3 + 16) + theirs.suffix(32)
+        let answer = responder.take(swapped)
+        XCTAssertEqual(caller.take(answer.reply).events, [], "the responder signed a share the caller never sent")
+        XCTAssertNil(caller.peer)
+    }
+
     /// An end that hears the other's challenge before sending its own sends its challenge first,
     /// then its proof, so the other end never sees a proof it cannot place.
     func testTheChallengeAlwaysGoesBeforeTheProof() {

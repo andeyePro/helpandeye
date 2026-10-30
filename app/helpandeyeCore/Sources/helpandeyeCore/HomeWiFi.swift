@@ -35,20 +35,22 @@ public enum LocalWire {
     /// The name a group's phones advertise under: from the group ID, so they find each other, but
     /// say nothing about the group to anyone else on the network.
     public static func serviceName(for group: GroupState) -> String {
-        let hash = SHA256.hash(data: Data("HELPA-LAN-2".utf8) + group.secrets.groupID)
+        let hash = SHA256.hash(data: Data("HELPA-LAN-3".utf8) + group.secrets.groupID)
         return "helpandi-" + hash.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
     /// The most one message may be: a group's settings, sealed, with room to spare.
     public static let maxMessage = 8192
 
-    /// One connection, from either end. Each side first sends a random challenge; each then proves
-    /// which member it is by signing the other's challenge, sealed with the group key. Until that
-    /// proof arrives nothing from the other end counts, and a proof from this phone's own member
-    /// (its own extension, say) or from anyone not in the group ends the connection: only another
-    /// member's phone ever counts as somewhere a call went. From the group key and both challenges
-    /// each end then has a key for what it sends and one for what it hears, new for every
-    /// connection. Every frame carries a number, sealed with it, and the other end returns that
+    /// One connection, from either end. Each side first sends a random challenge and a one-off key
+    /// share; each then proves which member it is by signing the other's challenge and both key
+    /// shares, sealed with the group key. Until that proof arrives nothing from the other end
+    /// counts, and a proof from this phone's own member (its own extension, say) or from anyone not
+    /// in the group ends the connection: only another member's phone ever counts as somewhere a
+    /// call went. From the group key, the secret the two shares make and both challenges, each end
+    /// then has a key for what it sends and one for what it hears, new for every connection. The
+    /// shares are signed, so even another member passing the two phones' messages between them
+    /// cannot learn those keys. Every frame carries a number, sealed with it, and the other end returns that
     /// number with a digest of the frame, sealed with its own key, once it has taken the frame in.
     /// So "sent" means another member's Help&I has that frame: something on the network between
     /// the two cannot make a receipt up, swap the frame, or hand a phone back its own.
@@ -68,6 +70,9 @@ public enum LocalWire {
         private let signingKey: Data
         private let myChallenge: Data
         private var theirChallenge: Data?
+        /// This end's one-off key share (private part) and the other end's (public part).
+        private let myShare: Data
+        private var theirShare: Data?
         private var sendKey: SymmetricKey?
         private var hearKey: SymmetricKey?
         /// Digests of frames sent and not yet confirmed, and of frames taken in and not yet confirmed.
@@ -81,6 +86,11 @@ public enum LocalWire {
         public init(group: GroupState, me: UInt16, identity: DeviceIdentity) {
             self.group = group; self.me = me; signingKey = identity.signingKey.rawRepresentation
             myChallenge = randomBytes(16)
+            myShare = Curve25519.KeyAgreement.PrivateKey().rawRepresentation
+        }
+
+        private var mySharePublic: Data {
+            (try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: myShare))?.publicKey.rawRepresentation ?? Data()
         }
 
         /// What this end sends first: its challenge, once. Empty if it already went, ahead of a
@@ -88,7 +98,7 @@ public enum LocalWire {
         public mutating func opening() -> Data {
             guard !opened else { return Data() }
             opened = true
-            return Self.wrap(.challenge, myChallenge)
+            return Self.wrap(.challenge, myChallenge + mySharePublic)
         }
 
         public mutating func message(_ frame: HelpFrame, id: UInt32) -> Data? {
@@ -120,14 +130,16 @@ public enum LocalWire {
                 let payload = Data(body.dropFirst())
                 switch kind {
                 case .challenge:
-                    guard theirChallenge == nil, payload.count == 16, let proof = proof(answering: payload) else { broken = true; break }
-                    theirChallenge = payload
+                    guard theirChallenge == nil, payload.count == 48 else { broken = true; break }
+                    theirChallenge = Data(payload.prefix(16))
+                    theirShare = Data(payload.dropFirst(16))
+                    guard let proof = proof() else { broken = true; break }
                     reply += opening() + proof
                 case .proof:
-                    guard peer == nil, let theirs = theirChallenge, let who = check(payload) else { broken = true; break }
+                    guard peer == nil, let theirs = theirChallenge, let who = check(payload), let secret = sharedSecret() else { broken = true; break }
                     peer = who
-                    sendKey = Self.key(group.secrets.groupKey, from: myChallenge, to: theirs)
-                    hearKey = Self.key(group.secrets.groupKey, from: theirs, to: myChallenge)
+                    sendKey = Self.key(group.secrets.groupKey, secret, from: myChallenge, to: theirs)
+                    hearKey = Self.key(group.secrets.groupKey, secret, from: theirs, to: myChallenge)
                     events.append(.peer(who))
                 case .frame:
                     guard let hearKey else { broken = true; break }
@@ -153,9 +165,10 @@ public enum LocalWire {
             return (events, reply)
         }
 
-        private func proof(answering challenge: Data) -> Data? {
-            guard let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: signingKey),
-                  let sig = try? key.signature(for: Self.proofInput(group.secrets.groupID, challenge, me)),
+        private func proof() -> Data? {
+            guard let challenge = theirChallenge, let share = theirShare,
+                  let key = try? Curve25519.Signing.PrivateKey(rawRepresentation: signingKey),
+                  let sig = try? key.signature(for: Self.proofInput(group.secrets.groupID, challenge, me, signer: mySharePublic, verifier: share)),
                   let box = try? ChaChaPoly.seal(Self.u16(me) + sig, using: SymmetricKey(data: group.secrets.groupKey)) else { return nil }
             return Self.wrap(.proof, box.combined)
         }
@@ -165,22 +178,31 @@ public enum LocalWire {
             guard let box = try? ChaChaPoly.SealedBox(combined: sealed),
                   let plain = try? ChaChaPoly.open(box, using: SymmetricKey(data: group.secrets.groupKey)), plain.count == 66 else { return nil }
             let who = UInt16(plain[plain.startIndex]) << 8 | UInt16(plain[plain.startIndex + 1])
-            guard who != me, let key = group.member(who)?.signingKey, let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
-                  pub.isValidSignature(Data(plain.dropFirst(2)), for: Self.proofInput(group.secrets.groupID, myChallenge, who)) else { return nil }
+            guard who != me, let share = theirShare, let key = group.member(who)?.signingKey, let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
+                  pub.isValidSignature(Data(plain.dropFirst(2)), for: Self.proofInput(group.secrets.groupID, myChallenge, who, signer: share, verifier: mySharePublic)) else { return nil }
             return who
         }
 
-        /// The key one end seals with, made from the group key and both ends' challenges, the
-        /// sender's first: each direction of each connection gets its own.
-        static func key(_ groupKey: Data, from sender: Data, to receiver: Data) -> SymmetricKey {
-            HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: groupKey), salt: sender + receiver,
-                                   info: Data("HELPA-LAN-SESSION-1".utf8), outputByteCount: 32)
+        private func sharedSecret() -> Data? {
+            guard let share = theirShare, let mine = try? Curve25519.KeyAgreement.PrivateKey(rawRepresentation: myShare),
+                  let theirs = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: share),
+                  let secret = try? mine.sharedSecretFromKeyAgreement(with: theirs) else { return nil }
+            return secret.withUnsafeBytes { Data($0) }
+        }
+
+        /// The key one end seals with, made from the group key, the two shares' secret and both
+        /// ends' challenges, the sender's first: each direction of each connection gets its own.
+        static func key(_ groupKey: Data, _ secret: Data, from sender: Data, to receiver: Data) -> SymmetricKey {
+            HKDF<SHA256>.deriveKey(inputKeyMaterial: SymmetricKey(data: groupKey + secret), salt: sender + receiver,
+                                   info: Data("HELPA-LAN-SESSION-2".utf8), outputByteCount: 32)
         }
 
         static func digest(_ sealed: Data) -> Data { Data(SHA256.hash(data: sealed).prefix(16)) }
 
-        static func proofInput(_ group: Data, _ challenge: Data, _ member: UInt16) -> Data {
-            Data("HELPA-LAN-PROOF-2".utf8) + group + challenge + u16(member)
+        /// What a member signs: the other end's challenge, and the signer's key share then the
+        /// other end's, so neither share can be swapped.
+        static func proofInput(_ group: Data, _ challenge: Data, _ member: UInt16, signer: Data, verifier: Data) -> Data {
+            Data("HELPA-LAN-PROOF-3".utf8) + group + challenge + u16(member) + signer + verifier
         }
 
         static func wrap(_ kind: Kind, _ payload: Data) -> Data {
