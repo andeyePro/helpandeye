@@ -511,7 +511,7 @@ void UITask::loop() {
       _nextBattery = now + 60000;
       _millivolts = getBattMilliVolts();
     }
-    _engine.power(now, wall, digitalRead(HI_PIN_MAINS) == HIGH, _millivolts);
+    _engine.power(now, wall, digitalRead(HI_PIN_MAINS) == HIGH, _millivolts, hasConnection());
     applyRadio();
     keep(now);
   }
@@ -600,10 +600,12 @@ void UITask::draw() {
   }
 
   if (s.mains == PowerMonitor::Mains::off && !_buttons.counting()) {
+    // "?" when the cut is the battery's trend, not the mains wire (section 10).
+    const char* cut = s.mainsEstimated ? "Power cut?" : "Power cut";
     if (s.hoursLeft) {
-      snprintf(line, sizeof line, "Power cut: about %lu h", (unsigned long)s.hoursLeft);
+      snprintf(line, sizeof line, "%s about %lu h", cut, (unsigned long)s.hoursLeft);
     } else {
-      snprintf(line, sizeof line, "Power cut");
+      snprintf(line, sizeof line, "%s", cut);
     }
     _display->drawTextLeftAlign(0, _display->height() - 10, line);
   }

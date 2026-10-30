@@ -14,14 +14,16 @@ namespace helpandi {
 
 struct BatteryModel {
     uint32_t capacityMAh;
+    // The box's average draw left alone, and while something keeps it awake (section 10).
     uint32_t drawMA;
+    uint32_t awakeMA;
     // Whether the build has the mains wire (section 5). Without it the battery's trend decides.
     bool mainsSensed;
 
     // A constructor rather than an aggregate: the board compiles as C++11, where a default
     // member initialiser would stop brace initialisation.
     constexpr BatteryModel(uint32_t capacityMAh, uint32_t drawMA, bool mainsSensed = true)
-        : capacityMAh(capacityMAh), drawMA(drawMA), mainsSensed(mainsSensed) {}
+        : capacityMAh(capacityMAh), drawMA(drawMA), awakeMA(drawMA), mainsSensed(mainsSensed) {}
 };
 
 enum class Mains : uint8_t { unknown, on, off };
@@ -109,6 +111,9 @@ public:
 
     // A responder has seen the power cut: only the final warning still goes.
     void acknowledged() { acknowledged_ = true; }
+
+    // The draw the hours are counted at from the next update: the box's, as it is now.
+    void setDraw(uint32_t drawMA) { model_.drawMA = drawMA; }
 
 private:
     BatteryModel model_;

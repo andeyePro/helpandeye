@@ -21,7 +21,9 @@ const char* statusWords(CallerStatus s) {
 BatteryModel batteryModel(const BatteryDraw& draw, bool mainsSensed) {
     double awakeShare = double(kAwakePerWakeMs) / (double(kSleepS) * 1000 + kAwakePerWakeMs);
     double averageUA = draw.asleepUA + (draw.awakeMA * 1000.0 - draw.asleepUA) * awakeShare;
-    return BatteryModel{draw.capacityMAh, uint32_t(std::ceil(averageUA / 1000)), mainsSensed};
+    BatteryModel m{draw.capacityMAh, uint32_t(std::ceil(averageUA / 1000)), mainsSensed};
+    m.awakeMA = draw.awakeMA;
+    return m;
 }
 
 namespace {
@@ -41,7 +43,9 @@ BoxEngine::BoxEngine(BoxPort& port, const RadioSettings& radio, const BatteryMod
     : port_(port),
       radio_(radio),
       budget_(radio.band() ? radio.band()->dutyCycle : 0),
-      monitor_(battery) {
+      monitor_(battery),
+      asleepDrawMA_(battery.drawMA),
+      awakeDrawMA_(battery.awakeMA) {
     setNextRequest(nextRequest);
 }
 
@@ -107,12 +111,17 @@ bool BoxEngine::resume(const uint8_t* in) {
     return true;
 }
 
-bool BoxEngine::canSleep(bool phoneConnected) const {
-    if (phoneConnected || monitor_.mains() != PowerMonitor::Mains::off) return false;
+bool BoxEngine::keptAwake(bool phoneConnected) const {
+    if (phoneConnected) return true;
     for (size_t i = 0; i < callCount_; i++) {
         uint64_t at;
-        if (slots_[i].repeating || slots_[i].call.nextResend(at)) return false;
+        if (slots_[i].repeating || slots_[i].call.nextResend(at)) return true;
     }
+    return false;
+}
+
+bool BoxEngine::canSleep(bool phoneConnected) const {
+    if (keptAwake(phoneConnected) || monitor_.mains() != PowerMonitor::Mains::off) return false;
     for (const ReportPart& p : parts_)
         if (p.repeating) return false;
     return true;
@@ -344,10 +353,22 @@ void BoxEngine::addReportPart(const uint8_t* inner, size_t innerLength, bool las
     port_.toPhone(slot->sealed, slot->length);
 }
 
-void BoxEngine::power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint16_t millivolts) {
+void BoxEngine::addNote(const char* text, bool lastWarning, uint64_t nowMs, uint32_t wallNow) {
+    NoteFrame note{group_.unit, reportRequest_, uint8_t(reportParts_ + 1), uint8_t(std::strlen(text)), {}};
+    std::memcpy(note.text, text, note.length);
+    uint8_t inner[9 + kMaxNoteBytes];
+    size_t n = encode(note, inner, sizeof inner);
+    addReportPart(inner, n, lastWarning, nowMs, wallNow);
+}
+
+void BoxEngine::power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint16_t millivolts, bool phoneConnected) {
+    // A report's own few minutes of repeats do not count: the estimate is for how the box will
+    // spend the cut, which a call or a phone changes and a report does not.
+    monitor_.setDraw(keptAwake(phoneConnected) ? awakeDrawMA_ : asleepDrawMA_);
     PowerMonitor::Event e = monitor_.update(nowMs, mainsPresent, millivolts);
     if (e.report == PowerMonitor::Report::none) return;
     if (!provisioned_ || !group_.reportPowerCut || !canSeal_) return;
+    bool probably = monitor_.estimated();
     if (e.report == PowerMonitor::Report::mainsLost) {
         reportRequest_ = takeRequest();
         reportParts_ = 0;
@@ -356,29 +377,27 @@ void BoxEngine::power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint1
         uint8_t inner[kFollowUpBytes];
         size_t n = encode(f, inner, sizeof inner);
         addReportPart(inner, n, false, nowMs, wallNow);
+        // Without the mains wire the cut is the battery's trend: say so, so a responder knows
+        // it may be wrong.
+        if (probably) addNote("Power probably cut: the battery is falling.", false, nowMs, wallNow);
         return;
     }
     if (!reportRequest_) return;
-    NoteFrame note{group_.unit, reportRequest_, 0, 0, {}};
+    char text[kMaxNoteBytes + 1];
     if (e.report == PowerMonitor::Report::mainsBack) {
-        std::strcpy(reinterpret_cast<char*>(note.text), "Power is back.");
+        std::strcpy(text, probably ? "Power probably back." : "Power is back.");
     } else if (e.hours == 0) {
-        std::strcpy(reinterpret_cast<char*>(note.text), "Less than an hour of battery left.");
+        std::strcpy(text, "Less than an hour of battery left.");
     } else {
-        std::snprintf(reinterpret_cast<char*>(note.text), sizeof note.text, "About %u hour%s of battery left.", unsigned(e.hours),
-                      e.hours == 1 ? "" : "s");
+        std::snprintf(text, sizeof text, "About %u hour%s of battery left.", unsigned(e.hours), e.hours == 1 ? "" : "s");
     }
-    note.length = uint8_t(std::strlen(reinterpret_cast<const char*>(note.text)));
-    note.part = uint8_t(reportParts_ + 1);
-    uint8_t inner[9 + kMaxNoteBytes];
-    size_t n = encode(note, inner, sizeof inner);
-    bool lastWarning = e.report == PowerMonitor::Report::hoursLeft && e.hours <= 1;
-    addReportPart(inner, n, lastWarning, nowMs, wallNow);
+    addNote(text, e.report == PowerMonitor::Report::hoursLeft && e.hours <= 1, nowMs, wallNow);
     if (e.report == PowerMonitor::Report::mainsBack) reportRequest_ = 0;
 }
 
 Screen BoxEngine::screen() const {
-    Screen s{provisioned_, callCount_ > 0, Colour::red, CallerStatus::notSent, monitor_.mains(), monitor_.hours()};
+    Screen s{provisioned_, callCount_ > 0, Colour::red, CallerStatus::notSent, monitor_.mains(), monitor_.estimated(),
+             monitor_.hours()};
     if (callCount_) {
         const OutgoingCall& c = slots_[callCount_ - 1].call;
         s.colour = c.colour;

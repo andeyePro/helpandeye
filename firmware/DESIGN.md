@@ -408,9 +408,10 @@ choice (Martin, 2026-10-30). `core/power.hpp` and `BoxEngine::power`:
   battery (about three seconds, `kAwakePerWakeMs`), rounded up to a whole milliamp so the
   estimate never flatters the cell; `HI_BATTERY_MAH` and both draws are build flags until section
   54 of the manual tests measures them. A call keeps the box awake, at the awake draw, for as long
-  as it stands; the estimate is for the box left alone again, which is how it spends a power cut,
-  and `PowerMonitor` takes its draw once, at construction, so the estimate does not switch
-  while a call is open.
+  as it stands, and so does a connected phone: while either does, `BoxEngine::power` counts the
+  hours at the awake draw (`PowerMonitor::setDraw`), and once the box is left alone again at the
+  sleeping one. A report's own few minutes of repeats do not switch it. The marks are one-way, so
+  a mark passed while a call kept the box up is reported then and not again.
 
 **Deep sleep on battery.** MeshCore's companion build never sleeps on an ESP32: every pass of
 its `loop()` runs the mesh (the SX1262 left in continuous receive, the outbound queue), the
@@ -487,9 +488,10 @@ The thresholds are a guess at the Heltec V4's charger and the box's draw, to be 
 own recordings (MANUAL-TESTS 53): the fall must stay above the step the charger makes when it
 finishes, and the flat allowance below what a full cell loses on battery in half an hour. The
 estimate reports with less confidence than the wire: `PowerMonitor::estimated()` is true, the
-info reply's mains byte carries bit 2, and the sealed report and the screen are to say
-"probably" (`BoxEngine::power` and `Screen`, still to do). Everything else, the hours, the marks
-and the acknowledgement, is the same as with the wire.
+info reply's mains byte carries bit 2, `Screen::mainsEstimated` makes the screen's bottom line
+"Power cut? about 12 h", and the report says so: after the power-cut follow-up comes a note,
+"Power probably cut: the battery is falling.", and mains back is "Power probably back.".
+Everything else, the hours, the marks and the acknowledgement, is the same as with the wire.
 
 **The frames.** A report is a request of the box's own, numbered from the same counter as its
 calls, so the responders' existing signed acknowledgement (kind 3) silences it and their phones
@@ -503,8 +505,9 @@ part, then five random bytes, and the group ID as the associated data.
 | Part | Inner frame | Bytes of the inner frame |
 |---|---|---|
 | 1 | follow-up, category power cut | `12` unit u32 request u16 `01` `04` |
-| 2, 3... | a note as the hours pass: "About 12 hours of battery left.", "About 1 hour of battery left.", "Less than an hour of battery left." | `16` unit u32 request u16 part u8 length u8 UTF-8 |
-| last | a note, "Power is back." | the same |
+| 2, without the mains wire | a note, "Power probably cut: the battery is falling." | `16` unit u32 request u16 part u8 length u8 UTF-8 |
+| then | a note as the hours pass: "About 12 hours of battery left.", "About 1 hour of battery left.", "Less than an hour of battery left." | `16` unit u32 request u16 part u8 length u8 UTF-8 |
+| last | a note, "Power is back." ("Power probably back." without the wire) | the same |
 
 On air each part is `10`, unit u32, request u16, part u8, the 5-byte salt, the sealed signed frame
 and its 16-byte tag: 106 bytes for the power cut, up to 140 for a note, inside the 165-byte
@@ -587,7 +590,7 @@ Ed25519 library (no signature vectors here: none could be made from a phone).
 
 ## 13. Test plan
 
-**Host tests (built, run, passing).** 123 tests in `firmware/test`: the frames byte for byte
+**Host tests (built, run, passing).** 126 tests in `firmware/test`: the frames byte for byte
 against the Swift layout, malformed and stray input, what may go on the group channel, the
 signature inputs, too small a buffer; the resend times, acknowledgement rules, removal, settling,
 I'm OK settling only earlier calls, which share each resend uses, and close repeats; airtime

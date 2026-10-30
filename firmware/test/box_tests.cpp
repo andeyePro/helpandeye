@@ -101,7 +101,8 @@ struct World {
     MemberList members;
     BoxEngine box;
 
-    explicit World(bool okCloses = true, bool reportPowerCut = true) : box(port, kUK, kCell, 1) {
+    explicit World(bool okCloses = true, bool reportPowerCut = true, const BatteryModel& battery = kCell)
+        : box(port, kUK, battery, 1) {
         for (int i = 0; i < 32; i++) respondersPrivate[i] = uint8_t(0x30 + i);
         respondersPrivate[0] &= 248;
         respondersPrivate[31] &= 127;
@@ -462,10 +463,10 @@ TEST(thePowerCapFollowsTheBandAndTheAntenna) {
 TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     World w;
     w.box.press(Colour::red, 0, 1000, false);
-    w.box.power(0, 1000, true, 4200);
-    w.box.power(10000, 1010, true, 4200);
-    w.box.power(20000, 1020, false, 4200);
-    w.box.power(30000, 1030, false, 4200);
+    w.box.power(0, 1000, true, 4200, false);
+    w.box.power(10000, 1010, true, 4200, false);
+    w.box.power(20000, 1020, false, 4200, false);
+    w.box.power(30000, 1030, false, 4200, false);
     CHECK(w.port.sent.size() == 2);
     CHECK(w.box.reportRequest() == 2 && w.port.savedNext == 3);
     const std::vector<uint8_t>& sealed = w.port.sent[1].payload;
@@ -479,7 +480,7 @@ TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     Screen s = w.box.screen();
     CHECK(s.mains == PowerMonitor::Mains::off && s.hoursLeft == 0);
 
-    w.box.power(31000, 1031, false, 4000);
+    w.box.power(31000, 1031, false, 4000, false);
     CHECK(w.port.sent.size() == 3);
     Frame note = w.open(w.port.sent[2].payload);
     CHECK(note.kind == FrameKind::note && note.note.part == 2);
@@ -495,9 +496,9 @@ TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     CHECK(w.box.reportAcknowledged());
     w.box.tick(90000, 1090);
     CHECK(w.port.sent.size() == 6);  // the red's resend only
-    w.box.power(91000, 1091, false, 3700);  // 9 hours: quiet now
+    w.box.power(91000, 1091, false, 3700, false);  // 9 hours: quiet now
     CHECK(w.port.sent.size() == 6);
-    w.box.power(92000, 1092, false, 3450);  // under an hour: the final warning still goes
+    w.box.power(92000, 1092, false, 3450, false);  // under an hour: the final warning still goes
     CHECK(w.port.sent.size() == 7);
     Frame last = w.open(w.port.sent[6].payload);
     CHECK(last.kind == FrameKind::note && last.note.part == 3);
@@ -505,8 +506,8 @@ TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     w.box.tick(122000, 1122);
     CHECK(w.port.sent.size() == 8 && w.port.sent[7].payload == w.port.sent[6].payload);
 
-    w.box.power(130000, 1130, true, 3450);
-    w.box.power(140000, 1140, true, 3450);
+    w.box.power(130000, 1130, true, 3450, false);
+    w.box.power(140000, 1140, true, 3450, false);
     Frame back = w.open(w.port.sent.back().payload);
     CHECK(back.kind == FrameKind::note && back.note.part == 4);
     CHECK(std::memcmp(back.note.text, "Power is back.", 14) == 0);
@@ -515,15 +516,15 @@ TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
 
 TEST(aPowerCutIsNotReportedWithoutOptInOrARespondersKey) {
     World quiet(true, false);
-    quiet.box.power(0, 1000, false, 4200);
-    quiet.box.power(10000, 1010, false, 4200);
+    quiet.box.power(0, 1000, false, 4200, false);
+    quiet.box.power(10000, 1010, false, 4200, false);
     CHECK(quiet.port.sent.empty());
     CHECK(quiet.box.screen().mains == PowerMonitor::Mains::off);
     World noKey;
     std::memset(noKey.group.respondersKey, 0, 32);
     noKey.box.provision(noKey.group, noKey.members);
-    noKey.box.power(0, 1000, false, 4200);
-    noKey.box.power(10000, 1010, false, 4200);
+    noKey.box.power(0, 1000, false, 4200, false);
+    noKey.box.power(10000, 1010, false, 4200, false);
     CHECK(noKey.port.sent.empty());
 }
 
@@ -618,8 +619,8 @@ TEST(theHoursAirtimeAndThePowerCutSurviveAResetThroughRTCMemory) {
     World w(false);
     w.box.coldStart(1000);
     w.box.press(Colour::amber, 2000, 1002, false);
-    w.box.power(2000, 1002, false, 4200);
-    w.box.power(12000, 1012, false, 4200);
+    w.box.power(2000, 1002, false, 4200, false);
+    w.box.power(12000, 1012, false, 4200, false);
     CHECK(w.port.sent.size() == 1 && w.port.phone.size() == 2);  // the power-cut report reached only the phone
     uint8_t rtc[BoxEngine::kRetainedBytes];
     w.box.retain(rtc);
@@ -634,9 +635,9 @@ TEST(theHoursAirtimeAndThePowerCutSurviveAResetThroughRTCMemory) {
     // share is still full and the note reaches only the phone.
     CHECK(after.box.screen().mains == PowerMonitor::Mains::off);
     CHECK(after.box.reportRequest() == w.box.reportRequest());
-    after.box.power(14000, 1014, false, 4200);
+    after.box.power(14000, 1014, false, 4200, false);
     CHECK(after.port.phone.empty());
-    after.box.power(15000, 1015, false, 4000);
+    after.box.power(15000, 1015, false, 4000, false);
     CHECK(after.port.sent.empty() && after.port.phone.size() == 1 && after.port.phone[0][7] == 2);
     CHECK(after.open(after.port.phone[0]).kind == FrameKind::note);
     after.box.press(Colour::green, 16000, 1016, false);
@@ -659,12 +660,12 @@ TEST(theHoursAirtimeAndThePowerCutSurviveAResetThroughRTCMemory) {
 TEST(theBoxSleepsOnlyOnBatteryWithNothingToSendAgainAndNoPhone) {
     World w;
     CHECK(!w.box.canSleep(false));  // mains not yet known
-    w.box.power(0, 1000, true, 4200);
-    w.box.power(10000, 1010, true, 4200);
+    w.box.power(0, 1000, true, 4200, false);
+    w.box.power(10000, 1010, true, 4200, false);
     CHECK(!w.box.canSleep(false));  // on mains it never sleeps
-    w.box.power(20000, 1020, false, 4200);
+    w.box.power(20000, 1020, false, 4200, false);
     CHECK(!w.box.canSleep(false));  // a flicker is not a power cut yet
-    w.box.power(30000, 1030, false, 4200);
+    w.box.power(30000, 1030, false, 4200, false);
     CHECK(!w.box.canSleep(false));  // the power-cut report is being repeated
     for (uint64_t t = 60000; t <= 500000; t += 30000) w.box.tick(t, 1000 + t / 1000);
     CHECK(w.box.canSleep(false));  // its four repeats are done
@@ -681,14 +682,14 @@ TEST(theBoxSleepsOnlyOnBatteryWithNothingToSendAgainAndNoPhone) {
     for (uint64_t t = 550000; t <= 1100000; t += 30000) w.box.tick(t, 1000 + t / 1000);
     CHECK(w.box.canSleep(false));
 
-    w.box.power(1110000, 2110, true, 4200);
-    w.box.power(1120000, 2120, true, 4200);
+    w.box.power(1110000, 2110, true, 4200, false);
+    w.box.power(1120000, 2120, true, 4200, false);
     CHECK(!w.box.canSleep(false));
 
     FakePort port;
     BoxEngine bare(port, kUK, kCell, 1);
-    bare.power(0, 1000, false, 4200);
-    bare.power(10000, 1010, false, 4200);
+    bare.power(0, 1000, false, 4200, false);
+    bare.power(10000, 1010, false, 4200, false);
     CHECK(bare.canSleep(false));  // a box not yet set up has nothing to stay awake for
 }
 
@@ -701,4 +702,63 @@ TEST(theHoursLeftAssumeTheBoxSleepsBetweenPolls) {
     CHECK(batteryModel(BatteryDraw{3000, 100, 1500}, true).drawMA == 2);
     // A box that never sleeps is the 30 hours the power tests assume.
     CHECK(hoursLeft(4200, batteryModel(BatteryDraw{3000, 100, 100000}, true)) == 30);
+}
+
+TEST(withoutTheWireTheReportAndTheScreenSayProbably) {
+    World w(true, true, BatteryModel{3000, 100, false});
+    // An hour held at full by the charger, then the cell falling as it does when the mains goes.
+    uint64_t minute = 0;
+    for (; minute < 60; minute++) w.box.power(minute * 60000, uint32_t(1000 + minute * 60), true, uint16_t(minute % 2 ? 4196 : 4184), false);
+    CHECK(w.box.screen().mains == Mains::on && w.box.screen().mainsEstimated);
+    CHECK(w.port.sent.empty());
+    for (int i = 0; i < 30 && w.port.sent.empty(); i++, minute++)
+        w.box.power(minute * 60000, uint32_t(1000 + minute * 60), true, uint16_t(4160 - i), false);
+    CHECK(w.port.sent.size() == 2);
+    CHECK(w.open(w.port.sent[0].payload).kind == FrameKind::followUp);
+    Frame note = w.open(w.port.sent[1].payload);
+    const char kProbably[] = "Power probably cut: the battery is falling.";
+    CHECK(note.kind == FrameKind::note && note.note.part == 2);
+    CHECK(note.note.length == sizeof kProbably - 1 && std::memcmp(note.note.text, kProbably, sizeof kProbably - 1) == 0);
+    CHECK(w.port.sent[1].payload.size() <= kMaxPayload);
+    Screen s = w.box.screen();
+    CHECK(s.mains == Mains::off && s.mainsEstimated);
+    // The charger lifts the cell: "probably back".
+    size_t before = w.port.sent.size();
+    for (int i = 0; i < 20 && w.box.screen().mains != Mains::on; i++, minute++)
+        w.box.power(minute * 60000, uint32_t(1000 + minute * 60), false, uint16_t(4150 + 3 * i), false);
+    CHECK(w.box.screen().mains == Mains::on);
+    CHECK(w.port.sent.size() > before);
+    Frame back = w.open(w.port.sent.back().payload);
+    CHECK(back.kind == FrameKind::note && back.note.length == 20 && std::memcmp(back.note.text, "Power probably back.", 20) == 0);
+}
+
+TEST(withTheWireTheReportAndTheScreenSayNothingOfProbably) {
+    World w;
+    w.box.power(0, 1000, false, 4200, false);
+    w.box.power(10000, 1010, false, 4200, false);
+    CHECK(w.port.sent.size() == 1);
+    CHECK(!w.box.screen().mainsEstimated);
+}
+
+TEST(theHoursAreCountedAtTheAwakeDrawWhileACallOrAPhoneKeepsTheBoxUp) {
+    World w(true, true, batteryModel(BatteryDraw{3000, 100, 500}, true));
+    w.box.power(0, 1000, false, 4200, false);
+    w.box.power(10000, 1010, false, 4200, false);
+    // The report's own repeats do not count: left alone, the box sleeps through the cut.
+    w.box.power(11000, 1011, false, 4200, false);
+    CHECK(w.box.screen().hoursLeft == 3000);
+    // A phone connected keeps it up.
+    w.box.power(12000, 1012, false, 4200, true);
+    CHECK(w.box.screen().hoursLeft == 30);
+    w.box.power(13000, 1013, false, 4200, false);
+    CHECK(w.box.screen().hoursLeft == 3000);
+    // A Help call is sent again until a person sees it, awake all the while.
+    w.box.press(Colour::red, 14000, 1014, false);
+    w.box.power(15000, 1015, false, 4200, false);
+    CHECK(w.box.screen().hoursLeft == 30);
+    uint16_t request = w.box.call(w.box.callCount() - 1).number;
+    auto seen = w.ack(w.responder, 2, request, 1016);
+    w.box.heard(seen.data(), seen.size());
+    w.box.power(17000, 1017, false, 4200, false);
+    CHECK(w.box.screen().hoursLeft == 3000);
 }

@@ -45,6 +45,8 @@ struct Screen {
     Colour colour;
     CallerStatus status;
     PowerMonitor::Mains mains;
+    // The mains state is the battery's trend, not the wire (section 10): the screen says "?".
+    bool mainsEstimated;
     uint32_t hoursLeft;
 };
 
@@ -69,7 +71,8 @@ struct BatteryDraw {
 // The hours-left model for a box left on battery: the sleeping draw plus the share of each poll
 // it is awake, rounded up to a whole milliamp so the estimate never flatters the battery. A call
 // that keeps the box awake draws more for as long as it stands; the estimate is for the box
-// once it is left alone again. `mainsSensed` says whether the build has the mains wire.
+// once it is left alone again: BoxEngine counts the hours at `awakeMA` while one does.
+// `mainsSensed` says whether the build has the mains wire.
 BatteryModel batteryModel(const BatteryDraw& draw, bool mainsSensed);
 
 class BoxEngine {
@@ -143,8 +146,9 @@ public:
     void heard(const uint8_t* data, size_t length);
     // The phone says whether its own routes took the call.
     void phoneRoute(uint16_t request, bool sent);
-    // The mains level and battery voltage, as often as the board reads them.
-    void power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint16_t millivolts);
+    // The mains level and battery voltage, as often as the board reads them. `phoneConnected`
+    // says whether a phone is keeping the box awake.
+    void power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint16_t millivolts, bool phoneConnected);
 
     Screen screen() const;
     Sound takeSound();
@@ -169,6 +173,9 @@ private:
     };
 
     bool send(const uint8_t* payload, size_t length, AirtimeBudget::Kind kind, uint64_t nowMs, uint32_t wallNow);
+    // A phone, or a call still being sent again, keeps the box awake whatever the mains.
+    bool keptAwake(bool phoneConnected) const;
+    void addNote(const char* text, bool lastWarning, uint64_t nowMs, uint32_t wallNow);
     Retained snapshot() const;
     uint16_t takeRequest();
     Slot& newSlot();
@@ -185,6 +192,7 @@ private:
     RadioSettings radio_;
     AirtimeBudget budget_;
     PowerMonitor monitor_;
+    uint32_t asleepDrawMA_, awakeDrawMA_;
     GroupSettings group_{};
     MemberList members_;
     bool provisioned_ = false;
