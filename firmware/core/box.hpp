@@ -52,7 +52,6 @@ struct Screen {
 // (decision 7).
 const char* statusWords(CallerStatus s);
 constexpr const char* kNotSetUpWords = "Not set up yet. Add this box to a group in the Help&I app.";
-constexpr const char* kPowerCutWords = "Power cut. Running on battery.";
 constexpr const char* kSupplementWords = "Help&I does not replace 999 or telecare.";
 
 class BoxEngine {
@@ -93,6 +92,8 @@ public:
     Screen screen() const;
     Sound takeSound();
     uint16_t nextRequest() const { return nextRequest_; }
+    // The number saved in flash, once the board has read it.
+    void setNextRequest(uint16_t next) { nextRequest_ = next >= 1 && next <= kMaxRequest ? next : 1; }
     size_t callCount() const { return callCount_; }
     const OutgoingCall& call(size_t i) const { return slots_[i].call; }
     uint16_t reportRequest() const { return reportRequest_; }
@@ -114,7 +115,8 @@ private:
         size_t length = 0;
         CloseRepeat repeat;
         bool repeating = false;
-        bool final = false;
+        // The last battery warning goes even after an acknowledgement (decision 4).
+        bool lastWarning = false;
     };
 
     bool send(const uint8_t* payload, size_t length, AirtimeBudget::Kind kind, uint64_t nowMs, uint32_t wallNow);
@@ -125,7 +127,7 @@ private:
     void settleSlot(Slot& s, CallState state, uint64_t nowMs, uint32_t wallNow);
     void onAck(const AckFrame& ack);
     void onSigned(const SignedFrame& s);
-    void addReportPart(const uint8_t* inner, size_t innerLength, bool final, uint64_t nowMs, uint32_t wallNow);
+    void addReportPart(const uint8_t* inner, size_t innerLength, bool lastWarning, uint64_t nowMs, uint32_t wallNow);
 
     BoxPort& port_;
     RadioSettings radio_;

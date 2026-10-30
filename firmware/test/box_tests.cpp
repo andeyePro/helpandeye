@@ -512,6 +512,10 @@ TEST(requestNumbersWrapBefore32768AndAreSavedBeforeUse) {
     CHECK(port.savedNext == 1);
     BoxEngine fresh(port, kUK, kCell, 0);
     CHECK(fresh.nextRequest() == 1);
+    fresh.setNextRequest(40000);
+    CHECK(fresh.nextRequest() == 1);
+    fresh.setNextRequest(500);
+    CHECK(fresh.nextRequest() == 500);
 }
 
 TEST(theOldestCallMakesRoomForTheNinth) {

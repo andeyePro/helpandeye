@@ -27,7 +27,7 @@ constexpr uint8_t kPushFrame = 0xA3;
 // MeshCore's own reply codes, which the app already reads.
 constexpr uint8_t kRespOK = 0;
 constexpr uint8_t kRespError = 1;
-constexpr uint8_t kErrorBadArgument = 2;
+constexpr uint8_t kErrorBadArgument = 6;
 
 constexpr uint8_t kHelpandiProtocol = 1;
 constexpr size_t kGroupIDBytes = 16;

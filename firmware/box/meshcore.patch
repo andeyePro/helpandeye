@@ -1,0 +1,26 @@
+diff --git a/examples/companion_radio/MyMesh.cpp b/examples/companion_radio/MyMesh.cpp
+index f32ea67a..df5827b7 100644
+--- a/examples/companion_radio/MyMesh.cpp
++++ b/examples/companion_radio/MyMesh.cpp
+@@ -2056,6 +2056,8 @@ void MyMesh::handleCmdFrame(size_t len) {
+     } else {
+       writeErrFrame(ERR_CODE_TABLE_FULL);
+     }
++  } else if (_listener && _listener->onUnhandledCmdFrame(cmd_frame, len)) {
++    // answered by the listener
+   } else {
+     writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
+     MESH_DEBUG_PRINTLN("ERROR: unknown command: %02X", cmd_frame[0]);
+diff --git a/examples/companion_radio/MyMesh.h b/examples/companion_radio/MyMesh.h
+index 944790df..0446649c 100644
+--- a/examples/companion_radio/MyMesh.h
++++ b/examples/companion_radio/MyMesh.h
+@@ -105,6 +105,8 @@ public:
+       virtual void onTraceRecv(mesh::Packet *pkt, uint32_t tag, uint32_t auth_code, uint8_t flags,
+                                const uint8_t *path_snrs, const uint8_t *path_hashes, uint8_t path_len) { }
+       virtual void onRawDataRecv(mesh::Packet *pkt) { }
++      // A companion command MyMesh does not know. True if the listener answered it.
++      virtual bool onUnhandledCmdFrame(const uint8_t *frame, size_t len) { return false; }
+       virtual ~Listener() { }
+   };
+ 

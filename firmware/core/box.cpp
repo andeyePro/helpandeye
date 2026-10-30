@@ -25,8 +25,9 @@ BoxEngine::BoxEngine(BoxPort& port, const RadioSettings& radio, const BatteryMod
     : port_(port),
       radio_(radio),
       budget_(radio.band() ? radio.band()->dutyCycle : 0),
-      monitor_(battery),
-      nextRequest_(nextRequest >= 1 && nextRequest <= kMaxRequest ? nextRequest : 1) {}
+      monitor_(battery) {
+    setNextRequest(nextRequest);
+}
 
 void BoxEngine::provision(const GroupSettings& group, const MemberList& members) {
     group_ = group;
@@ -188,7 +189,7 @@ void BoxEngine::tick(uint64_t nowMs, uint32_t wallNow) {
     for (ReportPart& p : parts_) {
         bool finished;
         if (!p.repeating || !p.repeat.tick(seconds(nowMs), finished)) continue;
-        if (!reportAcknowledged_ || p.final) send(p.sealed, p.length, AirtimeBudget::Kind::optional, nowMs, wallNow);
+        if (!reportAcknowledged_ || p.lastWarning) send(p.sealed, p.length, AirtimeBudget::Kind::optional, nowMs, wallNow);
         if (finished) p.repeating = false;
     }
 }
@@ -255,7 +256,7 @@ void BoxEngine::heard(const uint8_t* data, size_t length) {
     if (f.kind == FrameKind::signedFrame) onSigned(f.signedFrame);
 }
 
-void BoxEngine::addReportPart(const uint8_t* inner, size_t innerLength, bool final, uint64_t nowMs, uint32_t wallNow) {
+void BoxEngine::addReportPart(const uint8_t* inner, size_t innerLength, bool lastWarning, uint64_t nowMs, uint32_t wallNow) {
     uint8_t signedFrame[kMaxSignedInner + 68];
     size_t n = signFrame(inner, innerLength, signedFrame, sizeof signedFrame);
     ReportPart* slot = nullptr;
@@ -271,7 +272,7 @@ void BoxEngine::addReportPart(const uint8_t* inner, size_t innerLength, bool fin
                                      signedFrame, n, slot->sealed, sizeof slot->sealed);
     slot->repeat = CloseRepeat(seconds(nowMs));
     slot->repeating = true;
-    slot->final = final;
+    slot->lastWarning = lastWarning;
     send(slot->sealed, slot->length, AirtimeBudget::Kind::optional, nowMs, wallNow);
     port_.toPhone(slot->sealed, slot->length);
 }
@@ -304,8 +305,8 @@ void BoxEngine::power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint1
     note.part = uint8_t(reportParts_ + 1);
     uint8_t inner[9 + kMaxNoteBytes];
     size_t n = encode(note, inner, sizeof inner);
-    bool final = e.report == PowerMonitor::Report::hoursLeft && e.hours <= 1;
-    addReportPart(inner, n, final, nowMs, wallNow);
+    bool lastWarning = e.report == PowerMonitor::Report::hoursLeft && e.hours <= 1;
+    addReportPart(inner, n, lastWarning, nowMs, wallNow);
     if (e.report == PowerMonitor::Report::mainsBack) reportRequest_ = 0;
 }
 

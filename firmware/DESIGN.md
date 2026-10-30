@@ -1,9 +1,10 @@
 # Help&I box firmware: design
 
-**Status: a proposal, untested on hardware.** Nothing in `firmware/` has run on a board. The
-portable core (`firmware/core`) compiles and passes host tests on a Linux PC; that is all. The
-choice between the options below is Martin's (TODO.md, "Buttons on a plain Heltec"). Until he
-makes it, decision 8 stands and the prototype keeps MeshCore's stock companion firmware.
+**Status: decided and built, untested on hardware.** Martin chose option A on 2026-10-30
+(section 14). The firmware compiles for the Heltec WiFi LoRa 32 V4 (`firmware/build.sh`) and the
+portable core passes its host tests on a Linux PC. Nothing in `firmware/` has run on a board:
+every board section of `tests/MANUAL-TESTS.md` is still to be run. Until a box has passed them
+the prototype keeps MeshCore's stock companion firmware.
 
 MeshCore references are to `meshcore-dev/MeshCore` at commit `81dbae5` (15 October 2026).
 
@@ -52,7 +53,7 @@ cannot (TODO.md, "One box for a household").
 B fails the first row, so it is not a way to meet AGENTS.md; it is listed because it is the only
 option that keeps decision 8 unchanged.
 
-## 3. Recommendation: A
+## 3. Decision: A (Martin, 2026-10-30)
 
 Build A. One board, one battery, one thing to set up, and the buttons, buzzer and cross work in a
 power cut with the phone dead. Keep the Help&I logic in a portable core with no Arduino or
@@ -72,8 +73,11 @@ real gain over C is one board fewer; C buys stock, independently updated radio f
 that second board. If Help&I cannot commit to tested firmware releases and a way to update boxes
 in the field, C is the safer choice, and the core here moves to it unchanged.
 
-Either A or C means revising decision 8 ("with nothing added"): both add buttons, a buzzer and a
-mains sensor to the board.
+A revises decision 8. Where it says the box is a standard Heltec LoRa board "with nothing
+added", it now has buttons, a buzzer and mains sensing added, and runs Help&I's own build of
+MeshCore's companion firmware; the rest of the decision (the routes, the phone, a SIM later)
+stands. The wording for `docs/design-decisions.md`, whose owner makes the change, is in section
+14.
 
 ## 4. What the box does, and what stays in the app
 
@@ -162,11 +166,14 @@ No secret is built into the firmware (AGENTS.md). Everything the box holds is ma
 handed to it by the phone at join, over Bluetooth pairing confirmed with the random code
 MeshCore shows on the box's screen.
 
-**The box as its own member (recommended).** The box joins the group as a caller in its own
-right, with its own unit number, like a person who only calls. Its keys are made on the board
-and never leave it: an Ed25519 key for signing and an X25519 key for receiving sealed key
-updates (MeshCore's own identity is an Ed25519 key made on the board; whether to reuse it or make
-a second, Help&I-only key is an open question below). A coordinator adds it with the usual
+**The box as its own member (Martin, 2026-10-30).** The box joins the group as a caller in its
+own right, with its own unit number, like a person who only calls. Its key is made on the board
+and never leaves it: MeshCore's own identity, an Ed25519 key, reused for Help&I signatures
+(Martin, 2026-10-30; one key, different signed prefixes). The same key seals: MeshCore's private
+key is SHA-512 of the seed, clamped, so its first 32 bytes are an X25519 scalar, and the box's
+sealing key (the `sealKey` in its `memberAdded`) is that scalar's X25519 public key, which
+`UITask::sharedSecret` uses with the responders' public key. The host tests do the same
+derivation with TweetNaCl and open the result on the responders' side. A coordinator adds it with the usual
 signed `memberAdded`, carrying the box's public keys. Then every rule the phones apply today
 already works for it, with no change to the app's frame rules: its calls carry its unit, its
 I'm OK is a `callState` signed by a member whose unit it is (Engine.swift, `sender.unit ==
@@ -188,10 +195,38 @@ What the phone gives the box, kept in its flash:
   removals. No names, phone numbers or anything else personal.
 - Its profile's I'm OK setting (close the call, or stop the urgent repeats) and whether the
   caller may close a call.
-- The time.
+- The responders' public key (X25519), so it can seal a power-cut report for them.
+- The antenna type the coordinator set for it, from which the box takes its transmit-power cap.
+- Whether the person opted in to power-cut reports.
+- The time (MeshCore's own `CMD_SET_DEVICE_TIME`).
 
 What the box never gets: the internet group key (it has no internet route), any responder's or
 the responders' private key, and anything personal.
+
+**Names (pending Martin).** The box says "a responder has seen your call", never who. Designed
+for, not built: first names stored on the box, updated by the phone whenever it connects, behind
+flash encryption, so the box can say "Pat has seen your call". Until Martin decides, the wording
+stays "a responder" and no name goes to the box.
+
+**The commands.** Help&I's companion commands sit where MeshCore's protocol has nothing: app to
+box at 0x70 to 0x75, box to app at 0xA0 to 0xA3 (`core/provision.hpp`). Integers are
+little-endian; keys are raw bytes; the reply to a command is MeshCore's own `OK` (0) or `ERR`
+(1, then an error code: 6 for a bad argument), which the app already reads.
+
+| Byte 0 | Name | Body |
+|---|---|---|
+| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off), battery mV u16, hours left u16, antenna u8, power cap i8 (-128 when the box must not send), members u8, calls u8 |
+| 0x71 | set group | 94 bytes after the command byte: group ID (16), member u16, unit u32, flags u8 (bit 0 I'm OK closes the call, bit 1 the caller may close, bit 2 report power cuts), antenna u8 (0 the V4's whip, 1 a stub, 2 an external 3 dBi, 3 an external 5 dBi), responders' public key (32, all zero when the group has none), channel secret (16), old channel secret (16, all zero outside a changeover), old secret ends at u32, first coordinator u16 |
+| 0x72 | set members | version u32, index u8, total u8, then up to four of: member u16, role u8 (1 caller, 2 responder, 3 both, 4 coordinator), Ed25519 signing key (32). Index 0 starts a new list; the list replaces the old one when every position up to `total` has arrived. At most 32 members |
+| 0x73 | get calls | nothing. Replies 0xA1 per call: request u16, colour u8, pressed at u32, status u8 (0 sending, 1 waiting for a responder, 2 seen, 3 not sent, 4 closed), acknowledgements u8; then 0xA2 |
+| 0x74 | route result | request u16, sent u8 (1 the phone's routes took it, 0 none did) |
+| 0x75 | forget | nothing: the box leaves the group and clears its flash |
+| 0xA3 | frame (push) | a frame the box made (its call, its signed I'm OK or close, a sealed report), for the phone to carry on its own routes and to show. The phone answers a call with 0x74 |
+
+The box keeps the set-group and set-members bytes in flash as they came (`/hi_group`,
+`/hi_members` on SPIFFS) and its next request number in NVS, written before each use. A phone
+recognises a Help&I box from the firmware version MeshCore's device query returns
+(`v1.18.0-hi1`), then sends 0x70. The app side is not built (TODO.md).
 
 **Keeping the member list current without a phone.** The phones already repeat signed membership
 frames on the channel. The box applies a `memberRemoved` it hears on air when it is signed by the
@@ -206,8 +241,16 @@ them to the Swift layout. MeshCore already links an Ed25519 library (`lib/ed2551
 signatures, which any RFC 8032 verifier should still accept; that needs one signed acknowledgement
 from a real phone, checked on the board, before it is relied on.
 
-**Protecting the keys.** ESP32-S3 flash encryption and secure boot would stop someone who takes
-the box from reading its keys, but make reflashing harder for contributors. Open question.
+**Protecting the keys (Martin, 2026-10-30).** Boxes that go to homes get ESP32-S3 flash
+encryption and secure boot, as long as they do not hurt uptime or adoption; development builds
+do not. The trade-off: with them, someone who takes the box cannot read its key, the channel
+secrets or (later) the names; without them, a box in a shared house is a readable copy of the
+group's channel. Against: a box with secure boot takes only firmware signed with the project's
+key, so a contributor cannot flash their own build onto it, a field update needs the signed
+image and the signing key becomes something the project must guard, and a flash-encryption
+mistake on a box in a home means a box that will not start. Both are set by eFuse at provisioning
+time, not in this build: `build.sh` makes a plain image. Enabling them is a release step, to be
+written up with the update path before any box goes out.
 
 ## 7. Calls, resends and acknowledgements on the board
 
@@ -263,9 +306,8 @@ its monotonic times, so a clock set mid-call cannot change which calls it settle
   Help; only taps and the warning of a long countdown can be left out when there is too much to
   report at once.
 
-**Pressing again.** In the app, each press of Help is a new call. On a box someone may press red
-over and over while waiting. Whether a repeat press while a call is open makes a new call, or
-sends the open one again at once, is an open question below.
+**Pressing again (Martin, 2026-10-30).** A second press of red while a call is open starts a
+new call, as the app does. The box keeps its last eight calls; the oldest makes room for a ninth.
 
 ## 8. Airtime and transmit power
 
@@ -289,18 +331,21 @@ sends the open one again at once, is an open question below.
   (`RadioLibWrapper::preambleLengthForSF`), the default in both `RadioSettings`. At the UK narrow
   preset (SF8, 62.5 kHz) a 21-byte packet is 378 ms on air. The board can pass its own.
 
-**After a restart.** The Swift budget is saved so a relaunch does not get a fresh hour. A board
-that lost power has no record of the hour before. Proposed: keep the log in RTC memory, which
-survives a reset but not a power cut, and after a cold start count the optional half as used for
-the first hour, so only calls go until the hour has passed. Open question below, because it also
-trims the room left for calls in that hour.
+**After a restart (Martin, 2026-10-30).** The Swift budget is saved so a relaunch does not get a
+fresh hour. A board that lost power has no record of the hour before, so after a cold start the
+box counts the optional half of the hour's allowance as used (`BoxEngine::coldStart`): for that
+hour, calls and their resends still go (their shares are 90% and 70%) and only I'm OK repeats,
+closes and reports wait. Keeping the log in RTC memory, so a plain reset does not count as a
+cold start, is still to do.
 
 **Transmit power.** `maxRadioPowerSetting` turns the band's ERP limit into the highest SX1262
 setting, given the antenna's gain and the amplifier's gain, and refuses to send at all if even
-the lowest setting would be over. With a 3 dBi antenna and 12 dB of amplifier gain that is 14 at
-869.4 to 869.65 MHz and 1 at 868.0 to 868.6 MHz. The firmware applies it whenever the frequency
-changes and ignores any higher setting from the app, MeshCore's console or a command. MeshCore's
-default for the V4 (10, about 22 dBm out) is inside the 10% band's limit and over the 1% band's.
+the lowest setting would be over. The antenna's gain comes from the antenna type the coordinator
+set in the app (Martin, 2026-10-30; section 6): the V4's standard whip is assumed, at 2 dBi,
+until measured; with 12 dB of amplifier gain that is 15 at 869.4 to 869.65 MHz and 2 at 868.0 to
+868.6 MHz. The firmware applies the cap once a second (`UITask::applyRadio`), so a higher setting
+from the app, MeshCore's console or a command is pulled back within a second. MeshCore's default
+for the V4 (10, about 22 dBm out) is inside the 10% band's limit and over the 1% band's.
 
 MeshCore also keeps its own transmit budget (`Dispatcher`, `getAirtimeBudgetFactor`). Help&I's
 budget is on top of it and does not replace it.
@@ -320,35 +365,63 @@ current member (an acknowledgement, a membership repeat), never from unsigned tr
 
 ## 10. Power cuts and battery (decisions 3 and 4)
 
-Not in the core yet, because the message needs a decision first.
+A power cut at someone's home is personal, so the report is sealed for responders like any other
+choice (Martin, 2026-10-30). `core/power.hpp` and `BoxEngine::power`:
 
-- Mains loss: the mains pin going low for more than, say, 10 seconds (so a flicker is not a
-  power cut). With the person's opt-in, the box tells the responders. Mains back is reported
-  the same way.
-- Battery: hours left estimated from the battery's voltage curve and the box's measured average
-  draw, reported at 24, 12, 6, 3, 2 and 1 hours. A responder's acknowledgement of the power cut
-  silences all but the final warning (decision 4).
+- Mains loss: the mains pin low for 10 seconds (a flicker is not a power cut). With the person's
+  opt-in and the responders' key on the box, the box tells the responders. Mains back is reported
+  the same way. The screen's bottom line says "Power cut: about 12 h" (or "Power cut" before an
+  estimate) whether or not it reports.
+- Battery: hours left from the cell's resting voltage (a piecewise-linear curve from 4.2 V to the
+  board's 3.4 V shutdown) and the box's average draw (`HI_BATTERY_MAH`, `HI_DRAW_MA`, build
+  flags until measured), reported as the estimate passes 24, 12, 6, 3, 2 and 1 hours. A
+  responder's acknowledgement of the report silences all but the final warning.
 
-The frame is the question. CallCategory already has `powerCut`, but every category except a
-missed check-in is personal and goes sealed for responders, which needs the responders' sealing
-key on the box (X25519, HKDF-SHA256 and ChaCha20-Poly1305: MeshCore's `rweather/Crypto`
-dependency has all three, so it is possible). The alternative is a new plain frame with only the
-unit number, mains state and hours left, numbered like a request so the existing signed
-acknowledgement silences it. Open question below.
+**The frames.** A report is a request of the box's own, numbered from the same counter as its
+calls, so the responders' existing signed acknowledgement (kind 3) silences it and their phones
+show it as a request from that unit; a follow-up for a request nobody has heard a call for already
+makes one on a responder's phone (`Inbox.receive`). Each part is a `ForResponders` frame (kind
+0) exactly as the app makes one: the inner frame, signed by the box (kind 10, signer the box's
+member), sealed with ChaCha20-Poly1305 under the key HKDF-SHA256 derives from the X25519 secret
+(salt the group ID, info `HELPA-RESPONDERS-1`), the nonce the unit and request big-endian, the
+part, then five random bytes, and the group ID as the associated data.
+
+| Part | Inner frame | Bytes of the inner frame |
+|---|---|---|
+| 1 | follow-up, category power cut | `12` unit u32 request u16 `01` `04` |
+| 2, 3... | a note as the hours pass: "About 12 hours of battery left.", "About 1 hour of battery left.", "Less than an hour of battery left." | `16` unit u32 request u16 part u8 length u8 UTF-8 |
+| last | a note, "Power is back." | the same |
+
+On air each part is `10`, unit u32, request u16, part u8, the 5-byte salt, the sealed signed frame
+and its 16-byte tag: 106 bytes for the power cut, up to 140 for a note, inside the 165-byte
+datagram. A part goes once, then again at 30 seconds, 1, 2 and 4 minutes unless the report has
+been acknowledged; the final warning goes regardless. The next power cut is a new request. The
+host tests seal a report and open it as a responder's phone would, with the key derivation in
+section 6.
 
 ## 11. How it sits on MeshCore
 
-- `firmware/core`: the portable logic, plain C++17, no Arduino, no heap, no exceptions.
-- Later, `firmware/box`: a PlatformIO project that builds MeshCore's companion firmware at a
-  pinned commit with a Help&I UI task in place of `ui-new`, the pins above, and the core.
-  The UI task makes its `ButtonMachine` with the wake cause (the buttons that woke the board),
-  reads the buttons every 5 to 10 ms into it, turns its events into
-  calls, sounds and the screen, receives Help&I datagrams through `onChannelDataRecv`, and sends
-  through `sendGroupData` with data type `0xFF48`.
-- New companion commands, in a range MeshCore does not use, for provisioning (section 6) and for
-  the box telling its phone about its own calls. The app would need to recognise a Help&I box
-  (from DEVICE_INFO's model and version) and carry the box's calls on its own routes. That is app
-  work, not started.
+- `firmware/core`: the portable logic, plain C++17, no Arduino, no heap, no exceptions. It is
+  copied into the MeshCore tree unchanged and compiled for the board.
+- `firmware/box`: the overlay on MeshCore at the pinned commit. `ui-helpandi/UITask.{h,cpp}` is
+  the Help&I UI task in place of `ui-new`: it owns a `ButtonMachine` (section 7) read every
+  loop, a `BoxEngine` (`core/box.hpp`) it feeds with presses, time, the mains pin and battery
+  voltage, and MeshCore's buzzer and screen. It receives Help&I datagrams through
+  `onChannelDataRecv` (only on the group's channels) and sends through `sendGroupData` with data
+  type `0xFF48`, signs with `self_id`, verifies with `mesh::Identity`, and seals with the core's
+  own ChaCha20-Poly1305 (one implementation on the board and in the tests) over an X25519 secret
+  from `Curve25519::eval`. `platformio.local.ini` adds two environments, `heltec_v4_helpandi`
+  (the box: three buttons, buzzer, mains pin) and `heltec_v4_helpandi_dev` (a plain board,
+  section 7's PRG layout). `meshcore.patch` is the one change to MeshCore's own files: a
+  `Listener::onUnhandledCmdFrame` hook, six lines, so the UI task answers the Help&I companion
+  commands (section 6).
+- `firmware/build.sh` clones MeshCore at the commit named in the script, copies the overlay and
+  the core in, applies the patch and runs `pio run`. One MeshCore tree, reused.
+- The UI task does not yet pass the wake cause to the buttons (section 7): the companion build
+  never deep-sleeps, so there is none. Deep sleep on battery is later work.
+- The app's side is not started: recognising a Help&I box from the firmware version, sending
+  0x71 and 0x72 at join and after every membership or settings change, carrying the box's calls
+  (0xA3) on its own routes and answering with 0x74, and setting the antenna type (TODO.md).
 - Register a MeshCore data type before release (TODO.md, MeshCore data_type): MeshCore's
   `docs/number_allocations.md` says to show a working project first, then ask.
 
@@ -360,6 +433,10 @@ acknowledgement silences it. Open question below.
 | `core/call.hpp` | The resend schedule, a call's status, acknowledgements, settling, I'm OK, close repeats | Resend.swift, Requests.swift, Engine.swift |
 | `core/airtime.hpp` | Time on air, the UK bands, the hourly budget, the transmit power cap | Airtime.swift |
 | `core/buttons.hpp` | Debouncing, press, long press, the countdown and stopping it | HelpCountdown.swift, the watch |
+| `core/seal.hpp` | SHA-256, HKDF, ChaCha20-Poly1305, the responders' key and nonce, the sealed frame | ForResponders.swift |
+| `core/power.hpp` | The ten-second mains rule, hours left, the six marks and the acknowledgement that silences them | decisions 3 and 4 |
+| `core/provision.hpp` | The Help&I companion commands and the flash layout (section 6) | |
+| `core/box.hpp` | The box: presses to calls, resends, acknowledgement checking, I'm OK and closes, removals, the changeover, the cold start, the power cap, reports, the screen and sounds | Engine.swift |
 
 Run the host tests from `firmware/`:
 
@@ -394,7 +471,7 @@ Ed25519 library (no signature vectors here: none could be made from a phone).
 
 ## 13. Test plan
 
-**Host tests (built, run, passing).** 57 tests in `firmware/test`: the frames byte for byte
+**Host tests (built, run, passing).** 102 tests in `firmware/test`: the frames byte for byte
 against the Swift layout, malformed and stray input, what may go on the group channel, the
 signature inputs, too small a buffer; the resend times, acknowledgement rules, removal, settling,
 I'm OK settling only earlier calls, which share each resend uses, and close repeats; airtime
@@ -403,141 +480,45 @@ both bands, the budget's three shares, entries after a clock reset, reservations
 the power cap; debouncing, a button held at start-up, the button that woke the board, press and
 long press, all three pressed at once, falling on red and green, I'm OK just after Help, the
 countdown's taps, warning and Help, a late wake, a 300-second countdown, and stopping it,
-including by a press that began just before the end. Still to add when the code exists: Ed25519
-checks with a vector from a real phone, provisioning, and an end-to-end test of the Help&I UI
-task against a fake radio.
+including by a press that began just before the end; the sealing primitives against their RFC
+vectors and Poly1305 against TweetNaCl on every length, the nonce and the sealed frame's layout;
+the mains rule, the hours and the marks; the provisioning bytes; and the whole box against a
+fake board with real keys (TweetNaCl, test only): a press, the resends, which acknowledgements
+count, a removal, I'm OK under both profiles, the cross and the phone's routes, the bands and the
+cold start, the power cap, a power-cut report opened as a responder's phone opens it, a
+coordinator's close, the changeover, request numbers and forgetting. Still to add: an
+acknowledgement signed by a real phone, checked on a board.
 
-**Proposed new sections for `tests/MANUAL-TESTS.md`** (not added there; they apply only once
-Help&I firmware exists, and replace "Help&I needs no firmware of its own" in Before you start).
+**On a board** (not run): `tests/MANUAL-TESTS.md` sections 45 to 56, which replace "Help&I needs
+no firmware of its own" in Before you start once a box has passed them. The sections proposed in
+an earlier version of this file are there now.
 
-> ### 45. The box's buttons with no phone
->
-> Needs two boxes with Help&I firmware, provisioned into the same group, and phone B as a
-> responder with its own box. Switch phone A off.
->
-> 1. On box A, press red once, briefly.
-> 2. Hold red down for ten seconds.
-> 3. On phone B, acknowledge.
->
-> Pass: box A beeps once and shows "Sending", then "Sent. Waiting for someone to see it.", and
-> never anything that suggests help is on its way. Phone B alerts within a few seconds. Holding
-> red makes no second call (phone B's list shows one). Only after step 3 does box A show that a
-> responder has seen the call, with its "seen" sound.
->
-> ### 46. The cross on the box
->
-> 1. Take box A's antenna off, or set box A to a frequency outside the UK bands, and press
->    amber.
->
-> Pass: box A shows a cross and "Not sent. Nobody may know you need help. If you need help now,
-> call 999.", with its cross sound. With the frequency outside the bands it sends nothing at all
-> (check with a third board).
->
-> ### 47. Resends from the box until someone acknowledges
->
-> 1. Switch phone B's box off. On box A, press red.
-> 2. After two minutes, switch phone B's box on. Do not touch box A.
-> 3. On phone B, acknowledge.
->
-> Pass: phone B alerts within ten minutes of step 2. Box A shows "seen" only after step 3, and a
-> third board's log shows box A's repeats stopping after it.
->
-> ### 48. I'm OK on the box
->
-> Run once with the box's profile set to "I'm OK closes the call" (A) and once to "stops the
-> urgent repeats" (B).
->
-> 1. On box A, press red, wait five seconds, then press green.
->
-> Pass: phone B shows the call and then I'm OK, quietly. In A the call shows as closed by the
-> caller; in B it stays open until a responder acknowledges. In B, box A's repeats carry I'm OK.
->
-> ### 49. Bouncing, stuck and start-up presses
->
-> 1. Tap red as lightly and quickly as you can, ten times.
-> 2. Hold red while plugging box A in, keep holding for ten seconds, then let go.
-> 3. Press red once.
-> 4. Wait five seconds, then press red, amber and green together with the flat of a hand.
-> 5. Wait five seconds. Press red, let go, and press green within two seconds.
-> 6. On battery, let box A go into deep sleep, then tap red once, briefly.
->
-> Pass: in step 1 each tap that beeps makes exactly one call and none makes two. Step 2 makes no
-> call. Step 3 makes one. Step 4 makes a Help and a Need a hand and no I'm OK. Step 5 makes one
-> Help and no I'm OK. Step 6 wakes the box and makes one Help.
->
-> ### 50. The countdown on a plain Heltec (development layout)
->
-> 1. On a board with only PRG, press PRG briefly, and do nothing for a minute.
-> 2. Press PRG briefly, then press it again after a few seconds.
-> 3. Hold PRG for three seconds.
->
-> Pass: step 1 counts down from 60 on the screen, beeping every 10 seconds if a buzzer is fitted,
-> shows the warning at 30 seconds left, and sends Help at 0. Step 2 stops the countdown and sends
-> nothing. Step 3 sends I'm OK.
->
-> ### 51. Sounds and screen for someone with poor sight or hearing
->
-> Pass: the press, "seen" and the cross each have a sound that can be told apart from the others
-> across a room, and none is harsh. The screen's words can be read at arm's length. The LED
-> shows the state in a dark room.
->
-> ### 52. A power cut
->
-> 1. With box A on its mains adapter and battery, and the person's power-cut report turned on,
->    switch the adapter off at the wall for one second, then on.
-> 2. Switch it off and leave it off.
-> 3. On phone B, acknowledge the power cut.
->
-> Pass: step 1 reports nothing. In step 2 phone B hears that unit's power is off within a
-> minute, then battery reports at the agreed hours; red still works throughout. After step 3 only
-> the final battery warning still comes. With the report turned off, nothing is sent in step 2.
->
-> ### 53. Battery life on battery alone
->
-> 1. Charge box A fully, unplug it, and leave it idle, pressing red once an hour.
->
-> Pass: it runs at least 24 hours, every press is heard, and its hours-left estimates are within
-> an hour of the truth near the end.
->
-> ### 54. Transmit power and duty cycle
->
-> Needs an RF power meter or a calibrated spectrum analyser.
->
-> 1. Measure box A's output at each band with its own antenna's rated gain set.
-> 2. Press red, amber and green repeatedly for an hour.
->
-> Pass: output is within the band's ERP limit with the antenna's gain. In step 2 the box's own
-> sending stays under the band's duty cycle, and red still goes out after amber and green have
-> used their share.
->
-> ### 55. The box and its phone together
->
-> 1. With phone A connected to box A and the internet on, press red on the box.
->
-> Pass: phone B hears the call once, whether by the mesh or the internet, and box A shows "seen"
-> after B acknowledges, by either route.
+## 14. Martin's answers (2026-10-30)
 
-## 14. Open questions for Martin
-
-1. **The firmware decision itself**: A (Help&I firmware on MeshCore, recommended), C (a hub) or
-   B (stock, phone-dependent buttons, which AGENTS.md rules out). A or C means revising decision
-   8's "with nothing added".
-2. Can Help&I commit to tested firmware releases, and to a way of updating boxes in people's
-   homes (over Bluetooth from the app, say)? If not, C.
-3. The box as its own member with its own unit (recommended), or acting for one person's unit?
-4. Reuse MeshCore's board identity key for Help&I signatures (one key, different signed
-   prefixes), or make a second key just for Help&I?
-5. May the box hold responders' names, so it can say who has seen the call? Recommended: no, it
-   says "a responder"; names stay on phones.
-6. A second press of red while a call is open: a new call (as the app does), or the open call
-   sent again at once?
-7. The plain-PRG development layout: a 60-second countdown (the watch's) or shorter?
-8. After a cold start with no record of the last hour, count the optional half of the airtime as
-   used for an hour?
-9. Power-cut and battery reports: sealed for responders like other choices, or a new plain frame
-   carrying only the unit number? And is a power cut at someone's home personal?
-10. Flash encryption and secure boot on boxes that go to homes?
-11. The antenna each box ships with, and its gain, so the power cap can be set.
+1. **The firmware decision**: A, Help&I firmware built on MeshCore's companion firmware, on the
+   Heltec WiFi LoRa 32 V4 as the one standard unit, with the extra buttons on free header GPIOs
+   (section 5). Decision 8 is revised accordingly; the wording for `docs/design-decisions.md`
+   (its owner makes the edit): in decision 8, replace "with nothing added" with "with buttons, a
+   buzzer and mains sensing added, running Help&I's own build of MeshCore's companion firmware
+   (option A, firmware/DESIGN.md; Martin, 2026-10-30)".
+2. Tested firmware releases and field updates: implied by 1; the update path is to be written
+   up with the flash-encryption release step (section 6).
+3. The box is its own group member with its own unit number.
+4. Reuse MeshCore's board identity key for Help&I signatures.
+5. **Names on the box: still open.** Designed for first names stored on the box, updated by the
+   phone when it connects, behind flash encryption; the wording stays "a responder" until then.
+6. A second red press while a call is open starts a new call, as the app does.
+7. The development layout with only PRG: a press starts a 60-second countdown, a second press
+   stops it, as on the watch.
+8. After a cold start with no record of the last hour, the optional half of the airtime counts as
+   used for an hour.
+9. Power-cut and battery reports are sealed for responders like other personal content; a power
+   cut at a home is personal.
+10. Flash encryption and secure boot on boxes that go to homes, as long as they do not hurt
+    uptime or adoption; the trade-off is in section 6; not in development builds.
+11. Assume the V4's standard whip for now. The coordinator sets each unit's antenna type in the
+    app and the box takes its transmit-power cap from it (sections 6 and 8); the app side is
+    separate work.
 
 ## 15. Things in the Swift sources that look inconsistent
 
