@@ -43,6 +43,14 @@ final class PhoneWatchLink: NSObject, ObservableObject {
                 ["unit": Int(r.key.unit), "request": Int(r.key.request), "colour": Int(r.colour?.rawValue ?? 1),
                  "who": e.name(ofUnit: r.key.unit), "group": e.group?.tag ?? ""]
             }
+            // Calls a person has settled here (acknowledged or closed, decision 6), newest first:
+            // the watch's own copy of the group settles the same way, so it never alerts for a
+            // call already in hand. The signed acknowledgements held go with them, for the watch
+            // to check as if heard on air; a close has no frame it could check, so its key alone goes.
+            let settled = model.engines.flatMap { e in e.activity.inbox.requests.values.filter { !$0.isOpen }.map { (e, $0) } }
+            context["settled"] = settled.sorted { $0.1.firstHeardAt > $1.1.firstHeardAt }.prefix(20).map { e, r -> [String: Any] in
+                ["unit": Int(r.key.unit), "request": Int(r.key.request), "group": e.group?.tag ?? "", "acks": r.acks.values.map { $0.encoded() }]
+            }
         }
         try? WCSession.default.updateApplicationContext(context)
         handOver()
@@ -58,6 +66,9 @@ final class PhoneWatchLink: NSObject, ObservableObject {
         let data = model.saved.flatMap { try? JSONEncoder().encode(WatchHandover(saved: $0, identity: model.identity, others: others)) } ?? Data()
         guard data != handedOver else { return }
         handedOver = data
+        // Each change replaces the last: a handover still waiting to go is stale now, and a watch
+        // away for a day should not be given every state its phone passed through.
+        for t in WCSession.default.outstandingUserInfoTransfers where !t.isTransferring { t.cancel() }
         WCSession.default.transferUserInfo(data.isEmpty ? ["left": true] : ["handover": data])
     }
 }
@@ -71,6 +82,10 @@ extension PhoneWatchLink: WCSessionDelegate {
     nonisolated func sessionDidDeactivate(_ s: WCSession) {
         Task { @MainActor in self.handedOver = nil }
         s.activate()
+    }
+    /// Help&I was installed on the watch after the phone had its group: the watch has none of it.
+    nonisolated func sessionWatchStateDidChange(_ s: WCSession) {
+        Task { @MainActor in self.handedOver = nil; self.pushStatus() }
     }
 
     nonisolated func session(_ s: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {

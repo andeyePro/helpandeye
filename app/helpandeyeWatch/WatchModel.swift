@@ -14,8 +14,9 @@ final class WatchModel: NSObject, ObservableObject {
         let unit: UInt32, request: UInt16, colour: Colour, who: String
         /// The group's tag, so an acknowledgement goes to the right group.
         var group = ""
-        var id: String { "\(group)-\(unit)-\(request)" }
+        var id: String { Self.id(group, key) }
         var key: IncomingRequest.Key { .init(unit: unit, request: request) }
+        static func id(_ group: String, _ key: IncomingRequest.Key) -> String { "\(group)-\(key.unit)-\(key.request)" }
     }
 
     @Published private(set) var phoneInReach = false
@@ -25,6 +26,15 @@ final class WatchModel: NSObject, ObservableObject {
     /// Which call the phone's status is about.
     @Published private var phoneCall: IncomingRequest.Key?
     @Published private var phoneOpen: [Open] = []
+    /// Calls a person settled on the phone (acknowledged or closed), by group tag: never alerted
+    /// for or listed as open here, whatever this watch has heard, in reach of the phone or not.
+    @Published private var phoneSettled: [String: Set<IncomingRequest.Key>] = [:]
+    /// The phone's signed acknowledgements already given to this watch's engines.
+    private var acksTaken: Set<Data> = []
+    /// Calls this watch made that the phone has taken, and acknowledgements made here it was told
+    /// of, so each is given once.
+    private var givenToPhone: Set<UInt16> = []
+    private var ackedThroughPhone: Set<String> = []
     /// The acknowledgement last made from the watch, and its group, so whether it went out can be
     /// shown.
     @Published private var lastAck: (group: String, key: IncomingRequest.Key)?
@@ -174,13 +184,22 @@ final class WatchModel: NSObject, ObservableObject {
         others[tag] = Other(engine: e, relay: relay, alerts: alerts)
     }
 
-    /// Each group's alerts stay quiet only for calls the phone, in reach, says it has.
+    /// Each group's alerts stay quiet only for calls the phone, in reach, says it has, and never
+    /// sound for those it has settled.
     private func settleAlerts() {
         let first = engine?.group?.tag ?? ""
         let has = phoneInReach ? phoneOpen : []
-        alerts.phoneHas = Set(has.filter { $0.group.isEmpty || $0.group == first }.map(\.key))
-        for (tag, o) in others { o.alerts.phoneHas = Set(has.filter { $0.group == tag }.map(\.key)) }
+        alerts.phoneHas = Set(has.filter { $0.group == first }.map(\.key))
+        alerts.phoneSettled = phoneSettled[first] ?? []
+        for (tag, o) in others {
+            o.alerts.phoneHas = Set(has.filter { $0.group == tag }.map(\.key))
+            o.alerts.phoneSettled = phoneSettled[tag] ?? []
+        }
     }
+
+    /// A group's tag as this watch names it: a phone from before several groups names none,
+    /// meaning the first.
+    private func tag(_ raw: String) -> String { raw.isEmpty ? (engine?.group?.tag ?? "") : raw }
 
     /// The owner left the group on their phone: the watch stops acting for them at once.
     fileprivate func forget() {
@@ -208,9 +227,22 @@ final class WatchModel: NSObject, ObservableObject {
         phoneOpen = (context["open"] as? [[String: Any]] ?? []).compactMap { d in
             guard let u = (d["unit"] as? Int).flatMap(UInt32.init(exactly:)), let r = (d["request"] as? Int).flatMap(UInt16.init(exactly:)),
                   let c = (d["colour"] as? Int).flatMap({ Colour(rawValue: UInt8($0)) }), let w = d["who"] as? String else { return nil }
-            return Open(unit: u, request: r, colour: c, who: w, group: d["group"] as? String ?? "")
+            return Open(unit: u, request: r, colour: c, who: w, group: tag(d["group"] as? String ?? ""))
         }
+        var settled: [String: Set<IncomingRequest.Key>] = [:]
+        for d in context["settled"] as? [[String: Any]] ?? [] {
+            guard let u = (d["unit"] as? Int).flatMap(UInt32.init(exactly:)), let r = (d["request"] as? Int).flatMap(UInt16.init(exactly:)) else { continue }
+            let group = tag(d["group"] as? String ?? "")
+            settled[group, default: []].insert(IncomingRequest.Key(unit: u, request: r))
+            // The signed acknowledgements the phone holds, checked here as if heard on air, so
+            // this watch's own copy of the group settles as the phone's did.
+            for ack in d["acks"] as? [Data] ?? [] where acksTaken.insert(ack).inserted {
+                if let f = HelpFrame(ack) { engine(forGroup: group)?.receive(f, via: .internet) }
+            }
+        }
+        phoneSettled = settled
         settleAlerts()
+        reconcileWithPhone()
     }
 
     fileprivate func setReach(_ reachable: Bool) {
@@ -218,6 +250,50 @@ final class WatchModel: NSObject, ObservableObject {
         // The watch stays quiet only for calls its phone, in reach, has itself heard and is
         // alerting for; any other call it alerts for at once.
         settleAlerts()
+        reconcileWithPhone()
+    }
+
+    /// Back in reach, the phone is given what this watch did while they were apart: every call it
+    /// is still sending (made out of reach, or one the phone did not take), so the phone sends it
+    /// on its own routes too, under the watch's number; and the acknowledgements made here for
+    /// calls the phone still lists as open, so it stops alerting its owner for what they have
+    /// already answered and sends its acknowledgement where the watch cannot.
+    private func reconcileWithPhone() {
+        guard phoneInReach, WCSession.default.activationState == .activated else { return }
+        for r in engine?.activity.outgoing ?? [] where r.number >= 0x8000 && r.unit != 0 && r.nextResend != nil && !givenToPhone.contains(r.number) {
+            give(r.callFrame)
+        }
+        for o in phoneOpen where !ackedThroughPhone.contains(o.id) {
+            guard let e = engine(forGroup: o.group), let me = e.saved?.me, e.activity.inbox.requests[o.key]?.acknowledgedBy.contains(me) == true else { continue }
+            tellPhone(acknowledged: o, mine: true)
+        }
+    }
+
+    /// Gives the phone a call this watch made and is sending itself, to send on the phone's routes
+    /// too: one call, however many ways it goes, so a lost reply can never send it twice.
+    private func give(_ call: HelpFrame) {
+        guard case let .call(_, number, _, _) = call else { return }
+        givenToPhone.insert(number)
+        // With a reply handler, so the phone's reply-taking delegate gets it.
+        WCSession.default.sendMessage(["call": call.encoded()], replyHandler: { _ in },
+                                      errorHandler: { _ in Task { @MainActor in self.givenToPhone.remove(number) } })
+    }
+
+    /// Acknowledges through the phone: the same as pressing it there. `mine` is whether this watch
+    /// acknowledged itself, so a phone that could not is a problem only when it did not.
+    private func tellPhone(acknowledged r: Open, mine: Bool) {
+        ackedThroughPhone.insert(r.id)
+        WCSession.default.sendMessage(["ackUnit": Int(r.unit), "ackRequest": Int(r.request), "group": r.group], replyHandler: { reply in
+            let ok = reply["ok"] as? Bool == true
+            Task { @MainActor in
+                if ok { self.phoneOpen.removeAll { $0 == r } } else if !mine { self.problem = "Not acknowledged. Use your phone." }
+            }
+        }, errorHandler: { _ in
+            Task { @MainActor in
+                self.ackedThroughPhone.remove(r.id)
+                if !mine { self.problem = "Not acknowledged: your phone did not answer. Use your phone." }
+            }
+        })
     }
 
     /// Where Apple can push to wake this watch when its phone is out of reach.
@@ -284,11 +360,10 @@ final class WatchModel: NSObject, ObservableObject {
         let all = allEngines.flatMap { e in e.activity.inbox.requests.values.filter(\.isOpen).map { (e, $0) } }
         let own = all.sorted { ResponderInbox.moreUrgent($0.1, $1.1) }.map { e, r in
             Open(unit: r.key.unit, request: r.key.request, colour: r.colour ?? .red, who: e.name(ofUnit: r.key.unit), group: e.group?.tag ?? "")
-        }
+        }.filter { phoneSettled[$0.group]?.contains($0.key) != true }
         guard phoneInReach else { return own }
         // Calls only the watch has heard are shown too, as their alerts ring here.
-        let first = engine?.group?.tag ?? ""
-        let watchOnly = own.filter { o in !phoneOpen.contains { $0.key == o.key && ($0.group.isEmpty ? first : $0.group) == o.group } }
+        let watchOnly = own.filter { o in !phoneOpen.contains { $0.key == o.key && $0.group == o.group } }
         // Red before amber before green; calls of one colour keep the order they came in.
         return (phoneOpen + watchOnly).enumerated()
             .sorted { ($0.element.colour.rawValue, $0.offset) < ($1.element.colour.rawValue, $1.offset) }
@@ -320,11 +395,8 @@ final class WatchModel: NSObject, ObservableObject {
         if let engine, engine.me?.canCall == true {
             sentByWatch = true
             engine.press(colour)
-            if phoneInReach, let call = engine.current?.callFrame {
-                // With a reply handler, so the phone's reply-taking delegate gets it; the watch
-                // sends the call itself either way.
-                WCSession.default.sendMessage(["call": call.encoded()], replyHandler: { _ in }, errorHandler: nil)
-            }
+            // The watch sends the call itself either way; the phone, in reach, sends it on its routes too.
+            if phoneInReach, let call = engine.current?.callFrame { give(call) }
             return
         }
         sentByWatch = false
@@ -408,14 +480,7 @@ final class WatchModel: NSObject, ObservableObject {
             if !mine { problem = "Not acknowledged: use your phone." }
             return
         }
-        WCSession.default.sendMessage(["ackUnit": Int(r.unit), "ackRequest": Int(r.request), "group": r.group], replyHandler: { reply in
-            let ok = reply["ok"] as? Bool == true
-            Task { @MainActor in
-                if ok { self.phoneOpen.removeAll { $0 == r } } else if !mine { self.problem = "Not acknowledged. Use your phone." }
-            }
-        }, errorHandler: { _ in
-            Task { @MainActor in if !mine { self.problem = "Not acknowledged: your phone did not answer. Use your phone." } }
-        })
+        tellPhone(acknowledged: r, mine: mine)
     }
 }
 
@@ -454,15 +519,19 @@ extension WatchModel: WCSessionDelegate {
 
 /// The watch's own alerts. Each is held back while the phone, in reach, has heard that call and is
 /// alerting for it (two buzzes for one call would only confuse), and let go the moment that stops
-/// being true, as one alert now rather than a burst of the ones missed.
+/// being true, as one alert now rather than a burst of the ones missed; one the phone settled is
+/// cancelled instead, never let go.
 @MainActor final class WatchAlerts: AlertScheduler {
     private let inner: NotificationAlerts
     init(prefix: String = "") { inner = NotificationAlerts(prefix: prefix, ownsCheckIns: false) }
     private var held: [IncomingRequest.Key: Alert] = [:]
     private var sounding: Set<IncomingRequest.Key> = []
     var phoneHas: Set<IncomingRequest.Key> = [] { didSet { if phoneHas != oldValue { settle() } } }
+    /// Calls a person settled on the phone: never sounded here, whatever this watch has heard.
+    var phoneSettled: Set<IncomingRequest.Key> = [] { didSet { for k in phoneSettled.subtracting(oldValue) { cancel(k) } } }
 
     func schedule(_ alert: Alert) {
+        guard !phoneSettled.contains(alert.key) else { return }
         held[alert.key] = alert
         sounding.remove(alert.key)
         settle()

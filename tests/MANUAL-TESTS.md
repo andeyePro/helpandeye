@@ -83,9 +83,10 @@ Then, with the internet route set up (section 5) and the watch on Wi-Fi or its o
 3. On phone A's watch, press Help. On phone B, acknowledge.
 4. Bring phone A back in reach of its watch and press Help on the watch again.
 5. Now test a responder's watch: give phone B a paired watch, open Help&I on phone B once with it nearby, then switch phone B off. Press Help on phone A and acknowledge on phone B's watch.
-6. On phone A, leave the group.
+6. Switch phone A off and press Help on its watch. Wait for the watch to show it sent, then switch phone A on, with its box connected and its internet off, and do not touch the watch. On phone B, acknowledge.
+7. On phone A, leave the group.
 
-Pass: in step 3 the watch says calls go over its own internet, phone B alerts, and the watch shows the acknowledgement only after phone B's person pressed it. In step 4 phone B shows one call, not two. In step 5 phone B's watch buzzes for the call (it does not buzz while phone B is on and alerting), and phone A shows the acknowledgement as phone B's. After step 6 phone A's watch no longer calls or alerts for the group. With no internet on the watch and its phone out of reach, the watch shows a cross and tells the wearer to use their phone or call 999.
+Pass: in step 3 the watch says calls go over its own internet, phone B alerts, and the watch shows the acknowledgement only after phone B's person pressed it. In step 4 phone B shows one call, not two. In step 5 phone B's watch buzzes for the call (it does not buzz while phone B is on and alerting), and phone A shows the acknowledgement as phone B's. In step 6 phone A shows the watch's call within a minute of coming back, as "Sent. Waiting for a responder to see it.", then phone B's acknowledgement (which reaches it over the box); phone B shows one call, not two. After step 7 phone A's watch no longer calls or alerts for the group. With no internet on the watch and its phone out of reach, the watch shows a cross and tells the wearer to use their phone or call 999.
 
 ## 8. Removing a lost phone
 
@@ -186,7 +187,10 @@ Needs phone B paired with an Apple Watch with Help&I on it.
 1. On phone A, press Help.
 2. On phone B's watch, open Help&I.
 
-Pass: the watch lists the caller's name and "Help" with an Acknowledge button. Tapping it acknowledges exactly as on the phone: phone A shows "<name> has seen your call", and the entry leaves the watch. With phone B out of the watch's range, the watch acknowledges over its own internet; with no internet on the watch either, tapping it shows "Not acknowledged: this watch cannot reach the internet. Use your phone." and phone A still shows no acknowledgement.
+3. Press Help on phone A again. With phone B's internet off and its box connected, acknowledge on phone B.
+4. Switch phone B off. Press Help on phone A, and acknowledge on phone B's watch. Then switch phone B on, with its internet off and its box connected, and do not touch the watch.
+
+Pass: the watch lists the caller's name and "Help" with an Acknowledge button. Tapping it acknowledges exactly as on the phone: phone A shows "<name> has seen your call", and the entry leaves the watch. With phone B out of the watch's range, the watch acknowledges over its own internet; with no internet on the watch either, tapping it shows "Not acknowledged: this watch cannot reach the internet. Use your phone." and phone A still shows no acknowledgement. In step 3 the watch stops alerting and the call leaves its list within seconds of the acknowledgement on phone B, and it does not buzz when phone B's acknowledgement makes the call leave phone B's list. In step 4 phone B, once on, stops alerting for the call within a minute and phone A shows the acknowledgement (over the box) as phone B's person's.
 
 ## 21. A missed check-in noticed with no internet at all
 
