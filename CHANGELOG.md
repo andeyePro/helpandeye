@@ -4,6 +4,8 @@ Done work, newest first. Open items live in the issue tracker.
 
 ## 2026-10-30
 
+- [x] **Website accessibility audit** (agent; axe-core in a real Chromium, every width from 1280 to 320 px, 320 px with a 32 px font, 200% and 400% zoom, keyboard, reduced motion, screen-reader view) - c74c5a7: a main landmark; no sideways scrolling from the hero glow; a link to a FAQ question opens its answer; dark form controls; muted text raised to 7:1; screen readers no longer read the + and − signs; the heading no longer breaks mid-word at 320 px. axe now reports no failures at WCAG 2.2 AA. Left for Martin: the brand green text is 4.8 to 5.2:1 (passes AA, not AAA); the * links' accessible names do not include the *; the site is dark only. Still to check with VoiceOver on a device.
+
 - [x] **Warnings at the largest text** - a screenshot showed the new-code banner cut off mid-sentence at the largest text. Warnings above the screens (notifications off, new code, could not save, coordinator notices) now show in full, in an area never more than a third of the screen that scrolls when they are longer, so the call buttons always show. Screen tests: the recheck honours the bar fade, and tall text is scrolled into view.
 
 - [x] **Second full screen run: no audit issues anywhere** - all 16 runs (3 iPhone and iPad sizes and 2 watches, light and dark, normal and largest text) have zero accessibility audit issues. Remaining failures were the tests' own: at the largest text the Wi-Fi message is taller than the large iPhone's screen (now checked as on screen, not tappable), and on the iPad a text field lost focus under the keyboard (now waited for and tried up to three times); once, Apple's audit call hung for ten minutes.

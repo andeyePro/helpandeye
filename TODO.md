@@ -19,7 +19,7 @@
 
 ## Open (work)
 
-- [ ] **Audit the whole website** with an automated accessibility checker (axe) and a screen reader, including the FAQ. Not started (Martin, 2026-10-29: add it, don't start yet).
+- [ ] **Website: checks on a device** - the automated audit is done (CHANGELOG 2026-10-30). Still to check with VoiceOver on iPhone and Mac: the disclosures with a heading inside, the * links in headings, the + and − signs now silent (older Safari may still read them), hyphenation at 320 px, and real pinch-zoom and Dynamic Type. Martin to decide: a lighter green for AAA, word links instead of *, a light colour scheme.
 - [ ] **Try everything on the website** (Martin, 2026-10-29). A full simulation of the app on help.andeye.com that lets people try 100% of what Help&I does: first a device picker (iPhone, iPad, Apple Watch, Android phone, common watches and so on); for a platform not yet built, the visitor can register interest in it and is then passed to the closest simulation that exists. They then play a caller with a simulated responder, or a responder with a set of simulated callers. **Blocked:** after the Codex review and its fixes, then Martin's physical checks with his own devices.
 - [ ] **A chat bot on the website** for questions about Help&I, paid from the Max plan's monthly API credit, with use watched and Martin emailed on suspected abuse. **Blocked:** Martin's answers (Help&I-fromClaude T13, T14).
 - [ ] **FAQ candidates.** The Discussions bot suggests FAQ entries in an issue titled "FAQ candidates". Every so often, move the good ones into `site/index.html` (#faq) or `docs/FAQ.md`, checked against the project documents.
