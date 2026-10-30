@@ -54,12 +54,58 @@ const char* statusWords(CallerStatus s);
 constexpr const char* kNotSetUpWords = "Not set up yet. Add this box to a group in the Help&I app.";
 constexpr const char* kSupplementWords = "Help&I does not replace 999 or telecare.";
 
+// On battery with nothing to send again, the box deep-sleeps between battery readings, and each
+// reading keeps it awake for about this long (MeshCore's start-up and one poll). Section 10.
+constexpr uint32_t kSleepS = 600;
+constexpr uint32_t kAwakePerWakeMs = 3000;
+
+// The box's draw as measured for the build flags: awake, and in deep sleep.
+struct BatteryDraw {
+    uint32_t capacityMAh;
+    uint32_t awakeMA;
+    uint32_t asleepUA;
+};
+
+// The hours-left model for a box left on battery: the sleeping draw plus the share of each poll
+// it is awake, rounded up to a whole milliamp so the estimate never flatters the battery. A call
+// that keeps the box awake draws more for as long as it stands; the estimate is for the box
+// once it is left alone again.
+BatteryModel batteryModel(const BatteryDraw& draw);
+
 class BoxEngine {
 public:
     static constexpr size_t kMaxCalls = 8;
     // A power cut, the six hour marks and the power back.
     static constexpr size_t kMaxReportParts = 8;
     static constexpr uint16_t kMaxRequest = 32767;
+
+private:
+    struct Slot {
+        OutgoingCall call;
+        // The signed I'm OK or close, sent with each resend or repeated on its own.
+        uint8_t state[96];
+        size_t stateLength = 0;
+        CloseRepeat repeat;
+        bool repeating = false;
+    };
+    // What survives a reset or deep sleep in the board's RTC memory (section 10).
+    struct Retained {
+        uint32_t version;
+        uint32_t sum;
+        AirtimeBudget budget;
+        PowerMonitor monitor;
+        Slot slots[kMaxCalls];
+        size_t callCount;
+        uint16_t reportRequest;
+        uint8_t reportParts;
+        bool reportAcknowledged;
+    };
+    // The layout's size and a number to raise whenever one of the types above changes without
+    // changing the size, so a copy another build wrote is never read as this one's.
+    static constexpr uint32_t kRetainedLayout = uint32_t(sizeof(Retained)) << 8 | 1;
+
+public:
+    static constexpr size_t kRetainedBytes = sizeof(Retained);
 
     BoxEngine(BoxPort& port, const RadioSettings& radio, const BatteryModel& battery, uint16_t nextRequest);
 
@@ -74,6 +120,17 @@ public:
     // After a cold start, with no record of the hour before, the optional half of the hour's
     // airtime counts as used (section 8).
     void coldStart(uint64_t nowMs);
+    // The copy that survives a reset or deep sleep: the hour's airtime, the mains and battery
+    // state, the calls and the open report. `retain` writes kRetainedBytes with a checksum;
+    // `resume` takes a copy back, and is false when it is not one this build wrote (a cold
+    // start, with nothing or something else in the memory). Call it before setRadio changes
+    // the band, not after.
+    void retain(uint8_t* out) const;
+    bool resume(const uint8_t* in);
+    // Whether the box may deep-sleep now (section 10): on battery, with nothing to send again
+    // (a call's resends, a close's or a report's repeats) and no phone using it as its radio.
+    // A sleeping box hears nothing, which is why nothing may be waiting for an answer.
+    bool canSleep(bool phoneConnected) const;
     // The highest SX1262 setting the band allows with this box's antenna, or false when the box
     // must not send at all.
     bool powerCap(double amplifierGainDB, int boardMin, int boardMax, int& setting) const;
@@ -102,14 +159,6 @@ public:
     bool inChangeover(uint32_t wallNow) const { return group_.hasOldSecret() && wallNow < group_.oldSecretEndsAt; }
 
 private:
-    struct Slot {
-        OutgoingCall call;
-        // The signed I'm OK or close, sent with each resend or repeated on its own.
-        uint8_t state[96];
-        size_t stateLength = 0;
-        CloseRepeat repeat;
-        bool repeating = false;
-    };
     struct ReportPart {
         uint8_t sealed[kMaxPayload];
         size_t length = 0;
@@ -120,6 +169,7 @@ private:
     };
 
     bool send(const uint8_t* payload, size_t length, AirtimeBudget::Kind kind, uint64_t nowMs, uint32_t wallNow);
+    Retained snapshot() const;
     uint16_t takeRequest();
     Slot& newSlot();
     void sound(Sound s);

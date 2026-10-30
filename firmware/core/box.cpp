@@ -1,7 +1,9 @@
 #include "box.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <type_traits>
 
 namespace helpandi {
 
@@ -16,9 +18,23 @@ const char* statusWords(CallerStatus s) {
     return "";
 }
 
+BatteryModel batteryModel(const BatteryDraw& draw) {
+    double awakeShare = double(kAwakePerWakeMs) / (double(kSleepS) * 1000 + kAwakePerWakeMs);
+    double averageUA = draw.asleepUA + (draw.awakeMA * 1000.0 - draw.asleepUA) * awakeShare;
+    return BatteryModel{draw.capacityMAh, uint32_t(std::ceil(averageUA / 1000))};
+}
+
 namespace {
 // The call schedule runs in whole seconds of the monotonic clock (call.hpp).
 uint64_t seconds(uint64_t nowMs) { return nowMs / 1000; }
+
+// FNV-1a, enough to tell a copy this build wrote from whatever a cold start leaves in RTC memory.
+uint32_t checksum(const void* bytes, size_t length) {
+    const uint8_t* p = static_cast<const uint8_t*>(bytes);
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < length; i++) h = (h ^ p[i]) * 16777619u;
+    return h;
+}
 }  // namespace
 
 BoxEngine::BoxEngine(BoxPort& port, const RadioSettings& radio, const BatteryModel& battery, uint16_t nextRequest)
@@ -60,6 +76,46 @@ void BoxEngine::setRadio(const RadioSettings& radio) {
 void BoxEngine::coldStart(uint64_t nowMs) {
     const Band* band = radio_.band();
     if (band) budget_.record(uint32_t(band->dutyCycle * AirtimeBudget::kWindowMs * 0.5), nowMs);
+}
+
+BoxEngine::Retained BoxEngine::snapshot() const {
+    Retained r{kRetainedLayout, 0, budget_, monitor_, {}, callCount_, reportRequest_, reportParts_, reportAcknowledged_};
+    for (size_t i = 0; i < callCount_; i++) r.slots[i] = slots_[i];
+    return r;
+}
+
+void BoxEngine::retain(uint8_t* out) const {
+    static_assert(std::is_trivially_copyable<Retained>::value, "the copy is the struct's own bytes");
+    Retained r = snapshot();
+    r.sum = checksum(&r, sizeof r);
+    std::memcpy(out, &r, sizeof r);
+}
+
+bool BoxEngine::resume(const uint8_t* in) {
+    Retained r = snapshot();
+    std::memcpy(&r, in, sizeof r);
+    uint32_t sum = r.sum;
+    r.sum = 0;
+    if (r.version != kRetainedLayout || checksum(&r, sizeof r) != sum) return false;
+    budget_ = r.budget;
+    monitor_ = r.monitor;
+    for (size_t i = 0; i < kMaxCalls; i++) slots_[i] = r.slots[i];
+    callCount_ = r.callCount;
+    reportRequest_ = r.reportRequest;
+    reportParts_ = r.reportParts;
+    reportAcknowledged_ = r.reportAcknowledged;
+    return true;
+}
+
+bool BoxEngine::canSleep(bool phoneConnected) const {
+    if (phoneConnected || monitor_.mains() != PowerMonitor::Mains::off) return false;
+    for (size_t i = 0; i < callCount_; i++) {
+        uint64_t at;
+        if (slots_[i].repeating || slots_[i].call.nextResend(at)) return false;
+    }
+    for (const ReportPart& p : parts_)
+        if (p.repeating) return false;
+    return true;
 }
 
 bool BoxEngine::powerCap(double amplifierGainDB, int boardMin, int boardMax, int& setting) const {

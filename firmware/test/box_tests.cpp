@@ -613,3 +613,92 @@ TEST(forgettingTheGroupStopsEverything) {
     CHECK(w.port.sent.size() == 1);
     CHECK(w.box.takeSound() == Sound::press && w.box.takeSound() == Sound::notSent);
 }
+
+TEST(theHoursAirtimeAndThePowerCutSurviveAResetThroughRTCMemory) {
+    World w(false);
+    w.box.coldStart(1000);
+    w.box.press(Colour::amber, 2000, 1002, false);
+    w.box.power(2000, 1002, false, 4200);
+    w.box.power(12000, 1012, false, 4200);
+    CHECK(w.port.sent.size() == 1 && w.port.phone.size() == 2);  // the power-cut report reached only the phone
+    uint8_t rtc[BoxEngine::kRetainedBytes];
+    w.box.retain(rtc);
+
+    World after(false);
+    CHECK(after.box.resume(rtc));
+    // The same call, still waiting.
+    CHECK(after.box.callCount() == 1 && after.box.call(0).number == 1);
+    CHECK(after.box.screen().status == CallerStatus::waitingForResponder);
+    // The same power cut: no second report, and the next note carries on the part numbers. The
+    // hour's record came too, half of it counted as used at the cold start, so the optional
+    // share is still full and the note reaches only the phone.
+    CHECK(after.box.screen().mains == PowerMonitor::Mains::off);
+    CHECK(after.box.reportRequest() == w.box.reportRequest());
+    after.box.power(14000, 1014, false, 4200);
+    CHECK(after.port.phone.empty());
+    after.box.power(15000, 1015, false, 4000);
+    CHECK(after.port.sent.empty() && after.port.phone.size() == 1 && after.port.phone[0][7] == 2);
+    CHECK(after.open(after.port.phone[0]).kind == FrameKind::note);
+    after.box.press(Colour::green, 16000, 1016, false);
+    CHECK(after.port.sent.size() == 1);  // the call went; the signed I'm OK could not
+    // An hour on, the record has cleared.
+    after.box.tick(3700000, 4700);
+    CHECK(after.port.sent.size() > 1);
+
+    // Anything else in the memory is a cold start.
+    World cold(false);
+    uint8_t broken[BoxEngine::kRetainedBytes];
+    std::memcpy(broken, rtc, sizeof broken);
+    broken[sizeof broken / 2] ^= 1;
+    CHECK(!cold.box.resume(broken));
+    std::memset(broken, 0, sizeof broken);
+    CHECK(!cold.box.resume(broken));
+    CHECK(cold.box.callCount() == 0 && cold.box.screen().mains == PowerMonitor::Mains::unknown);
+}
+
+TEST(theBoxSleepsOnlyOnBatteryWithNothingToSendAgainAndNoPhone) {
+    World w;
+    CHECK(!w.box.canSleep(false));  // mains not yet known
+    w.box.power(0, 1000, true, 4200);
+    w.box.power(10000, 1010, true, 4200);
+    CHECK(!w.box.canSleep(false));  // on mains it never sleeps
+    w.box.power(20000, 1020, false, 4200);
+    CHECK(!w.box.canSleep(false));  // a flicker is not a power cut yet
+    w.box.power(30000, 1030, false, 4200);
+    CHECK(!w.box.canSleep(false));  // the power-cut report is being repeated
+    for (uint64_t t = 60000; t <= 500000; t += 30000) w.box.tick(t, 1000 + t / 1000);
+    CHECK(w.box.canSleep(false));  // its four repeats are done
+    CHECK(!w.box.canSleep(true));  // a phone is using the box as its radio
+
+    w.box.press(Colour::red, 510000, 1510, false);
+    CHECK(!w.box.canSleep(false));  // an open call is resent until a person settles it
+    auto seen = w.ack(w.responder, 2, 2, 1511);  // request 1 was the power-cut report
+    w.box.heard(seen.data(), seen.size());
+    CHECK(w.box.canSleep(false));
+
+    w.box.press(Colour::green, 520000, 1520, false);
+    CHECK(!w.box.canSleep(false));  // the I'm OK call's own repeats, and the close's
+    for (uint64_t t = 550000; t <= 1100000; t += 30000) w.box.tick(t, 1000 + t / 1000);
+    CHECK(w.box.canSleep(false));
+
+    w.box.power(1110000, 2110, true, 4200);
+    w.box.power(1120000, 2120, true, 4200);
+    CHECK(!w.box.canSleep(false));
+
+    FakePort port;
+    BoxEngine bare(port, kUK, kCell, 1);
+    bare.power(0, 1000, false, 4200);
+    bare.power(10000, 1010, false, 4200);
+    CHECK(bare.canSleep(false));  // a box not yet set up has nothing to stay awake for
+}
+
+TEST(theHoursLeftAssumeTheBoxSleepsBetweenPolls) {
+    // Awake 100 mA, asleep 0.5 mA, awake about 3 s in every 600: just under 1 mA, so 3000 hours.
+    BatteryModel sleeping = batteryModel(BatteryDraw{3000, 100, 500});
+    CHECK(sleeping.capacityMAh == 3000 && sleeping.drawMA == 1);
+    CHECK(hoursLeft(4200, sleeping) == 3000);
+    // Rounded up to the next milliamp, never down: 1.99 mA counts as 2.
+    CHECK(batteryModel(BatteryDraw{3000, 100, 1500}).drawMA == 2);
+    // A box that never sleeps is the 30 hours the power tests assume.
+    CHECK(hoursLeft(4200, batteryModel(BatteryDraw{3000, 100, 100000})) == 30);
+}
