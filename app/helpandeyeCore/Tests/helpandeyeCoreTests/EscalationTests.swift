@@ -120,6 +120,22 @@ final class AirtimeTests: XCTestCase {
         XCTAssertEqual(meshPacketBytes(payload: 14), 2 + 1 + 2 + 32, "3 + 14 bytes need a second block")
     }
 
+    /// Decision 8 (Martin, 2026-10-30): the cap on the radio's own output follows from the band's
+    /// ERP limit and the antenna, allowing for the V4's amplifier. The same figures as the
+    /// firmware's `maxRadioPowerSetting` test.
+    func testTheTransmitPowerCapFollowsFromTheBandAndTheAntenna() {
+        let one = Band.all[0], ten = Band.all[1]
+        // 869.4-869.65 MHz, 500 mW ERP: 26.99 + 2.15 - 3 - 12 = 14.1; 868.0-868.6 MHz, 25 mW: 1.1.
+        XCTAssertEqual(ten.maxRadioSetting(antenna: .external(gainDBi: 3)), 14)
+        XCTAssertEqual(one.maxRadioSetting(antenna: .external(gainDBi: 3)), 1)
+        XCTAssertEqual(ten.maxRadioSetting(antenna: .external(gainDBi: 0), amplifierGainDB: 0), 22, "never above the board's own limit")
+        XCTAssertNil(one.maxRadioSetting(antenna: .external(gainDBi: 3), amplifierGainDB: 25), "over the limit at the lowest setting: do not send")
+        XCTAssertEqual(ten.maxRadioSetting(antenna: .standardWhip), 15)
+        XCTAssertEqual(one.maxRadioSetting(antenna: .standardWhip), 2)
+        XCTAssertEqual(ten.maxRadioSetting(antenna: .higherGainWhip), 12)
+        XCTAssertLessThan(Antenna.standardWhip.gainDBi, Antenna.higherGainWhip.gainDBi)
+    }
+
     func testChangingBandKeepsTheHoursRecord() {
         let t0 = Date(timeIntervalSince1970: 0)
         var b = AirtimeBudget(dutyCycle: 0.01)

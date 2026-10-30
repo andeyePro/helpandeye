@@ -50,6 +50,51 @@ public struct Band: Equatable, Sendable {
     ]
 }
 
+/// The antenna on a unit's box, set by its coordinator (decision 8). The transmit-power cap
+/// follows from it: the band's ERP limit less the antenna's gain, allowing for the board's
+/// amplifier. The two whips' gains are their makers' ratings, to be measured before boxes go out
+/// (firmware/DESIGN.md, section 5).
+public enum Antenna: Codable, Equatable, Hashable, Sendable {
+    /// The whip that ships with the Heltec WiFi LoRa 32 V4.
+    case standardWhip
+    case higherGainWhip
+    /// An external antenna, with its gain as rated, in dBi.
+    case external(gainDBi: Double)
+
+    public var isExternal: Bool { if case .external = self { true } else { false } }
+
+    public var gainDBi: Double {
+        switch self { case .standardWhip: 2; case .higherGainWhip: 5; case let .external(g): g }
+    }
+
+    public var words: String {
+        switch self {
+        case .standardWhip: "Standard whip, as supplied"
+        case .higherGainWhip: "Higher-gain whip"
+        case .external: "External antenna"
+        }
+    }
+
+    /// The Heltec V4's amplifier after the SX1262: about 12 dB from its build comment, to be
+    /// measured (firmware/DESIGN.md, section 5).
+    public static let v4AmplifierGainDB: Double = 12
+    /// The SX1262's output settings, in dBm.
+    public static let radioSettings = -9...22
+}
+
+extension Band {
+    /// The highest SX1262 output setting (dBm) that keeps a box inside this band's ERP limit with
+    /// this antenna, allowing for the board's amplifier; nil when even the lowest setting is over,
+    /// so the box must not send. The same arithmetic as the firmware's `maxRadioPowerSetting`,
+    /// for the box to take at provisioning. ERP is measured against a dipole, 2.15 dBi.
+    public func maxRadioSetting(antenna: Antenna, amplifierGainDB: Double = Antenna.v4AmplifierGainDB) -> Int? {
+        let conducted = 10 * log10(maxERPmW) + 2.15 - antenna.gainDBi
+        let setting = Int(floor(conducted - amplifierGainDB))
+        guard setting >= Antenna.radioSettings.lowerBound else { return nil }
+        return min(setting, Antenna.radioSettings.upperBound)
+    }
+}
+
 /// Keeps this phone's own mesh sending well inside the band's duty cycle. Calls for help may use
 /// the whole legal allowance; follow-ups, text and position only the part left after keeping
 /// half of it free for other people's calls (decision 12, "only when there is airtime to spare").

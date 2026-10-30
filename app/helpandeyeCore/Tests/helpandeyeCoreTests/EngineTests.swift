@@ -241,9 +241,10 @@ final class RelayModel {
     let alerts = FakeAlerts()
     var engine: HelpEngine!
 
-    /// `watchOf` makes this the paired watch of that phone, acting as the same member.
-    init(air: Air, clock: Clock, watchOf owner: Phone? = nil) {
-        identity = owner?.identity ?? DeviceIdentity()
+    /// `watchOf` makes this the paired watch of that phone, acting as the same member; `identity`
+    /// a second engine on the same phone, for another group.
+    init(air: Air, clock: Clock, watchOf owner: Phone? = nil, identity: DeviceIdentity? = nil) {
+        self.identity = identity ?? owner?.identity ?? DeviceIdentity()
         mesh.air = air; relay.air = air
         engine = HelpEngine(identity: identity, mesh: mesh, relay: relay, alerts: alerts, store: NoStore(),
                             saved: nil, activity: Activity(), calendar: Calendar(identifier: .gregorian), now: { clock.now },
@@ -752,6 +753,17 @@ final class RelayModel {
         await air.run()
         caller.engine.receive(old, via: .internet)
         XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.profile), "Help")
+    }
+
+    func testAUnitsAntennaReachesEveryoneWithTheSettings() async {
+        for p in air.phones { p.relay.isConfigured = true }
+        await relaySetUp()
+        let callerNumber = caller.engine.saved!.me, unit = caller.engine.me!.unit!
+        coordinator.engine.updateGroup { $0.policy.antennaOf[callerNumber] = .higherGainWhip }
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.antenna(of: callerNumber), .higherGainWhip)
+        XCTAssertEqual(responder.engine.group?.maxRadioSetting(ofUnit: unit, in: Band.all[1]), 12)
+        XCTAssertEqual(coordinator.engine.activity.log.entries.last?.text, "You changed a unit's antenna")
     }
 
     func testSettingsTooBigToSendAreNotKept() {

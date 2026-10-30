@@ -30,6 +30,14 @@ struct BoxView: View {
                         LabeledContent("Box battery", value: String(format: "%.2f V", Double(mv) / 1000))
                     }
                 }
+                if let me = model.me, let unit = me.unit {
+                    let antenna = model.group?.antenna(of: me.number) ?? .standardWhip
+                    Section(header: Header("Antenna")) {
+                        LabeledContent("On this box", value: antenna.words + (antenna.isExternal ? ", \(gainWords(antenna.gainDBi))" : ""))
+                        PowerLimits(unit: unit)
+                        Text("Set by your coordinator. The box keeps its radio under this limit once it is set up with Help&I's firmware.")
+                    }
+                }
                 Section(header: Header("Boxes nearby")) {
                     Button(model.board.searching ? "Looking…" : "Look for boxes") { model.board.startSearch() }
                         .disabled(model.board.searching)

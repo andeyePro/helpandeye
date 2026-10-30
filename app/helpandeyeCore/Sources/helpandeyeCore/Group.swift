@@ -145,9 +145,11 @@ public struct GroupState: Codable, Equatable, Sendable {
         public var profileOf: [UInt16: UInt8] = [:]
         /// Whether coordinators' phones keep the group's log (app spec, The log). On by default.
         public var keepsLog = true
+        /// The antenna on each unit's box, by member number (decision 8); the standard whip unless set.
+        public var antennaOf: [UInt16: Antenna] = [:]
         public init() {}
 
-        enum CodingKeys: String, CodingKey { case useDistance, profiles, profileOf, keepsLog, redInterval, amberInterval, buttonWords }
+        enum CodingKeys: String, CodingKey { case useDistance, profiles, profileOf, keepsLog, antennaOf, redInterval, amberInterval, buttonWords }
 
         /// Settings from before profiles (escalation times and button words for the whole group)
         /// become the first profile's.
@@ -156,6 +158,7 @@ public struct GroupState: Codable, Equatable, Sendable {
             useDistance = try c.value(.useDistance, or: false)
             profileOf = try c.value(.profileOf, or: [:])
             keepsLog = try c.value(.keepsLog, or: true)
+            antennaOf = try c.value(.antennaOf, or: [:])
             if let p = try c.decodeIfPresent([Profile].self, forKey: .profiles), !p.isEmpty {
                 profiles = p
             } else {
@@ -173,6 +176,7 @@ public struct GroupState: Codable, Equatable, Sendable {
             try c.encode(profiles, forKey: .profiles)
             try c.encode(profileOf, forKey: .profileOf)
             try c.encode(keepsLog, forKey: .keepsLog)
+            if !antennaOf.isEmpty { try c.encode(antennaOf, forKey: .antennaOf) }
         }
     }
 
@@ -374,6 +378,15 @@ public struct GroupState: Codable, Equatable, Sendable {
         guard let m = member(number), let key = m.signingKey else { return nil }
         return .memberAdded(member: m.number, role: m.role, unit: m.unit ?? 0, signingKey: key,
                             sealKey: m.publicKey.count == 32 ? m.publicKey : Data(count: 32), version: membershipVersion)
+    }
+
+    /// The antenna on this member's box, as their coordinator set it.
+    public func antenna(of member: UInt16?) -> Antenna { member.flatMap { policy.antennaOf[$0] } ?? .standardWhip }
+
+    /// The transmit-power cap for this unit's box in this band: the highest SX1262 setting its
+    /// antenna allows, or nil where it must not send. For the box to take at provisioning.
+    public func maxRadioSetting(ofUnit unit: UInt32, in band: Band) -> Int? {
+        band.maxRadioSetting(antenna: antenna(of: member(unit: unit)?.number))
     }
 
     /// How the calls of the caller on `unit` escalate: their profile's alert times.

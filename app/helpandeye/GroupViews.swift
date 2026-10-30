@@ -206,9 +206,13 @@ struct GroupView: View {
                 }
                 Section(header: Header("Members")) {
                     ForEach(model.group?.members ?? []) { m in
-                        VStack(alignment: .leading) {
+                        let row = VStack(alignment: .leading) {
                             Text(m.name + (m.number == model.saved?.me ? " (you)" : "")).font(.headline)
-                            Text(roleText(m))
+                            Text(memberWords(m))
+                        }
+                        // A coordinator opens a member to set the antenna on their box.
+                        Group {
+                            if model.me?.role == .coordinator { NavigationLink { MemberView(number: m.number) } label: { row } } else { row }
                         }
                         .swipeActions {
                             // Only the group's first coordinator removes people or makes coordinators.
@@ -266,17 +270,70 @@ struct GroupView: View {
         }
     }
 
-    private func roleText(_ m: Member) -> String {
-        var parts: [String] = []
-        switch m.role {
-        case .coordinator: parts.append("Coordinator")
-        case .caller: parts.append("Calls for help")
-        case .responder: parts.append("Responds")
-        case .both: parts.append("Calls for help and responds")
+}
+
+func memberWords(_ m: Member) -> String {
+    var parts: [String] = []
+    switch m.role {
+    case .coordinator: parts.append("Coordinator")
+    case .caller: parts.append("Calls for help")
+    case .responder: parts.append("Responds")
+    case .both: parts.append("Calls for help and responds")
+    }
+    if let u = m.unit { parts.append("unit \(u)") }
+    if m.canRespond, m.phone == nil { parts.append("no mobile number") }
+    return parts.joined(separator: ", ")
+}
+
+/// A coordinator's view of one member: what they do, and the antenna on their box, from which the
+/// box's transmit-power cap follows (decision 8).
+struct MemberView: View {
+    @EnvironmentObject var model: AppModel
+    let number: UInt16
+
+    var body: some View {
+        let m = model.group?.member(number)
+        Form {
+            if let m {
+                Section { Text(memberWords(m)) }
+                if let unit = m.unit {
+                    let antenna = model.group?.antenna(of: number) ?? .standardWhip
+                    Section(header: Header("Antenna on their box")) {
+                        Picker("Antenna", selection: Binding(get: { antenna.isExternal ? 2 : antenna == .higherGainWhip ? 1 : 0 },
+                                                             set: { set($0 == 0 ? nil : $0 == 1 ? .higherGainWhip : .external(gainDBi: 3)) })) {
+                            Text(Antenna.standardWhip.words).tag(0)
+                            Text(Antenna.higherGainWhip.words).tag(1)
+                            Text(Antenna.external(gainDBi: 3).words).tag(2)
+                        }
+                        .pickerStyle(.inline)
+                        .labelsHidden()
+                        if antenna.isExternal {
+                            Stepper("Its gain: \(gainWords(antenna.gainDBi))", value: Binding(get: { antenna.gainDBi }, set: { set(.external(gainDBi: $0)) }),
+                                    in: 0...15, step: 0.5)
+                        }
+                        PowerLimits(unit: unit)
+                        Text("The box keeps its radio under this limit once it is set up with Help&I's firmware. The antenna goes to every member with the group's settings.")
+                    }
+                }
+            }
         }
-        if let u = m.unit { parts.append("unit \(u)") }
-        if m.canRespond, m.phone == nil { parts.append("no mobile number") }
-        return parts.joined(separator: ", ")
+        .navigationTitle(m?.name ?? "Member")
+    }
+
+    private func set(_ antenna: Antenna?) { model.updateGroup { $0.policy.antennaOf[number] = antenna } }
+}
+
+func gainWords(_ dBi: Double) -> String { String(format: "%g dBi", dBi) }
+
+/// The transmit-power cap a unit's antenna gives in each band Help&I uses (Airtime.swift).
+struct PowerLimits: View {
+    @EnvironmentObject var model: AppModel
+    let unit: UInt32
+
+    var body: some View {
+        ForEach(Band.all, id: \.name) { band in
+            LabeledContent(band.name, value: model.group?.maxRadioSetting(ofUnit: unit, in: band).map { "up to \($0) dBm from the radio" } ?? "must not send")
+        }
     }
 }
 

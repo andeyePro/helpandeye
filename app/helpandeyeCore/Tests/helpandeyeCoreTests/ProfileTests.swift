@@ -53,6 +53,31 @@ final class ProfileTests: XCTestCase {
         XCTAssertEqual(again, old)
     }
 
+    /// A unit's antenna is part of the group's settings: it goes to every member with them, a
+    /// group saved before it loads with the standard whip, and the cap follows from it.
+    func testAUnitsAntennaIsInTheSettingsAndGivesItsCap() throws {
+        let coordinator = DeviceIdentity()
+        var g = GroupState(name: "Mill Lane", secrets: .random(), members: [
+            Member(number: 1, name: "Sam", role: .coordinator, publicKey: coordinator.publicKey, signingKey: coordinator.signingPublicKey),
+            Member(number: 2, name: "Pat", role: .caller, publicKey: Data(count: 32), unit: 70001),
+        ])
+        XCTAssertEqual(g.antenna(of: 2), .standardWhip)
+        XCTAssertEqual(g.maxRadioSetting(ofUnit: 70001, in: Band.all[1]), 15)
+        g.policy.antennaOf[2] = .external(gainDBi: 6)
+        XCTAssertEqual(g.maxRadioSetting(ofUnit: 70001, in: Band.all[1]), 11)
+        XCTAssertEqual(g.settings.changes(from: GroupSettings(policy: .init(), relayURL: nil)), ["changed a unit's antenna"])
+        g.settingsVersion = 1
+        let frame = try XCTUnwrap(g.settingsFrame(as: 1, identity: coordinator))
+        var copy = g
+        copy.policy = .init()
+        copy.settingsVersion = 0
+        XCTAssertTrue(copy.apply(settings: frame))
+        XCTAssertEqual(copy.antenna(of: 2), .external(gainDBi: 6))
+        let old = try JSONDecoder().decode(GroupState.StoredPolicy.self, from: Data(#"{"useDistance":false,"profiles":[],"profileOf":{},"keepsLog":true}"#.utf8))
+        XCTAssertTrue(old.antennaOf.isEmpty)
+        XCTAssertEqual(try JSONDecoder().decode(GroupState.StoredPolicy.self, from: JSONEncoder().encode(g.policy)), g.policy)
+    }
+
     func testSeveralProfilesFitOneSignedSettingsFrame() {
         let coordinator = DeviceIdentity()
         var g = GroupState(name: "Mill Lane", secrets: .random(), members: [

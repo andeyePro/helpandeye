@@ -47,6 +47,7 @@ extension GroupSettings {
         for p in old.policy.profiles where !now.contains(p.id) { out.append("deleted the profile \(p.name)") }
         if policy.profileOf != old.policy.profileOf { out.append("changed who has which profile") }
         if policy.keepsLog != old.policy.keepsLog { out.append(policy.keepsLog ? "switched the log on" : "switched the log off") }
+        if policy.antennaOf != old.policy.antennaOf { out.append("changed a unit's antenna") }
         if policy.useDistance != old.policy.useDistance { out.append("changed whether distance counts") }
         if relayURL != old.relayURL { out.append("changed the relay address") }
         if relayPass != old.relayPass { out.append("added a relay pass") }
