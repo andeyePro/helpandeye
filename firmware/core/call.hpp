@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "airtime.hpp"
 #include "frame.hpp"
 
 namespace helpandi {
@@ -92,12 +93,21 @@ struct OutgoingCall {
 
     // After a long sleep, missed slots are skipped rather than sent back to back.
     void markResent(uint64_t nowMono);
+
+    // The airtime a resend may use: Help and Need a hand their own share, so routine traffic
+    // never leaves them none; I'm OK only what is spare (Engine.swift checkResends).
+    AirtimeBudget::Kind resendKind() const {
+        return colour == Colour::green ? AirtimeBudget::Kind::optional : AirtimeBudget::Kind::resend;
+    }
 };
 
 // The calls a press of I'm OK settles: every open Help or Need a hand when the caller's profile
 // has I'm OK close them (A), or only those still waiting for a responder when it just stops the
-// urgent repeats (B). Writes their indices to `out` and returns how many.
-size_t settledByOK(const OutgoingCall* calls, size_t count, bool okClosesCall, size_t* out, size_t cap);
+// urgent repeats (B). Only calls made before the I'm OK press (`okPressedMono`, the monotonic
+// clock), as Engine.swift settleOnOK: never one made at the same moment or since. Writes their
+// indices to `out` and returns how many.
+size_t settledByOK(const OutgoingCall* calls, size_t count, bool okClosesCall, uint64_t okPressedMono, size_t* out,
+                   size_t cap);
 
 // A close this box sent, repeated on the call's resend times a few times, so a phone that missed
 // it does not go on alerting.

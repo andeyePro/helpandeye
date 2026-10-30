@@ -1,6 +1,6 @@
 // Keeps the box's own sending inside Ofcom IR 2030 at 868 MHz: time on air per packet, the
 // licence-exempt sub-bands, the hourly duty-cycle budget and the transmit power cap. Follows
-// Airtime.swift, except where noted in firmware/DESIGN.md (packet size).
+// Airtime.swift.
 //
 // UNTESTED ON HARDWARE. Host tests only (firmware/test).
 #pragma once
@@ -28,8 +28,18 @@ struct RadioSettings {
     int spreadingFactor;
     // The coding rate denominator, 5 to 8 for 4/5 to 4/8, as MeshCore reports it.
     int codingRate;
-    // MeshCore uses 32 symbols at SF8 and below and 16 above (RadioLibWrapper::preambleLengthForSF).
     int preambleSymbols;
+
+    RadioSettings(double frequencyMHz, double bandwidthKHz, int spreadingFactor, int codingRate, int preambleSymbols)
+        : frequencyMHz(frequencyMHz),
+          bandwidthKHz(bandwidthKHz),
+          spreadingFactor(spreadingFactor),
+          codingRate(codingRate),
+          preambleSymbols(preambleSymbols) {}
+    // MeshCore sends a 32-symbol preamble at SF8 and below and 16 above
+    // (RadioLibWrapper::preambleLengthForSF), as Airtime.swift assumes when none is given.
+    RadioSettings(double frequencyMHz, double bandwidthKHz, int spreadingFactor, int codingRate)
+        : RadioSettings(frequencyMHz, bandwidthKHz, spreadingFactor, codingRate, spreadingFactor <= 8 ? 32 : 16) {}
 
     // Seconds on air for one LoRa packet of `bytes` (Semtech AN1200.13), explicit header, CRC on.
     double airtime(int bytes) const;
@@ -50,7 +60,8 @@ bool maxRadioPowerSetting(const Band& band, double antennaGainDBi, double amplif
 
 class AirtimeBudget {
 public:
-    enum class Kind : uint8_t { call, optional };
+    // A new press; a resend of a Help or Need a hand nobody has answered; anything else.
+    enum class Kind : uint8_t { call, resend, optional };
     static constexpr uint64_t kWindowMs = 3600000;
     static constexpr size_t kCapacity = 128;
 
@@ -59,8 +70,9 @@ public:
     uint64_t usedMs(uint64_t nowMs) const;
 
     // Calls may use up to 90% of the legal allowance, leaving a margin for what MeshCore sends
-    // itself (adverts, direct-message acknowledgements). Everything else, resends included, only
-    // the half left after keeping half free for other people's calls (decision 12).
+    // itself (adverts, direct-message acknowledgements). Resends of unanswered calls may use up to
+    // 70%, so routine traffic, which keeps half free for other people's calls (decision 12), never
+    // leaves them none.
     bool allows(uint32_t ms, Kind kind, uint64_t nowMs) const;
 
     // Reserves airtime before sending, so overlapping sends cannot each see the same allowance.

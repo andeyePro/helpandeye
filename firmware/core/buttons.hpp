@@ -2,7 +2,11 @@
 // Fed the raw button levels every few milliseconds; says what to send and what to sound.
 //
 // The countdown follows HelpCountdown.swift and the watch's rule for a press during it: the
-// countdown stops, I'm OK then sends nothing, and Help or Need a hand go at once.
+// countdown stops, I'm OK then sends nothing, and Help or Need a hand go at once. A press that
+// began before the end counts as during it, even when debouncing confirms it after.
+//
+// I'm OK never goes while Help or Need a hand is held, in the same poll as either, or within
+// kNoOKAfterUrgentMs of either: someone who has fallen on the box must not cancel their own call.
 //
 // UNTESTED ON HARDWARE. Host tests only (firmware/test).
 #pragma once
@@ -60,16 +64,25 @@ struct Event {
     Colour colour;
 };
 
+constexpr uint64_t kNoOKAfterUrgentMs = 3000;
+
 class ButtonMachine {
 public:
-    // Room to pass to `update`: enough for a whole missed countdown and every button at once.
+    // Room to pass to `update`. Everything but a tap or the warning is always kept: those are
+    // what a late call may leave out of a long countdown.
     static constexpr size_t kMaxEvents = 16;
+    // The most events other than taps and the warning one call can give: the countdown's Help,
+    // and for each button a stop and its own call.
+    static constexpr size_t kMaxActionEvents = 1 + 2 * kInputCount;
 
-    explicit ButtonMachine(const Layout& layout);
+    // `wokenBy` has bit Input set for each button that woke the board from deep sleep: that press
+    // counts at once, even if already released. Zero for a cold power-on, when a button already
+    // held counts only after it has been seen released.
+    explicit ButtonMachine(const Layout& layout, uint8_t wokenBy = 0);
 
     // `levels` has bit Input set while that button is pressed. Writes what is due since the last
     // call to `out`, which must have room for kMaxEvents, and returns how many. A late call does
-    // everything missed, the countdown first, so a press at the moment it ends still leaves Help sent.
+    // everything missed, the countdown first, so a press after it ended still leaves Help sent.
     size_t update(uint64_t nowMs, uint8_t levels, Event* out);
 
     bool counting() const { return counting_; }
@@ -89,12 +102,19 @@ private:
         bool swallow = false;
     };
 
+    void press(State& s, const Binding& b, uint64_t nowMs);
+    void send(Colour colour, uint64_t nowMs);
     void act(Action a, uint64_t nowMs);
     void emit(Event::Type type, Colour colour = Colour::red);
     void countdownEvents(uint64_t from, uint64_t to);
 
     Layout layout_;
     State inputs_[kInputCount];
+    uint8_t wokenBy_;
+    // Buttons bound to Help or Need a hand.
+    uint8_t urgentInputs_ = 0;
+    bool urgentSeen_ = false;
+    uint64_t urgentAt_ = 0;
     bool counting_ = false;
     uint64_t countdownStart_ = 0;
     uint64_t lastUpdate_ = 0;

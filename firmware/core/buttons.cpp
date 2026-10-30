@@ -5,7 +5,14 @@ namespace helpandi {
 namespace {
 constexpr uint64_t kTapEveryMs = 10000;
 constexpr uint64_t kWarnLeftMs = 30000;
+constexpr uint32_t kCountdownMs = 60000;
+
+bool urgent(Action a) { return a == Action::red || a == Action::amber; }
 }  // namespace
+
+// A call made after the whole of the usual countdown still keeps every tap and the warning.
+static_assert((kCountdownMs - 1) / kTapEveryMs + 1 + ButtonMachine::kMaxActionEvents <= ButtonMachine::kMaxEvents,
+              "room for the countdown's taps, its warning and every action in one call");
 
 Layout threeButtons() {
     Layout l{};
@@ -15,7 +22,7 @@ Layout threeButtons() {
     l.bindings[size_t(Input::prg)] = {Action::none, Action::none, Action::none};
     l.debounceMs = 30;
     l.longPressMs = 3000;
-    l.countdownMs = 60000;
+    l.countdownMs = kCountdownMs;
     return l;
 }
 
@@ -27,21 +34,37 @@ Layout prgOnly() {
     l.bindings[size_t(Input::prg)] = {Action::none, Action::countdown, Action::green};
     l.debounceMs = 30;
     l.longPressMs = 3000;
-    l.countdownMs = 60000;
+    l.countdownMs = kCountdownMs;
     return l;
 }
 
-ButtonMachine::ButtonMachine(const Layout& layout) : layout_(layout) {}
+ButtonMachine::ButtonMachine(const Layout& layout, uint8_t wokenBy) : layout_(layout), wokenBy_(wokenBy) {
+    for (size_t i = 0; i < kInputCount; i++) {
+        const Binding& b = layout_.bindings[i];
+        if (urgent(b.onPress) || urgent(b.onShort) || urgent(b.onLong)) urgentInputs_ |= uint8_t(1 << i);
+    }
+}
 
 void ButtonMachine::emit(Event::Type type, Colour colour) {
-    if (outCount_ < kMaxEvents) out_[outCount_++] = Event{type, colour};
+    bool droppable = type == Event::Type::tap || type == Event::Type::warn;
+    if (outCount_ < kMaxEvents - (droppable ? kMaxActionEvents : 0)) out_[outCount_++] = Event{type, colour};
+}
+
+void ButtonMachine::send(Colour colour, uint64_t nowMs) {
+    if (colour != Colour::green) {
+        urgentSeen_ = true;
+        urgentAt_ = nowMs;
+    } else if (urgentSeen_ && nowMs - urgentAt_ < kNoOKAfterUrgentMs) {
+        return;
+    }
+    emit(Event::Type::send, colour);
 }
 
 void ButtonMachine::act(Action a, uint64_t nowMs) {
     switch (a) {
-    case Action::red: emit(Event::Type::send, Colour::red); break;
-    case Action::amber: emit(Event::Type::send, Colour::amber); break;
-    case Action::green: emit(Event::Type::send, Colour::green); break;
+    case Action::red: send(Colour::red, nowMs); break;
+    case Action::amber: send(Colour::amber, nowMs); break;
+    case Action::green: send(Colour::green, nowMs); break;
     case Action::countdown:
         if (counting_) break;
         counting_ = true;
@@ -63,20 +86,58 @@ void ButtonMachine::countdownEvents(uint64_t from, uint64_t to) {
     }
     if (a < length && length <= b) {
         counting_ = false;
-        emit(Event::Type::send, Colour::red);
+        send(Colour::red, to);
+    }
+}
+
+void ButtonMachine::press(State& s, const Binding& b, uint64_t nowMs) {
+    s.pressed = true;
+    s.longDone = false;
+    // A button held since start-up, or stuck, keeps `swallow` and never makes a call.
+    s.swallow = true;
+    if (s.armed && counting_) {
+        counting_ = false;
+        emit(Event::Type::countdownStopped);
+        Action first = b.onPress != Action::none ? b.onPress : b.onShort;
+        if (urgent(first)) act(first, nowMs);
+    } else if (s.armed && b.onPress != Action::none) {
+        act(b.onPress, nowMs);
+    } else if (s.armed) {
+        s.swallow = false;
     }
 }
 
 size_t ButtonMachine::update(uint64_t nowMs, uint8_t levels, Event* out) {
     out_ = out;
     outCount_ = 0;
-    if (counting_) countdownEvents(lastUpdate_, nowMs);
+    if (levels & urgentInputs_) {
+        urgentSeen_ = true;
+        urgentAt_ = nowMs;
+    }
+    if (counting_) {
+        // A press that began before the end, certain only now, stops the countdown instead.
+        uint64_t to = nowMs;
+        for (size_t i = 0; i < kInputCount; i++) {
+            const State& s = inputs_[i];
+            bool raw = (levels >> i) & 1;
+            if (s.armed && !s.pressed && raw && s.raw && nowMs - s.rawSince >= layout_.debounceMs && s.rawSince < to)
+                to = s.rawSince;
+        }
+        countdownEvents(lastUpdate_, to);
+    }
     lastUpdate_ = nowMs;
 
     for (size_t i = 0; i < kInputCount; i++) {
         State& s = inputs_[i];
         const Binding& b = layout_.bindings[i];
         bool raw = (levels >> i) & 1;
+        if ((wokenBy_ >> i) & 1) {
+            s.raw = true;
+            s.rawSince = nowMs;
+            s.armed = true;
+            s.pressedAt = nowMs;
+            press(s, b, nowMs);
+        }
         if (raw != s.raw) {
             s.raw = raw;
             s.rawSince = nowMs;
@@ -84,21 +145,8 @@ size_t ButtonMachine::update(uint64_t nowMs, uint8_t levels, Event* out) {
         bool stable = nowMs - s.rawSince >= layout_.debounceMs;
 
         if (stable && raw && !s.pressed) {
-            s.pressed = true;
             s.pressedAt = s.rawSince;
-            s.longDone = false;
-            // A button held since start-up, or stuck, keeps `swallow` and never makes a call.
-            s.swallow = true;
-            if (s.armed && counting_) {
-                counting_ = false;
-                emit(Event::Type::countdownStopped);
-                Action first = b.onPress != Action::none ? b.onPress : b.onShort;
-                if (first == Action::red || first == Action::amber) act(first, nowMs);
-            } else if (s.armed && b.onPress != Action::none) {
-                act(b.onPress, nowMs);
-            } else if (s.armed) {
-                s.swallow = false;
-            }
+            press(s, b, nowMs);
         } else if (stable && !raw && s.pressed) {
             s.pressed = false;
             if (s.armed && !s.swallow && !s.longDone) act(b.onShort, nowMs);
@@ -111,6 +159,7 @@ size_t ButtonMachine::update(uint64_t nowMs, uint8_t levels, Event* out) {
             act(b.onLong, nowMs);
         }
     }
+    wokenBy_ = 0;
     return outCount_;
 }
 

@@ -126,12 +126,23 @@ TEST(imOKSettlesWhatTheProfileSays) {
     size_t out[5];
 
     // B: only those still waiting for a responder.
-    size_t n = settledByOK(calls, 5, false, out, 5);
+    size_t n = settledByOK(calls, 5, false, m0 + 1, out, 5);
     CHECK(n == 1 && out[0] == 0);
 
     // A: every open Help or Need a hand, seen or not.
-    n = settledByOK(calls, 5, true, out, 5);
+    n = settledByOK(calls, 5, true, m0 + 1, out, 5);
     CHECK(n == 3 && out[0] == 0 && out[1] == 1 && out[2] == 2);
+}
+
+TEST(imOKSettlesOnlyCallsMadeBeforeIt) {
+    OutgoingCall calls[] = {redCall(), OutgoingCall(5, 2, Colour::red, t0 + 10, m0 + 10),
+                            OutgoingCall(5, 3, Colour::amber, t0 + 11, m0 + 11)};
+    size_t out[3];
+    // I'm OK pressed at m0 + 10: the call made at that moment and the one after stay open.
+    size_t n = settledByOK(calls, 3, true, m0 + 10, out, 3);
+    CHECK(n == 1 && out[0] == 0);
+    n = settledByOK(calls, 3, false, m0 + 10, out, 3);
+    CHECK(n == 1 && out[0] == 0);
 }
 
 TEST(aCloseIsRepeatedOnTheCallsResendTimes) {
@@ -149,4 +160,10 @@ TEST(aCloseAfterALongSleepGoesOnceAndStops) {
     CloseRepeat r(m0);
     bool finished = false;
     CHECK(r.tick(m0 + 1000, finished) && finished);
+}
+
+TEST(helpAndNeedAHandResendFromTheirOwnShareAndImOKFromWhatIsSpare) {
+    CHECK(redCall().resendKind() == AirtimeBudget::Kind::resend);
+    CHECK(OutgoingCall(5, 1, Colour::amber, t0, m0).resendKind() == AirtimeBudget::Kind::resend);
+    CHECK(OutgoingCall(5, 1, Colour::green, t0, m0).resendKind() == AirtimeBudget::Kind::optional);
 }

@@ -47,15 +47,21 @@ bool maxRadioPowerSetting(const Band& band, double antennaGainDBi, double amplif
     return true;
 }
 
+namespace {
+// An entry stamped after `nowMs` (the clock went back) still counts, as in Airtime.swift: never
+// under-count what went on air.
+bool inWindow(uint64_t atMs, uint64_t nowMs) { return atMs > nowMs || nowMs - atMs < AirtimeBudget::kWindowMs; }
+}  // namespace
+
 uint64_t AirtimeBudget::usedMs(uint64_t nowMs) const {
     uint64_t used = 0;
     for (size_t i = 0; i < count_; i++)
-        if (nowMs - log_[i].atMs < kWindowMs) used += log_[i].ms;
+        if (inWindow(log_[i].atMs, nowMs)) used += log_[i].ms;
     return used;
 }
 
 bool AirtimeBudget::allows(uint32_t ms, Kind kind, uint64_t nowMs) const {
-    double share = kind == Kind::call ? 0.9 : 0.5;
+    double share = kind == Kind::call ? 0.9 : kind == Kind::resend ? 0.7 : 0.5;
     // The small allowance absorbs rounding in the product, never a whole millisecond.
     uint64_t limit = uint64_t(std::floor(dutyCycle_ * kWindowMs * share + 1e-6));
     return usedMs(nowMs) + ms <= limit;
@@ -64,7 +70,7 @@ bool AirtimeBudget::allows(uint32_t ms, Kind kind, uint64_t nowMs) const {
 uint32_t AirtimeBudget::record(uint32_t ms, uint64_t nowMs) {
     size_t kept = 0;
     for (size_t i = 0; i < count_; i++)
-        if (nowMs - log_[i].atMs < kWindowMs) log_[kept++] = log_[i];
+        if (inWindow(log_[i].atMs, nowMs)) log_[kept++] = log_[i];
     count_ = kept;
     if (count_ == kCapacity) {
         // Folding the oldest into the next keeps it counted for longer, never shorter.

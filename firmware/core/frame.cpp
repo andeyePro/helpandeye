@@ -14,9 +14,10 @@ constexpr uint8_t kSettingsHeader = 0x21;
 constexpr uint8_t kCallStateHeader = 0x22;
 constexpr uint8_t kChangeRequestHeader = 0x23;
 
+// Given the whole frame's size first, so a buffer too small for it is left untouched.
 class Writer {
 public:
-    Writer(uint8_t* out, size_t cap) : out_(out), cap_(cap) {}
+    Writer(uint8_t* out, size_t cap, size_t need) : out_(out), cap_(cap), failed_(need > cap) {}
     void u8(uint8_t v) { put(&v, 1); }
     void u16(uint16_t v) {
         uint8_t b[2] = {uint8_t(v), uint8_t(v >> 8)};
@@ -41,7 +42,7 @@ private:
     uint8_t* out_;
     size_t cap_;
     size_t used_ = 0;
-    bool failed_ = false;
+    bool failed_;
 };
 
 class Reader {
@@ -110,7 +111,7 @@ bool isValidUTF8(const uint8_t* s, size_t n) {
 
 size_t encode(const CallFrame& f, uint8_t* out, size_t cap) {
     if (!validColour(uint8_t(f.colour))) return 0;
-    Writer w(out, cap);
+    Writer w(out, cap, kCallBytes);
     w.u8(kCallHeader);
     w.u32(f.unit);
     w.u16(f.request);
@@ -120,7 +121,7 @@ size_t encode(const CallFrame& f, uint8_t* out, size_t cap) {
 }
 
 size_t encode(const AckFrame& f, uint8_t* out, size_t cap) {
-    Writer w(out, cap);
+    Writer w(out, cap, kAckBytes);
     w.u8(kAckHeader);
     w.u32(f.unit);
     w.u16(f.request);
@@ -133,7 +134,7 @@ size_t encode(const AckFrame& f, uint8_t* out, size_t cap) {
 size_t encode(const CallStateFrame& f, uint8_t* out, size_t cap) {
     if (!validState(uint8_t(f.state)) || f.reasonLength > kMaxReasonBytes || !isValidUTF8(f.reason, f.reasonLength))
         return 0;
-    Writer w(out, cap);
+    Writer w(out, cap, 13 + size_t(f.reasonLength));
     w.u8(kCallStateHeader);
     w.u32(f.unit);
     w.u16(f.request);
@@ -146,7 +147,7 @@ size_t encode(const CallStateFrame& f, uint8_t* out, size_t cap) {
 
 size_t encode(const SignedFrame& f, uint8_t* out, size_t cap) {
     if (f.innerLength > kMaxSignedInner) return 0;
-    Writer w(out, cap);
+    Writer w(out, cap, 4 + size_t(f.innerLength) + kSignatureBytes);
     w.u8(kSignedHeader);
     w.u16(f.signer);
     w.u8(f.innerLength);
@@ -230,7 +231,7 @@ bool mayGoOnGroupChannel(const Frame& f) {
 
 size_t ackSignatureInput(const AckFrame& f, const uint8_t* group, size_t groupLength, uint8_t* out, size_t cap) {
     static const char label[] = "HELPA-ACK-2";
-    Writer w(out, cap);
+    Writer w(out, cap, sizeof label - 1 + groupLength + 12);
     w.bytes(reinterpret_cast<const uint8_t*>(label), sizeof label - 1);
     w.bytes(group, groupLength);
     w.u32(f.unit);
@@ -243,7 +244,7 @@ size_t ackSignatureInput(const AckFrame& f, const uint8_t* group, size_t groupLe
 size_t signedSignatureInput(uint16_t signer, const uint8_t* inner, size_t innerLength, const uint8_t* group,
                             size_t groupLength, uint8_t* out, size_t cap) {
     static const char label[] = "HELPA-SIGNED-2";
-    Writer w(out, cap);
+    Writer w(out, cap, sizeof label - 1 + groupLength + 2 + innerLength);
     w.bytes(reinterpret_cast<const uint8_t*>(label), sizeof label - 1);
     w.bytes(group, groupLength);
     w.u16(signer);

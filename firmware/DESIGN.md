@@ -220,10 +220,12 @@ in `core/call.hpp`:
 - The 12-byte call frame goes on the group channel at once, as urgent airtime.
 - It goes again 30 s, 1, 2 and 4 minutes after the press, then every 10 minutes, until a person
   settles it: a valid acknowledgement, or a close. Nothing stops it on a timer. After a long
-  sleep, missed slots are skipped, not sent back to back. Resends use the optional share of the
-  airtime (section 8), so they never use up what a new press needs. A call the radio could not
-  send is retried on the same times.
-- An I'm OK call is repeated on the first four resend times, then left.
+  sleep, missed slots are skipped, not sent back to back. Resends of Help and Need a hand use
+  the resend share of the airtime, and I'm OK resends the optional share (section 8), so they
+  never use up what a new press needs. A call the radio could not send is retried on the same
+  times.
+- An I'm OK call is repeated on the first four resend times, then left: after them it has no
+  next resend time, as in `OutgoingRequest.nextResend`.
 - While a call stands at I'm OK (profile B), the signed I'm OK goes with each resend, so a
   responder who missed both still comes to check.
 - A close the box made is repeated on the call's resend times four times.
@@ -239,6 +241,28 @@ in `core/call.hpp`:
 The core uses the board's monotonic clock for the schedule and the wall clock only for what goes
 in frames, so the phone setting the time mid-call never moves a resend.
 
+**I'm OK settles only what came before it.** A press of I'm OK settles the calls made before
+it, never one made at the same moment or since, as `settleOnOK` in Engine.swift. The box compares
+its monotonic times, so a clock set mid-call cannot change which calls it settles.
+
+**Buttons** (`core/buttons.hpp`):
+
+- A press counts once it has been steady for the debounce time (30 ms), and sends at once, not on
+  release.
+- I'm OK never goes while red or amber is held, in the same poll as either firing, or within
+  3 seconds of either (`kNoOKAfterUrgentMs`), the countdown's Help included. Someone who falls on
+  the box, or presses everything at once, sends Help and Need a hand, never I'm OK.
+- After a cold power-on, a button already held counts only once it has been seen released, so a
+  stuck button or one leant on while plugging in makes no call. The button that woke the board
+  from deep sleep is different: the firmware passes the wake cause, and that press counts at
+  once, even if the button was let go before the core first ran.
+- A press during the countdown stops it, as on the watch: I'm OK then sends nothing, and Help or
+  Need a hand go at once. A press that began before the end counts as during it, even when the
+  debounce confirms it after.
+- A late poll does everything missed. It keeps room for every call, stop and the countdown's
+  Help; only taps and the warning of a long countdown can be left out when there is too much to
+  report at once.
+
 **Pressing again.** In the app, each press of Help is a new call. On a box someone may press red
 over and over while waiting. Whether a repeat press while a call is open makes a new call, or
 sends the open one again at once, is an open question below.
@@ -251,23 +275,19 @@ sends the open one again at once, is an open question below.
   optimisation when a symbol is over 16 ms.
 - The two IR 2030 sub-bands MeshCore uses in the UK: 868.0 to 868.6 MHz (1%, 25 mW ERP) and
   869.4 to 869.65 MHz (10%, 500 mW ERP). Outside them the box sends nothing of its own.
-- A one-hour sliding budget: calls up to 90% of the legal allowance, everything else, resends
-  included, up to 50%. Airtime is reserved before sending and given back only if the radio
-  refused the packet. The log has a fixed size; when it fills, the oldest entry is folded into the
-  next one, which keeps it counted for longer, never shorter.
-
-Two differences from the Swift code, both towards counting more airtime, never less:
-
-- **Packet size.** MeshCore's `sendGroupData` puts the data type and a length byte before the
-  payload, so the encrypted part is 3 + payload bytes. `meshPacketBytes` in Airtime.swift uses
-  2 + payload, which comes out a whole 16-byte block short whenever the payload is 14, 30, 46...
-  bytes. The core uses 3. On the board the firmware should use the real packet length
+- A one-hour sliding budget: new calls up to 90% of the legal allowance, resends of Help and
+  Need a hand up to 70%, everything else (I'm OK resends included) up to 50%, so routine traffic
+  never leaves an unanswered call no airtime. Airtime is reserved before sending and given back
+  only if the radio refused the packet. An entry stamped later than now, after the clock went
+  back, still counts: the budget never under-counts. The log has a fixed size; when it fills, the
+  oldest entry is folded into the next one, which keeps it counted for longer, never shorter.
+- Packet size as MeshCore sends it: `sendGroupData` puts the data type and a length byte before
+  the payload, so the encrypted part is 3 + payload bytes, as `meshPacketBytes` in Airtime.swift
+  now counts. On the board the firmware should use the real packet length
   (`Packet::getRawLength`) rather than any estimate.
-- **Preamble.** MeshCore uses a 32-symbol preamble at spreading factor 8 and below, and 16 above
-  (`RadioLibWrapper::preambleLengthForSF`). The Swift `RadioSettings` defaults to 16 and the
-  companion protocol does not report it, so at the UK narrow preset (SF8, 62.5 kHz) the app
-  counts a 21-byte packet as 312 ms when it is 378 ms. The core takes the preamble as a field,
-  and the board knows its own.
+- The preamble MeshCore sends: 32 symbols at spreading factor 8 and below, 16 above
+  (`RadioLibWrapper::preambleLengthForSF`), the default in both `RadioSettings`. At the UK narrow
+  preset (SF8, 62.5 kHz) a 21-byte packet is 378 ms on air. The board can pass its own.
 
 **After a restart.** The Swift budget is saved so a relaunch does not get a fresh hour. A board
 that lost power has no record of the hour before. Proposed: keep the log in RTC memory, which
@@ -321,7 +341,8 @@ acknowledgement silences it. Open question below.
 - `firmware/core`: the portable logic, plain C++17, no Arduino, no heap, no exceptions.
 - Later, `firmware/box`: a PlatformIO project that builds MeshCore's companion firmware at a
   pinned commit with a Help&I UI task in place of `ui-new`, the pins above, and the core.
-  The UI task reads the buttons every 5 to 10 ms into `ButtonMachine`, turns its events into
+  The UI task makes its `ButtonMachine` with the wake cause (the buttons that woke the board),
+  reads the buttons every 5 to 10 ms into it, turns its events into
   calls, sounds and the screen, receives Help&I datagrams through `onChannelDataRecv`, and sends
   through `sendGroupData` with data type `0xFF48`.
 - New companion commands, in a range MeshCore does not use, for provisioning (section 6) and for
@@ -362,7 +383,7 @@ undefined-behaviour sanitisers, and runs every test.
 - For a header byte it does not read (a follow-up, a sealed note, settings), the decoder says
   "other" without checking the rest, so the box can pass it to the phone unread. The phone then
   applies its own checks.
-- Packet size and preamble, as in section 8.
+- An encoder given too small a buffer writes nothing into it, not the part that fits.
 
 **Test vectors.** Swift could not be run here, so the vectors in `test/frame_tests.cpp` were
 worked out by hand from `HelpFrame.encoded()`, field by field, and checked with a separate
@@ -373,12 +394,16 @@ Ed25519 library (no signature vectors here: none could be made from a phone).
 
 ## 13. Test plan
 
-**Host tests (built, run, passing).** 45 tests in `firmware/test`: the frames byte for byte
+**Host tests (built, run, passing).** 57 tests in `firmware/test`: the frames byte for byte
 against the Swift layout, malformed and stray input, what may go on the group channel, the
-signature inputs; the resend times, acknowledgement rules, removal, settling and close repeats;
-airtime against Semtech's figure, both bands, the budget's shares, reservations and a full log;
-the power cap; debouncing, a button held at start-up, press and long press, the countdown's taps,
-warning and Help, a late wake, and stopping it. Still to add when the code exists: Ed25519
+signature inputs, too small a buffer; the resend times, acknowledgement rules, removal, settling,
+I'm OK settling only earlier calls, which share each resend uses, and close repeats; airtime
+against Semtech's figure, the default preamble and packet size against EscalationTests.swift,
+both bands, the budget's three shares, entries after a clock reset, reservations and a full log;
+the power cap; debouncing, a button held at start-up, the button that woke the board, press and
+long press, all three pressed at once, falling on red and green, I'm OK just after Help, the
+countdown's taps, warning and Help, a late wake, a 300-second countdown, and stopping it,
+including by a press that began just before the end. Still to add when the code exists: Ed25519
 checks with a vector from a real phone, provisioning, and an end-to-end test of the Help&I UI
 task against a fake radio.
 
@@ -422,7 +447,7 @@ Help&I firmware exists, and replace "Help&I needs no firmware of its own" in Bef
 > Run once with the box's profile set to "I'm OK closes the call" (A) and once to "stops the
 > urgent repeats" (B).
 >
-> 1. On box A, press red, then green.
+> 1. On box A, press red, wait five seconds, then press green.
 >
 > Pass: phone B shows the call and then I'm OK, quietly. In A the call shows as closed by the
 > caller; in B it stays open until a responder acknowledges. In B, box A's repeats carry I'm OK.
@@ -432,9 +457,13 @@ Help&I firmware exists, and replace "Help&I needs no firmware of its own" in Bef
 > 1. Tap red as lightly and quickly as you can, ten times.
 > 2. Hold red while plugging box A in, keep holding for ten seconds, then let go.
 > 3. Press red once.
+> 4. Wait five seconds, then press red, amber and green together with the flat of a hand.
+> 5. Wait five seconds. Press red, let go, and press green within two seconds.
+> 6. On battery, let box A go into deep sleep, then tap red once, briefly.
 >
 > Pass: in step 1 each tap that beeps makes exactly one call and none makes two. Step 2 makes no
-> call. Step 3 makes one.
+> call. Step 3 makes one. Step 4 makes a Help and a Need a hand and no I'm OK. Step 5 makes one
+> Help and no I'm OK. Step 6 wakes the box and makes one Help.
 >
 > ### 50. The countdown on a plain Heltec (development layout)
 >
@@ -512,24 +541,19 @@ Help&I firmware exists, and replace "Help&I needs no firmware of its own" in Bef
 
 ## 15. Things in the Swift sources that look inconsistent
 
-For whoever works on `app/helpandeyeCore`; nothing here was changed.
+For whoever works on `app/helpandeyeCore`; nothing here was changed. The packet size (the length
+byte), the 32-symbol preamble and `nextResend` for I'm OK after its four repeats, once listed
+here, were fixed in the app in commit a9f5267, which also gave resends their 70% share.
 
-1. `meshPacketBytes` (Airtime.swift) leaves out the length byte MeshCore puts before a group
-   datagram's payload, so it counts a block short for payloads of 14, 30, 46... bytes (section 8).
-2. `RadioSettings` defaults to a 16-symbol preamble; MeshCore uses 32 at SF8 and below, which
-   includes the UK narrow preset the tests use (section 8). Both make the app count less airtime
-   than it uses.
-3. `HelpFrame.init` checks for trailing bytes on the nibble kinds but returns early for 0x21,
+1. `HelpFrame.init` checks for trailing bytes on the nibble kinds but returns early for 0x21,
    0x22 and 0x23 without that check, so a call state with junk after it is accepted.
-4. `HelpFrame.signed` encodes at most 80 bytes of the inner frame, but `signing` signs the whole
+2. `HelpFrame.signed` encodes at most 80 bytes of the inner frame, but `signing` signs the whole
    inner frame, so an inner frame over 80 bytes would go out with a signature that cannot verify.
    No frame signed today is that long, as far as could be seen.
-5. A `.note` built directly, not through `HelpFrame.note(typed:)`, is cut at 120 bytes, which can
+3. A `.note` built directly, not through `HelpFrame.note(typed:)`, is cut at 120 bytes, which can
    split a character and make a frame its own decoder rejects as not UTF-8.
-6. `OutgoingRequest.nextResend` gives a time for an I'm OK call after its four repeats, though
-   `resendDue` will never be true again for it.
-7. The watch numbers its calls from 32768 and the phone from 1, which uses the whole request
+4. The watch numbers its calls from 32768 and the phone from 1, which uses the whole request
    number range; a box acting for the same unit would have no numbers of its own. The box as its
    own member avoids this.
-8. ForResponders' nonce puts unit and request in big-endian, while every frame is little-endian.
+5. ForResponders' nonce puts unit and request in big-endian, while every frame is little-endian.
    Not wrong, but worth a comment for anyone reimplementing it on a board.

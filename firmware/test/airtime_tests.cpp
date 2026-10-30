@@ -8,7 +8,7 @@
 using namespace helpandi;
 
 namespace {
-const RadioSettings ukNarrow{869.618, 62.5, 8, 8, 32};
+const RadioSettings ukNarrow{869.618, 62.5, 8, 8};
 
 bool near(double a, double b) { return std::fabs(a - b) < 1e-6; }
 }  // namespace
@@ -22,21 +22,32 @@ TEST(airtimeMatchesSemtechsCalculator) {
 }
 
 TEST(airtimeCountsMeshCoresLongerPreambleAtLowSpreadingFactors) {
-    RadioSettings swiftDefault{869.618, 62.5, 8, 8, 16};
-    CHECK(near(swiftDefault.airtime(21), 0.31232));
+    RadioSettings sixteen{869.618, 62.5, 8, 8, 16};
+    CHECK(near(sixteen.airtime(21), 0.31232));
     CHECK(near(ukNarrow.airtime(21), 0.377856));
 }
 
+TEST(airtimeCountsWhatMeshCoreReallySends) {
+    // EscalationTests.swift: the preamble MeshCore uses when none is given, and the packet size.
+    CHECK(RadioSettings(869.5, 62.5, 8, 8).preambleSymbols == 32);
+    CHECK(RadioSettings(869.5, 125, 11, 5).preambleSymbols == 16);
+    CHECK(RadioSettings(869.5, 125, 9, 5).preambleSymbols == 16);
+    CHECK(RadioSettings(869.5, 125, 7, 5).preambleSymbols == 32);
+    CHECK(RadioSettings(869.5, 125, 7, 5, 8).preambleSymbols == 8);
+    CHECK(meshPacketBytes(13) == 2 + 1 + 2 + 16);
+    CHECK(meshPacketBytes(14) == 2 + 1 + 2 + 32);  // 3 + 14 bytes need a second block
+}
+
 TEST(airtimeUsesLowDataRateOptimisationWhenSymbolsAreLong) {
-    RadioSettings sf12{869.5, 125, 12, 5, 16};
+    RadioSettings sf12{869.5, 125, 12, 5};
     CHECK(near(sf12.airtime(21), 1.744896));
 }
 
 TEST(onlyTheUKBandsHaveAnAllowance) {
     CHECK(ukNarrow.band() && ukNarrow.band()->dutyCycle == 0.10);
-    RadioSettings low{868.1, 125, 7, 5, 32};
+    RadioSettings low{868.1, 125, 7, 5};
     CHECK(low.band() && low.band()->dutyCycle == 0.01);
-    RadioSettings us{915, 125, 7, 5, 32};
+    RadioSettings us{915, 125, 7, 5};
     CHECK(us.band() == nullptr);
 }
 
@@ -44,7 +55,7 @@ TEST(packetSizeIncludesMeshCoresLengthByte) {
     CHECK(meshPacketBytes(12) == 21);  // a call
     CHECK(meshPacketBytes(77) == 85);  // an acknowledgement
     CHECK(meshPacketBytes(13) == 21);
-    CHECK(meshPacketBytes(14) == 37);  // Airtime.swift says 21 here: it leaves the length byte out
+    CHECK(meshPacketBytes(14) == 37);
     CHECK(meshPacketBytes(12, 2) == 23);
 }
 
@@ -58,11 +69,25 @@ TEST(optionalTrafficKeepsHalfTheAllowanceFree) {
     CHECK(b.allows(18000, AirtimeBudget::Kind::optional, AirtimeBudget::kWindowMs));
 }
 
-TEST(resendsUseTheShareThatLeavesRoomForANewPress) {
+TEST(resendsHaveTheirOwnShareBetweenRoutineTrafficAndANewPress) {
+    // EngineTests.swift testResendsNeverUseTheAirtimeANewPressNeeds, on the 1% band: 36 s an hour.
     AirtimeBudget b(0.01);
     b.record(18000, 0);
-    CHECK(!b.allows(500, AirtimeBudget::Kind::optional, 0));
-    CHECK(b.allows(500, AirtimeBudget::Kind::call, 0));
+    CHECK(!b.allows(500, AirtimeBudget::Kind::optional, 0));  // routine traffic has used its half
+    CHECK(b.allows(500, AirtimeBudget::Kind::resend, 0));     // a resend still goes
+    b.record(7200, 0);                                          // resends have used 70%: 25.2 s
+    CHECK(!b.allows(1, AirtimeBudget::Kind::resend, 0));
+    CHECK(b.allows(500, AirtimeBudget::Kind::call, 0));  // a new press still goes
+}
+
+TEST(entriesFromAfterAClockResetStillCount) {
+    AirtimeBudget b(0.01);
+    b.record(18000, 5000000);
+    // The clock went back: what was sent is still on air time, not an hour old.
+    CHECK(b.usedMs(1000) == 18000);
+    CHECK(!b.allows(1, AirtimeBudget::Kind::optional, 1000));
+    b.record(10, 1000);  // recording drops old entries; this one is not old
+    CHECK(b.usedMs(1000) == 18010);
 }
 
 TEST(reservationsCountAtOnceAndCanBeGivenBack) {

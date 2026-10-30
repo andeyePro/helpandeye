@@ -16,7 +16,7 @@ struct Run {
     Event events[64];
     size_t count = 0;
 
-    explicit Run(const Layout& l) : m(l) {}
+    explicit Run(const Layout& l, uint8_t wokenBy = 0) : m(l, wokenBy) {}
 
     // Polls every 5 ms from `from` to `to` with these buttons held.
     void hold(uint64_t from, uint64_t to, uint8_t levels) {
@@ -190,14 +190,137 @@ TEST(aLongPressOfPRGSendsImOKOnce) {
     CHECK(r.of(Event::Type::countdownStarted) == 0);
 }
 
-TEST(aPressAsTheCountdownEndsStillLeavesHelpSent) {
+TEST(aPressThatBeganBeforeTheEndStopsTheCountdown) {
     Run r(withCountdown());
     r.hold(0, 100, 0);
     startCountdown(r);
     r.hold(1205, kStart + 59965, 0);
-    // I'm OK pressed and certain in the same poll as the end: Help has gone, then I'm OK goes too.
-    r.hold(kStart + 59970, kStart + 60000, kGreen);
+    // I'm OK pressed 30 ms before the end, certain only as it ends: a press during the countdown.
+    r.hold(kStart + 59970, kStart + 60100, kGreen);
+    CHECK(r.of(Event::Type::countdownStopped) == 1);
+    CHECK(r.sends(Colour::red) == 0 && r.sends(Colour::green) == 0);
+    CHECK(!r.m.counting());
+
+    // The same when the call that confirms it comes late.
+    Run late(withCountdown());
+    late.hold(0, 100, 0);
+    startCountdown(late);
+    late.hold(1205, kStart + 59965, 0);
+    late.at(kStart + 59970, kGreen);
+    late.at(kStart + 61000, kGreen);
+    CHECK(late.of(Event::Type::countdownStopped) == 1);
+    CHECK(late.sends(Colour::red) == 0 && late.sends(Colour::green) == 0);
+}
+
+TEST(aPressAfterTheEndLeavesHelpSentAndImOKDoesNotFollowIt) {
+    Run r(withCountdown());
+    r.hold(0, 100, 0);
+    startCountdown(r);
+    r.hold(1205, kStart + 59995, 0);
+    r.hold(kStart + 60000, kStart + 60100, kGreen);
     CHECK(r.sends(Colour::red) == 1);
-    CHECK(r.sends(Colour::green) == 1);
+    CHECK(r.sends(Colour::green) == 0);
     CHECK(r.of(Event::Type::countdownStopped) == 0);
+}
+
+TEST(allThreePressedAtOnceSendHelpAndNeedAHandButNeverImOK) {
+    Run r(threeButtons());
+    r.hold(0, 100, 0);
+    r.hold(105, 2000, kRed | kAmber | kGreen);
+    r.hold(2005, 2100, 0);
+    CHECK(r.sends(Colour::red) == 1 && r.sends(Colour::amber) == 1);
+    CHECK(r.sends(Colour::green) == 0);
+}
+
+TEST(fallingOnRedAndGreenSendsOnlyHelp) {
+    // Green touched first: red is already down, though not yet certain, when green is.
+    Run r(threeButtons());
+    r.hold(0, 100, 0);
+    r.hold(105, 110, kGreen);
+    r.hold(115, 20000, kGreen | kRed);
+    // Rolling off red but still on green: green's press was used up.
+    r.hold(20005, 30000, kGreen);
+    r.hold(30005, 30100, 0);
+    CHECK(r.sends(Colour::red) == 1);
+    CHECK(r.sends(Colour::green) == 0);
+
+    // Red touched first.
+    Run redFirst(threeButtons());
+    redFirst.hold(0, 100, 0);
+    redFirst.hold(105, 110, kRed);
+    redFirst.hold(115, 5000, kGreen | kRed);
+    redFirst.hold(5005, 5100, 0);
+    CHECK(redFirst.sends(Colour::red) == 1 && redFirst.sends(Colour::green) == 0);
+}
+
+TEST(imOKWaitsUntilHelpOrNeedAHandHasBeenLetGoForAWhile) {
+    Run r(threeButtons());
+    r.hold(0, 100, 0);
+    r.hold(105, 1000, kAmber);
+    // Green pressed while amber is still held.
+    r.hold(1005, 2000, kAmber | kGreen);
+    r.hold(2005, 2100, 0);
+    // Green again, certain just inside the time after amber was last seen held.
+    const uint64_t letGo = 2000, until = letGo + kNoOKAfterUrgentMs;
+    r.hold(2105, until - 40, 0);
+    r.hold(until - 35, until + 500, kGreen);
+    r.hold(until + 505, until + 600, 0);
+    CHECK(r.sends(Colour::amber) == 1 && r.sends(Colour::green) == 0);
+    // After it, I'm OK goes.
+    r.hold(until + 605, until + 700, kGreen);
+    CHECK(r.sends(Colour::green) == 1);
+}
+
+TEST(theButtonThatWokeTheBoardCountsAtOnce) {
+    // Already let go by the first call: a quick press that woke the board from deep sleep.
+    Run tapped(threeButtons(), kRed);
+    tapped.hold(400, 500, 0);
+    CHECK(tapped.sends(Colour::red) == 1);
+    CHECK(tapped.count == 1);
+
+    // Still held: one call, not one now and another once it has been seen released.
+    Run held(threeButtons(), kRed);
+    held.hold(400, 5000, kRed);
+    held.hold(5005, 5100, 0);
+    CHECK(held.sends(Colour::red) == 1);
+    CHECK(held.count == 1);
+
+    // Only that button: another held from the start is still ignored.
+    Run other(threeButtons(), kAmber);
+    other.hold(400, 5000, kAmber | kRed);
+    other.hold(5005, 5100, 0);
+    CHECK(other.sends(Colour::amber) == 1 && other.sends(Colour::red) == 0);
+}
+
+TEST(aLongCountdownNeverLosesHelp) {
+    Layout l = prgOnly();
+    l.countdownMs = 300000;
+    Run r(l);
+    r.hold(0, 100, 0);
+    startCountdown(r);
+    // A very late call: 29 taps, the warning and Help are due, more than there is room for.
+    Event e[ButtonMachine::kMaxEvents];
+    size_t n = r.m.update(kStart + 301000, 0, e);
+    CHECK(n == ButtonMachine::kMaxEvents - ButtonMachine::kMaxActionEvents + 1);
+    CHECK(e[n - 1].type == Event::Type::send && e[n - 1].colour == Colour::red);
+    CHECK(!r.m.counting());
+}
+
+TEST(aLateCallFullOfTapsStillKeepsAButtonsCall) {
+    // Need a hand on release, pressed before the countdown starts and let go during it.
+    Layout l = withCountdown();
+    l.bindings[size_t(Input::amber)] = {Action::none, Action::amber, Action::none};
+    l.countdownMs = 300000;
+    Run r(l);
+    r.hold(0, 100, 0);
+    r.hold(105, 900, kAmber);
+    r.hold(1000, 1100, kPrg | kAmber);
+    r.hold(1105, 1200, kAmber);
+    CHECK(r.m.counting());
+    r.at(1205, 0);
+    Event e[ButtonMachine::kMaxEvents];
+    size_t n = r.m.update(kStart + 301000, 0, e);
+    CHECK(n == ButtonMachine::kMaxEvents - ButtonMachine::kMaxActionEvents + 2);
+    CHECK(e[n - 2].type == Event::Type::send && e[n - 2].colour == Colour::red);
+    CHECK(e[n - 1].type == Event::Type::send && e[n - 1].colour == Colour::amber);
 }

@@ -57,11 +57,12 @@ void OutgoingCall::markResent(uint64_t nowMono) {
     while (nowMono >= pressedMono + resend::due(resends + 1)) resends++;
 }
 
-size_t settledByOK(const OutgoingCall* calls, size_t count, bool okClosesCall, size_t* out, size_t cap) {
+size_t settledByOK(const OutgoingCall* calls, size_t count, bool okClosesCall, uint64_t okPressedMono, size_t* out,
+                   size_t cap) {
     size_t n = 0;
     for (size_t i = 0; i < count && n < cap; i++) {
         const OutgoingCall& c = calls[i];
-        if (!c.isUnsettled()) continue;
+        if (!c.isUnsettled() || c.pressedMono >= okPressedMono) continue;
         if (!okClosesCall && (c.status() == CallerStatus::seen || c.settled)) continue;
         out[n++] = i;
     }

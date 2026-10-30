@@ -208,10 +208,45 @@ TEST(signatureInputsMatchSwift) {
     CHECK(ackSignatureInput(sampleAck(), group, sizeof group, out, sizeof kAckInput - 1) == 0);
 }
 
+namespace {
+// Encodes into a buffer of exactly `need` bytes, then one short of it: the first must fill it,
+// the second must leave every byte as it was.
+template <typename Encode>
+bool fitsExactlyAndOneShortWritesNothing(size_t need, Encode encode) {
+    uint8_t out[256];
+    if (encode(out, need) != need) return false;
+    std::memset(out, 0xEE, sizeof out);
+    if (encode(out, need - 1) != 0) return false;
+    for (uint8_t b : out)
+        if (b != 0xEE) return false;
+    return true;
+}
+}  // namespace
+
 TEST(tooSmallABufferWritesNothing) {
-    uint8_t out[kCallBytes - 1];
-    CHECK(encode(CallFrame{1, 1, Colour::red, 0}, out, sizeof out) == 0);
+    CHECK(fitsExactlyAndOneShortWritesNothing(kCallBytes, [](uint8_t* o, size_t c) {
+        return encode(CallFrame{1, 1, Colour::red, 0}, o, c);
+    }));
+    CHECK(fitsExactlyAndOneShortWritesNothing(kAckBytes, [](uint8_t* o, size_t c) { return encode(sampleAck(), o, c); }));
+    CHECK(fitsExactlyAndOneShortWritesNothing(sizeof kClosedWithReason, [](uint8_t* o, size_t c) {
+        CallStateFrame f{70001, 12, CallState::closedWithReason, 1793000100, 3, {'O', 'f', 'f'}};
+        return encode(f, o, c);
+    }));
+    CHECK(fitsExactlyAndOneShortWritesNothing(4 + sizeof kCallerOK + kSignatureBytes, [](uint8_t* o, size_t c) {
+        return encode(signedCallerOK(), o, c);
+    }));
+    CHECK(fitsExactlyAndOneShortWritesNothing(sizeof kAckInput, [](uint8_t* o, size_t c) {
+        return ackSignatureInput(sampleAck(), group, sizeof group, o, c);
+    }));
+    CHECK(fitsExactlyAndOneShortWritesNothing(sizeof kSignedInput, [](uint8_t* o, size_t c) {
+        return signedSignatureInput(5, kCallerOK, sizeof kCallerOK, group, sizeof group, o, c);
+    }));
+}
+
+TEST(anUnknownColourIsNotEncoded) {
+    uint8_t out[kMaxPayload];
     CHECK(encode(CallFrame{1, 1, Colour(0), 0}, out, sizeof out) == 0);
+    CHECK(encode(CallFrame{1, 1, Colour(4), 0}, out, sizeof out) == 0);
 }
 
 TEST(utf8IsCheckedStrictly) {
