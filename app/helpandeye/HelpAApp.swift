@@ -90,13 +90,22 @@ struct RootView: View {
     var body: some View {
         if let me = model.me {
             VStack(spacing: 0) {
-                NotificationsBanner()
-                KeysBanner()
-                if model.saveFailed {
-                    Text("Help&I could not save its latest changes on this phone, so they could be lost if it closes. Calls still go. Freeing some space on the phone may help.")
-                        .font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.2))
+                // Never more than a third of the screen, however large the text, so the call
+                // buttons below always show; longer warnings scroll.
+                ScrollView {
+                    VStack(spacing: 0) {
+                        NotificationsBanner()
+                        KeysBanner()
+                        if model.saveFailed {
+                            Text("Help&I could not save its latest changes on this phone, so they could be lost if it closes. Calls still go. Freeing some space on the phone may help.")
+                                .font(.callout).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.2))
+                        }
+                        NoticeBanner()
+                    }
                 }
-                NoticeBanner()
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(maxHeight: UIScreen.main.bounds.height / 3)
+                .fixedSize(horizontal: false, vertical: true)
                 // A profile can leave a caller only the three buttons (app spec, Profiles).
                 if me.role == .caller && model.profile.hidesSettings { CallView() } else { tabs(me) }
             }
@@ -159,7 +168,7 @@ struct NoticeBanner: View {
             VStack(spacing: 0) {
                 ForEach(Notice.allCases.filter(model.showing), id: \.self) { n in
                     HStack {
-                        Text(text(n)).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(text(n)).font(.callout).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
                         Button("Acknowledge") { model.acknowledge(n) }.buttonStyle(.action)
                     }
                     .padding()
@@ -190,7 +199,7 @@ struct KeysBanner: View {
                 Text(model.engine.keysExpired
                      ? "This phone cannot reach your group until you scan the new code from your coordinator, under Group. If you need help now, call 999."
                      : "Please scan the new code from your coordinator, under Group, by \(end.formatted(date: .long, time: .omitted)). After that this phone cannot reach your group until you do.")
-                    .font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.2))
+                    .font(.callout).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.2))
             }
         }
     }
@@ -213,7 +222,7 @@ struct NotificationsBanner: View {
     }
 
     private func message(_ text: String) -> some View {
-        Text(text).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+        Text(text).font(.callout).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var settings: some View {

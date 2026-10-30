@@ -211,7 +211,7 @@ final class ScreensTests: XCTestCase {
     /// Scrolls text into view that may be too tall ever to count as tappable.
     private func show(_ e: XCUIElement) {
         let window = app.windows.firstMatch.frame
-        for _ in 0..<20 where !(e.exists && e.frame.minY < window.maxY - 150 && e.frame.maxY > window.minY + 150) {
+        for _ in 0..<60 where !(e.exists && e.frame.minY < window.maxY - 150 && e.frame.maxY > window.minY + 150) {
             if e.exists && e.frame.maxY <= window.minY + 150 { app.swipeDown(velocity: .slow) } else { app.swipeUp(velocity: .slow) }
         }
     }
