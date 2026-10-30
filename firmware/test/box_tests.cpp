@@ -369,6 +369,25 @@ TEST(theCrossWhenNeitherTheRadioNorAPhoneTookIt) {
     CHECK(w.box.screen().status == CallerStatus::waitingForResponder);
 }
 
+TEST(aPhoneThatNeverAnswersIsNotSendingForEver) {
+    // The phone was connected when red was pressed, then went out of range (or its app cannot
+    // answer 0x74 yet) and the radio refused the packet: by the first resend the box must show
+    // the cross, not "Sending...".
+    World w;
+    w.port.radioWorks = false;
+    w.box.press(Colour::red, 0, 1000, true);
+    CHECK(w.box.screen().status == CallerStatus::sending);
+    CHECK(w.box.takeSound() == Sound::press);
+    w.box.tick(29000, 1029);
+    CHECK(w.box.screen().status == CallerStatus::sending && w.box.takeSound() == Sound::none);
+    w.box.tick(30000, 1030);
+    CHECK(w.box.screen().status == CallerStatus::notSent);
+    CHECK(w.box.takeSound() == Sound::notSent);
+    // A late answer from the phone still counts, and the radio coming back is retried as before.
+    w.box.phoneRoute(1, true);
+    CHECK(w.box.screen().status == CallerStatus::waitingForResponder);
+}
+
 TEST(nothingIsSentOutsideTheUKBandsAndAColdStartKeepsRoomForCalls) {
     World w(false);
     w.box.setRadio(RadioSettings(915.0, 250, 10, 5));

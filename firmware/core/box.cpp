@@ -169,6 +169,11 @@ void BoxEngine::press(Colour colour, uint64_t nowMs, uint32_t wallNow, bool phon
 void BoxEngine::tick(uint64_t nowMs, uint32_t wallNow) {
     for (size_t i = 0; i < callCount_; i++) {
         Slot& s = slots_[i];
+        // A phone asked to carry the call and still silent at its first resend did not take it
+        // (gone out of range, or an app that cannot answer yet): the cross, not "Sending..." for
+        // ever.
+        if (s.call.phone == RouteState::sending && seconds(nowMs) >= s.call.pressedMono + resend::kGaps[0])
+            phoneRoute(s.call.number, false);
         if (s.call.resendDue(seconds(nowMs))) {
             uint8_t frame[kCallBytes];
             encode(s.call.callFrame(), frame, sizeof frame);

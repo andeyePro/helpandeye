@@ -279,7 +279,11 @@ in `core/call.hpp`:
 - What the box shows follows `CallerStatus`: sending, sent and waiting for a responder, seen,
   the cross (nothing could be sent by the box or by its phone), or closed. There is no
   "delivered": the radio sending is not a person reading it (decision 7). The words follow the
-  app's ("Not sent. Nobody may know you need help. If you need help now, call 999.").
+  app's ("Not sent. Nobody may know you need help. If you need help now, call 999."). A phone
+  asked to carry a call that has not answered (0x74) by the call's first resend, 30 seconds on,
+  counts as not having taken it, so a phone that went out of range, or an app that cannot answer
+  yet, leaves the cross rather than "Sending..." for ever; its answer still counts if it comes
+  later.
 
 The core uses the board's monotonic clock for the schedule and the wall clock only for what goes
 in frames, so the phone setting the time mid-call never moves a resend.
