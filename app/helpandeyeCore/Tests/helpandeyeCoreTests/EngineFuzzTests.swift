@@ -3,7 +3,8 @@ import XCTest
 
 /// Random interleavings of presses, acknowledgements, membership changes, links going up and
 /// down, lost packets and clock jumps across a group of phones, checking the safety rules after
-/// every step. Every run is repeatable from its seed. HELPA_FUZZ_SEEDS=n runs more seeds.
+/// every step. Every run is repeatable from its seed. HELPA_FUZZ_SEEDS=n runs more seeds, and
+/// HELPA_FUZZ_SEED=n only that one.
 @MainActor final class EngineFuzzTests: XCTestCase {
     struct SplitMix64: RandomNumberGenerator {
         var state: UInt64
@@ -34,8 +35,9 @@ import XCTest
     }
 
     func testRandomInterleavingsKeepTheSafetyRules() async throws {
-        let seeds = Int(ProcessInfo.processInfo.environment["HELPA_FUZZ_SEEDS"] ?? "") ?? 60
-        for seed in 1...seeds {
+        let env = ProcessInfo.processInfo.environment
+        let seeds = Int(env["HELPA_FUZZ_SEEDS"] ?? "") ?? 60
+        for seed in Int(env["HELPA_FUZZ_SEED"] ?? "").map({ $0...$0 }) ?? 1...seeds {
             try await run(seed: UInt64(seed), steps: 250)
         }
     }
@@ -256,7 +258,9 @@ import XCTest
         let versions = Set(stayed.map { $0.engine.group!.membershipVersion })
         let orphans = Set(w.phones.filter(orphan).map { $0.engine.saved!.me })
         let rosters = Set(stayed.map { Set($0.engine.group!.members.map(\.number)).subtracting(orphans) })
-        XCTAssertEqual(versions.count, 1, "seed \(seed): phones disagree on the membership version: \(versions)\n" + w.log.suffix(30).joined(separator: "\n"))
+        XCTAssertEqual(versions.count, 1, "seed \(seed): phones disagree on the membership version: "
+                       + stayed.map { "\($0.engine.saved!.me)\($0.engine.isPrimaryCoordinator ? "*" : "")=v\($0.engine.group!.membershipVersion) gen\($0.engine.group!.secrets.generation) n\($0.engine.group!.members.count)" }.joined(separator: " ")
+                       + "\n" + w.log.suffix(30).joined(separator: "\n"))
         // For relay/test/model.test.js: the member-list publishes this run made, with what the model
         // said, to replay through the real relay.
         if let path = ProcessInfo.processInfo.environment["HELPA_RELAY_LOG"], seed <= 4 {

@@ -188,8 +188,8 @@ struct KeysBanner: View {
         TimelineView(.periodic(from: .now, by: 3600)) { _ in
             if let end = model.keysEndAt {
                 Text(model.engine.keysExpired
-                     ? "This phone can no longer reach your group: its keys are out of date. Scan the update code your coordinator shows you, under Group. If you need help now, call 999."
-                     : "A phone was removed from your group. Scan the update code your coordinator shows you, under Group, by \(end.formatted(date: .long, time: .omitted)). After that this phone can no longer reach the group.")
+                     ? "This phone cannot reach your group until you scan the new code from your coordinator, under Group. If you need help now, call 999."
+                     : "Please scan the new code from your coordinator, under Group, by \(end.formatted(date: .long, time: .omitted)). After that this phone cannot reach your group until you do.")
                     .font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.2))
             }
         }

@@ -368,18 +368,18 @@ struct ReceiveUpdateSection: View {
     @State private var message: String?
 
     var body: some View {
-        Section(header: Header("Key update")) {
+        Section(header: Header("New code from your coordinator")) {
             if model.keyProblem != nil {
-                Text("A phone was removed, so your coordinator has new keys for you. Until you scan your update code, your choices, messages and where you are are not sent.")
+                Text("Your coordinator has a new code for you. Until you scan it, anything you type, choose or share is not sent.")
                     .foregroundStyle(Color.warning)
             }
-            CodeReader(prompt: "If your coordinator shows you an update code, scan it here") { code in
+            CodeReader(prompt: "If your coordinator shows you a new code, scan it here") { code in
                 guard let g = model.group, let w = try? Joining.decode(Joining.Welcome.self, from: code),
                       let updated = try? Joining.openUpdate(w, current: g, me: model.identity) else {
-                    message = "That update code could not be used."; return
+                    message = "That code did not work. Ask your coordinator to show it again."; return
                 }
                 model.engine.applyKeyUpdate(updated)
-                message = "Keys updated."
+                message = "Done. Everything you send goes again."
             }
             if let message { Text(message) }
         }
@@ -468,19 +468,21 @@ struct CheckInSection: View {
 
     var body: some View {
         Section(header: Header("Check-ins")) {
+            // In the caller's own button words, which a coordinator may have changed.
+            let checkInRule = "Press \(ButtonWords.words(.green, in: model.profile)) within half an hour of each time. If you do not, your responders get a \(ButtonWords.words(.amber, in: model.profile)) call."
             let mayChange = model.group.map { $0.profile(of: model.saved?.me).mayChange(.checkIns) } ?? true
             if !mayChange {
                 // Set by the coordinator: said in words, not shown as controls that do nothing.
                 let times = (model.checkIn?.times ?? []).map { date($0).formatted(date: .omitted, time: .shortened) }
                 Text(times.isEmpty ? "No check-ins. \(SetByCoordinator.text)" : "Check in at \(times.joined(separator: " and ")). \(SetByCoordinator.text)")
-                if !times.isEmpty { Text("Press I'm OK within half an hour of each time. If you do not, your responders get a Need a hand call.") }
+                if !times.isEmpty { Text(checkInRule) }
             } else {
                 Toggle("Check in at set times", isOn: $on)
                 if on {
                     DatePicker("First check-in", selection: $morning, displayedComponents: .hourAndMinute)
                     Toggle("A second check-in", isOn: $twice)
                     if twice { DatePicker("Second check-in", selection: $evening, displayedComponents: .hourAndMinute) }
-                    Text("Press I'm OK within half an hour of each time. If you do not, your responders get a Need a hand call.")
+                    Text(checkInRule)
                 }
                 Button("Save") { model.setCheckIn(on ? CheckInSchedule(times: [minutes(morning)] + (twice ? [minutes(evening)] : [])) : nil) }
             }

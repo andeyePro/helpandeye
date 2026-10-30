@@ -139,7 +139,7 @@ struct WatchCallView: View {
                     Text("Alerts for Help&I are off on this watch, so it cannot tell you when someone calls. To turn them on, open the Watch app on your iPhone, then Notifications, then Help&I.")
                         .foregroundStyle(Colour.amber.color)
                 }
-                Text("Not a replacement for 999.")
+                Text("Help&I does not replace 999 or telecare.")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

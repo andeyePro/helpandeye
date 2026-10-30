@@ -403,8 +403,8 @@ public final class HelpEngine: ObservableObject {
                 activity.outgoing[i].revoke(keeping: current)
                 // Someone told their call was seen may have put the phone down: say so plainly.
                 if activity.outgoing[i].acknowledgedBy.isEmpty {
-                    alerts.tellCaller(title: "Your call is going out again",
-                                      body: "The person who saw it has left the group, so nobody has seen it now. If you need help now, call 999.")
+                    alerts.tellCaller(title: "Your call is being sent again",
+                                      body: "The person who saw it is no longer in your group. Nobody else has seen it yet. If you need help now, call 999.")
                 }
             }
             if activity.inbox.requests.values.contains(where: { $0.acknowledgedBy.contains { !current.contains($0) } }) {
@@ -461,7 +461,7 @@ public final class HelpEngine: ObservableObject {
     public var keysEndAt: Date? { group?.keysOutdatedSince?.addingTimeInterval(GroupState.changeoverPeriod) }
     /// Past that, only a text the caller sends reaches anyone, so every other route shows the cross.
     public var keysExpired: Bool { keysEndAt.map { now() >= $0 } ?? false }
-    public static let keysExpiredReason = "This phone's keys are out of date. Scan your update code"
+    public static let keysExpiredReason = "Scan the new code from your coordinator, under Group"
 
     public var availableRoutes: Set<Route> {
         var s: Set<Route> = [.sms]
@@ -725,11 +725,12 @@ public final class HelpEngine: ObservableObject {
     /// After a removal this phone has no new keys for, the removed phone could still open what it
     /// seals for responders, so choices, messages and where the caller is wait for the update code.
     public var keyProblem: String? { group?.needsKeyUpdate == true && me != nil ? Self.keysNeeded : nil }
-    public static let keysNeeded = "A phone was removed from your group. Until you scan the update code your coordinator shows you, your choices, messages and where you are are not sent, so that phone cannot read them. Help calls still go."
+    public static let keysNeeded = "Your buttons still work. Your coordinator has a new code for you to scan, under Group. Until then, anything you type, choose or share is not sent."
+    public static let cannotSendPersonal = "Messages and where you are cannot be sent just now. Your buttons still work. If you need help now, call 999."
 
     public func addNote(_ text: String) -> String? {
         if let keyProblem { return keyProblem }
-        guard canSendPersonal else { return "Typed messages need the internet, home Wi-Fi or your box." }
+        guard canSendPersonal else { return Self.cannotSendPersonal }
         guard var r = activity.outgoing.popLast() else { return nil }
         // Sealed and signed for responders, long text goes as several notes that each fit the radio.
         let frames = group?.secrets.responderPublicKey == nil ? [r.addNote(text)].compactMap { $0 } : r.addNotes(text, pieceBytes: ForResponders.maxNoteBytes)
@@ -798,14 +799,14 @@ public final class HelpEngine: ObservableObject {
         case .mesh: return await sendOnMesh(frame, kind: kind, in: gid)
         case .internet: return await sendOnInternet(frame, in: gid)
         case .wifi: return await sendOnWiFi(frame, in: gid)
-        case .sms: return "Needs you to send it"
+        case .sms: return "Press Send as a text"
         }
     }
 
     /// Every send names the group it was made in, and each route is tried only while this phone is
     /// still in that group: a send waiting on one route must never go out sealed with the keys of a
     /// group joined meanwhile.
-    private static let groupChanged = "This phone has changed group since"
+    private static let groupChanged = "This call was made in your old group"
 
     private func sendOnWiFi(_ frame: HelpFrame, to only: Set<UInt16>? = nil, in gid: Data) async -> String? {
         guard groupID == gid else { return Self.groupChanged }

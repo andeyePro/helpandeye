@@ -296,7 +296,7 @@ struct ProfileEditor: View {
                 LabeledField(label: ButtonWords.standard(c), text: words(ButtonWords.key(c)))
             }
             LabeledField(label: "After \(ButtonWords.standard(.amber)): " + ButtonWords.amberNote(in: nil), text: words(ButtonWords.amberNoteKey))
-            Text("Leave a box empty to keep the words shown above it. At most \(ButtonWords.longest) letters each, or \(ButtonWords.longestNote) for what is said after \(ButtonWords.standard(.amber)).")
+            Text("Leave a space empty to keep the words shown above it. At most \(ButtonWords.longest) letters each, or \(ButtonWords.longestNote) for what is said after \(ButtonWords.standard(.amber)).")
             mayChange(.buttons)
         }
     }

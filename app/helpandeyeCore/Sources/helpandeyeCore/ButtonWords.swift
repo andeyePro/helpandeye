@@ -32,7 +32,7 @@ public enum ButtonWords {
 
     public static func amberNote(in profile: Profile?) -> String {
         chosen(amberNoteKey, in: profile)
-            ?? "You have requested non-urgent assistance. If you need help sooner, please press \(words(.red, in: profile))."
+            ?? "If you need help sooner, press \(words(.red, in: profile))."
     }
 
     public static func words(_ category: CallCategory, in profile: Profile?) -> String {

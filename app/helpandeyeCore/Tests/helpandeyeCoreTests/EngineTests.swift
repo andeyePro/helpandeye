@@ -1111,7 +1111,7 @@ final class RelayModel {
         XCTAssertEqual(caller.request?.status, .waitingForResponder, "the removed person's ack no longer counts")
         XCTAssertNotNil(caller.request?.nextResend, "so the call goes out again")
         XCTAssertNotNil(coordinator.alerts.scheduled[key], "and the coordinator is alerted again")
-        XCTAssertEqual(caller.alerts.toldCaller, ["Your call is going out again"], "and the caller is told")
+        XCTAssertEqual(caller.alerts.toldCaller, ["Your call is being sent again"], "and the caller is told")
     }
 
     func testAPhoneThatMissedARemovalCatchesUp() async {

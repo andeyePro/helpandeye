@@ -129,7 +129,8 @@ struct StatusCard: View {
             }
             Text("\(request.colour.label), \(request.createdAt.formatted(date: .omitted, time: .shortened))")
             if request.colour == .amber, request.status != .notSent { Text(ButtonWords.amberNote(in: model.profile)) }
-            if request.colour == .green, request.status != .notSent, let note = model.okNote { Text(note) }
+            // Only once it has gone: "your responders have been told" must be true.
+            if request.colour == .green, request.status != .notSent, request.status != .sending, let note = model.okNote { Text(note) }
             if let s = request.settled, !s.reason.isEmpty { Text("Why: \(s.reason)") }
             ForEach(Route.allCases.filter { request.routes[$0] != nil }, id: \.self) { route in
                 Text(line(route))
@@ -214,7 +215,7 @@ struct FollowUps: View {
                     }
                     .buttonStyle(ActionButtonStyle(prominent: chosen))
                     .accessibilityAddTraits(chosen ? .isSelected : [])
-                    .accessibilityHint(chosen ? "Tells your responders to ignore this" : "Tells your responders")
+                    .accessibilityHint(chosen ? "Takes this back" : "Tells your responders this")
                 }
             }
             if canSendPersonal {
@@ -246,7 +247,7 @@ struct FollowUps: View {
                 if location.state == .denied { Text("Help&I is not allowed to use your location. You can allow it in Settings.") }
                 ForEach(request.notes, id: \.self) { Text("You said: \($0)") }
             } else {
-                Text(model.keyProblem ?? "Typed messages and where you are can only go over the internet or your box, and neither is working now.")
+                Text(model.keyProblem ?? HelpEngine.cannotSendPersonal)
             }
             if let problem { Text(problem) }
         }

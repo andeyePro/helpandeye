@@ -128,7 +128,7 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
     public var okSpokenStandard: String {
         switch afterOK {
         case .closesCall: return "Your call is closed. Thank you for letting us know you're OK."
-        case .stopsRepeats: return "Your responders have been told you're OK. One of them will still check on you."
+        case .stopsRepeats: return "Your responders have been told you're OK. They will still be asked to check on you."
         }
     }
 

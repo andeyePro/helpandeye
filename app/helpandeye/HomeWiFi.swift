@@ -60,7 +60,7 @@ import Network
         return problem ?? (group == nil ? "Not in a group" : "No other phones of the group on this Wi-Fi")
     }
     /// The other phones have new keys, so cannot check this one until its update code is scanned.
-    static let needsUpdate = "Scan the update code your coordinator shows you. Until then the group's other phones on this Wi-Fi cannot check this one."
+    static let needsUpdate = "Scan the new code from your coordinator, under Group. Until then the group's other phones on this Wi-Fi cannot check this one."
 
 
     /// Starts afresh when the keys, this phone's number or who is in the group changes, so a

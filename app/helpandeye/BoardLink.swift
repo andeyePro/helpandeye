@@ -385,7 +385,7 @@ extension BoardLink: @preconcurrency CBPeripheralDelegate {
     func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor ch: CBCharacteristic, error: Error?) {
         guard error == nil, ch.isNotifying, rx != nil else {
             // Often a wrong pairing code: drop the link, so the reconnect path tries again.
-            state = .failed("Box would not talk. If it asked for a code, check the code and try again.")
+            state = .failed("The box did not connect. Check the Bluetooth code and try again.")
             central.cancelPeripheralConnection(p)
             return
         }

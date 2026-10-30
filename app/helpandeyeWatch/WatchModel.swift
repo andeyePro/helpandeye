@@ -30,6 +30,8 @@ final class WatchModel: NSObject, ObservableObject {
     @Published private var lastAck: (group: String, key: IncomingRequest.Key)?
     /// What happened when the watch could not even ask the phone or the internet.
     @Published private var problem: String?
+    /// Something to know that is not a failure, so shown and said without the cross or its sound.
+    @Published private var warning: String?
     /// Set when the last call went out from the watch itself, so its own status is shown.
     @Published private var sentByWatch = false
     /// The button last pressed here, for what is said after Need a hand.
@@ -257,6 +259,7 @@ final class WatchModel: NSObject, ObservableObject {
 
     var status: (text: String, cross: Bool)? {
         if let problem { return (problem, true) }
+        if let warning { return (warning, false) }
         if let ack = lastAck, let s = engine(forGroup: ack.group)?.ackSendStatus(ack.key) {
             switch s {
             case .notSent: return ("Not acknowledged: this watch cannot reach the internet. Use your phone.", true)
@@ -312,6 +315,7 @@ final class WatchModel: NSObject, ObservableObject {
         pressed = colour
         okNote = colour == .green && !(engine?.settledByOK.isEmpty ?? true) ? profile.okSpoken : nil
         problem = nil
+        warning = nil
         lastAck = nil
         if let engine, engine.me?.canCall == true {
             sentByWatch = true
@@ -489,7 +493,10 @@ extension WatchModel: WKExtendedRuntimeSessionDelegate {
                                             error: Error?) {
         Task { @MainActor in
             guard self.countdown != nil, session === self.runtime else { return }
-            self.failed("The countdown may stop when the screen goes dark. Keep your wrist raised, or press \(self.words(.red)) now.")
+            // Nothing has failed: the countdown is still running while the screen is on.
+            let why = "The countdown may stop if the screen goes dark. Keep your wrist raised, or press \(self.words(.red)) now."
+            self.warning = why
+            CallerVoice.shared.tell(.init(sound: nil, spoken: why), profile: self.profile)
         }
     }
 }

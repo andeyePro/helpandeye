@@ -163,4 +163,22 @@ final class SignedFrameTests: XCTestCase {
         let ack = HelpFrame.noticeAck(notice: .rotaGap, by: 1, at: 5)
         XCTAssertEqual(HelpFrame.signing(ack, as: 1, identity: me, group: Data()).verifiedInner(signedBy: me.signingPublicKey, group: Data()), ack)
     }
+
+    /// The same bytes firmware/test/frame_tests.cpp expects, so the box's C++ and the app agree
+    /// byte for byte on calls, acknowledgements, call states and what is signed.
+    func testFramesMatchTheFirmwareVectors() {
+        let call = HelpFrame.call(unit: 70001, request: 12, colour: .red, sentAt: 1_793_000_000)
+        XCTAssertEqual([UInt8](call.encoded()), [0x11, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x01, 0x40, 0x02, 0xDF, 0x6A])
+        let ack = HelpFrame.ack(unit: 70001, request: 12, responder: 3, ackedAt: 1_793_000_060, signature: Data(repeating: 7, count: 64))
+        XCTAssertEqual([UInt8](ack.encoded()), [0x13, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x03, 0x00, 0x7C, 0x02, 0xDF, 0x6A] + [UInt8](repeating: 7, count: 64))
+        let ok = HelpFrame.callState(unit: 70001, request: 12, state: .callerOK, at: 1_793_000_100, reason: "")
+        XCTAssertEqual([UInt8](ok.encoded()), [0x22, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x01, 0xA4, 0x02, 0xDF, 0x6A, 0x00])
+        let closed = HelpFrame.callState(unit: 70001, request: 12, state: .closedWithReason, at: 1_793_000_100, reason: "Off")
+        XCTAssertEqual([UInt8](closed.encoded()), [0x22, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x04, 0xA4, 0x02, 0xDF, 0x6A, 0x03] + Array("Off".utf8))
+        let group = Data(0...15)
+        XCTAssertEqual(HelpFrame.ackInput(unit: 70001, request: 12, responder: 3, ackedAt: 1_793_000_060, group: group),
+                       Data("HELPA-ACK-2".utf8) + group + Data([0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x03, 0x00, 0x7C, 0x02, 0xDF, 0x6A]))
+        XCTAssertEqual(HelpFrame.signedInput(signer: 5, inner: ok.encoded(), group: group),
+                       Data("HELPA-SIGNED-2".utf8) + group + Data([0x05, 0x00]) + ok.encoded())
+    }
 }

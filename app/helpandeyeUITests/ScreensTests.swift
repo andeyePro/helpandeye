@@ -119,7 +119,7 @@ final class ScreensTests: XCTestCase {
         startGroupIfNew()
         app.terminate()
         launch("-HelpAPositionSending", "-HelpAKeysNeeded")
-        let message = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A phone was removed from your group")).firstMatch
+        let message = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Your buttons still work")).firstMatch
         if !message.waitForExistence(timeout: 3) {
             reveal(app.buttons["Need a hand"]).tap()
             allowSystemAlerts()
@@ -128,7 +128,7 @@ final class ScreensTests: XCTestCase {
         XCTAssert(message.isHittable, "keys-needed: the call screen does not say why")
         look("keys-needed-call")
         tab("Group")
-        let wifi = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Scan the update code")).firstMatch
+        let wifi = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Scan the new code")).firstMatch
         reveal(wifi)
         XCTAssert(wifi.isHittable, "keys-needed: Home Wi-Fi does not ask for the update code")
         look("keys-needed-group")
@@ -274,7 +274,9 @@ final class ScreensTests: XCTestCase {
         let shot = XCUIScreen.main.screenshot()
         let screen = app.windows.firstMatch.frame
         for (e, detail) in found {
-            let frame = e.exists ? e.frame : .zero
+            // Found again by its label: the audit's element can keep the frame it had then.
+            let now = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", e.label)).firstMatch
+            let frame = now.exists ? now.frame : .zero
             if screen.contains(frame), !frame.isEmpty, let ratio = Self.contrast(in: frame, of: shot, screen: screen), ratio >= 4.5 {
                 print("ADVICE read while moving; \(String(format: "%.1f", ratio)) to 1 when still: " + detail)
             } else {

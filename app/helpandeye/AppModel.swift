@@ -126,7 +126,7 @@ final class AppModel: ObservableObject {
             : nil
     }
 
-    private static let notificationsOff = "Notifications are off for Help&I, so it cannot alert you when someone calls for help or answers your call. Turn them on in Settings, Notifications, Help&I."
+    private static let notificationsOff = "Notifications are off for Help&I, so it cannot alert you when someone calls for help or sees your call. Turn them on in Settings, Notifications, Help&I."
 
     /// Says out loud what happened to this phone's own calls. The watch says it for the calls it
     /// made itself (numbered 32768 and up), so they are not heard twice.
