@@ -40,19 +40,29 @@ export async function checkPass(pass, groupId, issuerKeyB64, now = Date.now()) {
   if (!p) throw new RelayError(402, "bad pass");
   if (p.groupId !== groupId) throw new RelayError(402, "pass is for another group");
   if (p.expiry <= now) throw new RelayError(402, "pass expired");
+  // Under a new issuer key, passes checked under the old one count for nothing.
+  if (issuer.b64 !== issuerKeyB64) {
+    checked.clear();
+    issuer = { b64: issuerKeyB64, key: await importIssuer(issuerKeyB64) };
+  }
   if (!checked.has(pass)) {
-    if (!(await verify(issuerKeyB64, p))) throw new RelayError(402, "bad pass");
+    if (!(await verify(p))) throw new RelayError(402, "bad pass");
     if (checked.size >= CHECKED_MAX) checked.clear();
     checked.add(pass);
   }
 }
 
-async function verify(issuerKeyB64, p) {
+async function importIssuer(b64) {
   try {
-    if (issuer.b64 !== issuerKeyB64) {
-      issuer = { b64: issuerKeyB64, key: await crypto.subtle.importKey("raw", fromB64url(issuerKeyB64), { name: "Ed25519" }, false, ["verify"]) };
-    }
-    return await crypto.subtle.verify({ name: "Ed25519" }, issuer.key, fromB64url(p.signature), signingInput(p.groupId, p.expiry / 1000));
+    return await crypto.subtle.importKey("raw", fromB64url(b64), { name: "Ed25519" }, false, ["verify"]);
+  } catch {
+    return null;
+  }
+}
+
+async function verify(p) {
+  try {
+    return issuer.key !== null && await crypto.subtle.verify({ name: "Ed25519" }, issuer.key, fromB64url(p.signature), signingInput(p.groupId, p.expiry / 1000));
   } catch {
     return false;
   }

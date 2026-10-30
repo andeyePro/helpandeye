@@ -44,13 +44,15 @@ test("an expired pass, another group's, a tampered one, another issuer's and non
   await refused(`2.${pass.slice(2)}`, GROUP, pub, undefined, "bad pass");
 });
 
-test("a pass checked once is still checked against the clock and the group", async () => {
+test("a pass checked once is still checked against the clock, the group and a changed issuer key", async () => {
   const { pair, pub } = await issuer();
   const expiry = Math.floor(Date.now() / 1000) + 60;
   const pass = await issue(GROUP, expiry, pair.privateKey);
   await checkPass(pass, GROUP, pub);
   await assert.rejects(checkPass(pass, GROUP, pub, expiry * 1000 + 1), (e) => e.message === "pass expired");
   await assert.rejects(checkPass(pass, GROUP.replace("A", "B"), pub), (e) => e.message === "pass is for another group");
+  await assert.rejects(checkPass(pass, GROUP, (await issuer()).pub), (e) => e.message === "bad pass");
+  await checkPass(pass, GROUP, pub);
 });
 
 test("the issuer tool makes a key pair once and its passes check with the public key it prints", async () => {
