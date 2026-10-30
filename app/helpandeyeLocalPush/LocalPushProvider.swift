@@ -8,37 +8,54 @@ import UserNotifications
 /// turns a call it hears into an alert; opening Help&I does the rest, as the caller's phone keeps
 /// sending until someone acknowledges. It confirms only the calls it alerts for: anything else
 /// (a note, a position, an acknowledgement) it does not keep, so the sender does not count it as
-/// sent here and carries on by its other routes. It reads the group afresh with each frame, so a
-/// change made in the app since it started counts. Needs signing, with the shared keychain group
-/// (as the notification extension does) and the local push entitlement.
+/// sent here and carries on by its other routes. It reads the group afresh with each frame and
+/// once a minute, so a change made in the app since it started counts, and a phone whose owner
+/// left or was removed stops. Needs signing, with the shared keychain group (as the notification
+/// extension does) and the local push entitlement.
 final class LocalPushProvider: NEAppPushProvider {
     private var home: HomeWiFi?
+    private var recheck: Timer?
 
     override func start() {
         Task { @MainActor in
-            guard let saved = SharedStore.saved(), let identity = SharedStore.identity() else { return }
             let home = HomeWiFi()
             home.keeps = { frame in
-                guard case let .call(unit, _, colour, _) = frame, colour != .green, let s = SharedStore.saved(),
-                      let me = s.group.member(s.me) else { return false }
+                guard case let .call(unit, _, colour, _) = frame, colour != .green, let me = Self.current()?.me else { return false }
                 return me.canRespond && unit != me.unit
             }
-            home.onFrame = { [weak self, weak home] frame in
-                guard let saved = SharedStore.saved() else { return }
-                self?.alert(for: frame, saved: saved)
-                home?.configure(group: saved.group, me: saved.me, identity: identity)
+            home.onFrame = { [weak self] frame in
+                if let saved = SharedStore.saved() { self?.alert(for: frame, saved: saved) }
+                self?.follow()
             }
-            home.configure(group: saved.group, me: saved.me, identity: identity)
             self.home = home
+            follow()
+            recheck = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.follow() } }
         }
     }
 
     override func stop(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         Task { @MainActor in
+            recheck?.invalidate()
+            recheck = nil
             if let identity = SharedStore.identity() { self.home?.configure(group: nil, me: nil, identity: identity) }
             self.home = nil
             completionHandler()
         }
+    }
+
+    /// The group as the app last saved it, and this phone in it; nothing for a phone whose owner
+    /// is no longer a member, which must not go on joining the group's phones as one.
+    private static func current() -> (saved: SavedState, me: Member)? {
+        guard let s = SharedStore.saved(), let me = s.group.member(s.me) else { return nil }
+        return (s, me)
+    }
+
+    /// Joins the group's phones as the app saved it last, or stops: the link restarts only when
+    /// the keys, the member list or this phone's place changed.
+    @MainActor private func follow() {
+        guard let home, let identity = SharedStore.identity() else { return }
+        let now = Self.current()
+        home.configure(group: now?.saved.group, me: now?.saved.me, identity: identity)
     }
 
     /// A call alerts again with each resend heard, at most once a minute, named as the app would
