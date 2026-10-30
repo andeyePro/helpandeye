@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { authenticate, b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS, RESEND_WINDOW_MS } from "../src/relay.js";
+import { authenticate, b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS, RESEND_WINDOW_MS, TAKEOVER_SILENCE_MS } from "../src/relay.js";
 import { MapStorage } from "./storage.js";
 
 async function phone() {
@@ -8,8 +8,8 @@ async function phone() {
   const key = b64(await crypto.subtle.exportKey("raw", pair.publicKey));
   return {
     key,
-    async sign(method, path, body, timestamp) {
-      const sig = await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, await signingInput(method, path, String(timestamp), body));
+    async sign(method, path, body, timestamp, raw = null) {
+      const sig = await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, raw ?? await signingInput(method, path, String(timestamp), body));
       return { method, path, key, timestamp: String(timestamp), signature: b64(sig), body };
     },
   };
@@ -339,4 +339,101 @@ test("a member list is stored in one write, and removing many members deletes in
   await relay.setMembers(coord.key, list(2, [], others));
   assert.equal(storage.puts - puts, 1, "one put");
   assert.equal([...storage.m.keys()].filter((k) => /^[pwr]:/.test(k)).length, 0, "450 keys deleted, at most 128 at a time");
+});
+
+// Decision 20: a coordinator takes over the group from the first coordinator's lost phone. The
+// group keeps its ID; the relay checks the takeover as the phones do and takes the new owner.
+async function takeoverSetUp() {
+  const relay = new GroupRelay(new MapStorage(), () => takeoverSetUp.now);
+  const owner = await phone(), second = await phone(), third = await phone(), member = await phone();
+  const c = (k) => ({ key: k.key, role: "coordinator" }), m = (k) => ({ key: k.key, role: "member" });
+  const nonce = crypto.getRandomValues(new Uint8Array(8));
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array([...new TextEncoder().encode("HELPA-GROUP-1"), ...nonce, ...Uint8Array.from(atob(owner.key), (ch) => ch.charCodeAt(0))])));
+  const id = new Uint8Array([...nonce, ...hash.slice(0, 8)]);
+  await relay.setMembers(owner.key, { generation: 1, members: [c(owner), c(second), c(third), m(member)], primary: owner.key }, id);
+  const raw = (k) => Uint8Array.from(atob(k), (ch) => ch.charCodeAt(0));
+  const input = new Uint8Array([...new TextEncoder().encode("HELPA-TAKEOVER-1"), ...id, ...raw(owner.key), ...raw(second.key)]);
+  const sign = async (p) => ({ key: p.key, signature: (await p.sign("", "", "", 0, input)).signature });
+  const list = (by, extra = {}) => ({ generation: 2, members: [c(second), c(third), m(member)], removed: [owner.key], primary: second.key,
+    takeover: { from: owner.key, to: second.key, signatures: [], ...extra } });
+  return { relay, owner, second, third, member, id, input, raw, sign, list, c, m };
+}
+takeoverSetUp.now = 1_793_000_000_000;
+
+test("a takeover needs the new first coordinator's signature and proof; alone it waits seven days", async () => {
+  const { relay, owner, second, third, member, id, sign, list } = await takeoverSetUp();
+  const mine = await sign(second);
+  // Nothing without the new first coordinator's own signature, or with a member's or the owner's.
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [await sign(third)] }), id), 403);
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine, await sign(member)] }), id), 403);
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine, await sign(owner)] }), id), 403);
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine, mine] }), id), 403);
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [] }), id), 400);
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine], from: third.key }), id), 403);
+  // Alone and within seven days of the owner's last request: not yet. Only the new owner's own
+  // list brings a takeover; another coordinator's waits too.
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine] }), id), 425);
+  await rejects(relay.setMembers(third.key, list(second, { signatures: [mine] }), id), 425);
+  // The lost phone must be among the removed.
+  takeoverSetUp.now += TAKEOVER_SILENCE_MS;
+  await rejects(relay.setMembers(second.key, { ...list(second, { signatures: [mine] }), removed: [] }, id), 400);
+  assert.equal((await relay.members()).members.some((e) => e.key === owner.key), true, "nothing changed");
+  // Seven days on, the single signature is enough.
+  await relay.setMembers(second.key, list(second, { signatures: [mine] }), id);
+  assert.equal(await relay.storage.get("owner"), second.key);
+  assert.equal((await relay.members()).members.some((e) => e.key === owner.key), false, "the lost phone is out");
+  await rejects(relay.since(owner.key, 0), 403);
+  // The new owner removes people and sets roles; the old owner's list is refused.
+  await relay.setMembers(second.key, { generation: 3, members: [{ key: second.key, role: "coordinator" }, { key: third.key, role: "coordinator" }], removed: [owner.key, member.key], primary: second.key }, id);
+  assert.deepEqual((await relay.members()).members.map((e) => e.key).sort(), [second.key, third.key].sort());
+  await rejects(relay.setMembers(owner.key, { generation: 9, members: [{ key: owner.key, role: "coordinator" }], primary: owner.key }, id), 403);
+  // Later lists carrying the same record change nothing, from the new owner or anyone else.
+  await relay.setMembers(third.key, { generation: 4, members: [{ key: second.key, role: "coordinator" }, { key: third.key, role: "coordinator" }], primary: second.key,
+    takeover: { from: owner.key, to: second.key, signatures: [mine] } }, id);
+  assert.equal(await relay.storage.get("owner"), second.key);
+});
+
+test("the owner's request resets the seven days, and two coordinators or the named deputy need no wait", async () => {
+  const { relay, owner, second, third, id, raw, sign, list } = await takeoverSetUp();
+  const mine = await sign(second);
+  takeoverSetUp.now += TAKEOVER_SILENCE_MS - 1000;
+  await relay.heard(owner.key);
+  takeoverSetUp.now += 2000;
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine] }), id), 425, "heard from within seven days");
+  await relay.heard(third.key);
+  // Two coordinators: at once.
+  const agreed = new GroupRelay(new MapStorage());
+  await relay.setMembers(second.key, list(second, { signatures: [mine, await sign(third)] }), id);
+  assert.equal(await relay.storage.get("owner"), second.key);
+  // The deputy the owner named, signed over the deputy's key and the naming's version: at once.
+  const fresh = await takeoverSetUp();
+  const version = 3;
+  const named = new Uint8Array([...new TextEncoder().encode("HELPA-DEPUTY-1"), ...fresh.id, ...fresh.raw(fresh.second.key), version, 0, 0, 0]);
+  const naming = (await fresh.owner.sign("", "", "", 0, named)).signature;
+  const theirs = await fresh.sign(fresh.second);
+  await rejects(fresh.relay.setMembers(fresh.second.key, fresh.list(fresh.second, { signatures: [theirs], deputy: { version: 4, signature: naming } }), fresh.id), 425, "another version is another naming");
+  await rejects(fresh.relay.setMembers(fresh.second.key, fresh.list(fresh.second, { signatures: [await fresh.sign(fresh.third)], deputy: { version, signature: naming } }), fresh.id), 403);
+  await fresh.relay.setMembers(fresh.second.key, fresh.list(fresh.second, { signatures: [theirs], deputy: { version, signature: naming } }), fresh.id);
+  assert.equal(await fresh.relay.storage.get("owner"), fresh.second.key);
+  // A naming the owner has since replaced, as their list told the relay, proves nothing.
+  const replaced = await takeoverSetUp();
+  const old = new Uint8Array([...new TextEncoder().encode("HELPA-DEPUTY-1"), ...replaced.id, ...replaced.raw(replaced.second.key), 1, 0, 0, 0]);
+  await replaced.relay.setMembers(replaced.owner.key, { generation: 2, members: [replaced.c(replaced.owner), replaced.c(replaced.second), replaced.c(replaced.third)], primary: replaced.owner.key, deputyVersion: 2 }, replaced.id);
+  await rejects(replaced.relay.setMembers(replaced.second.key, { ...replaced.list(replaced.second, { signatures: [await replaced.sign(replaced.second)], deputy: { version: 1, signature: (await replaced.owner.sign("", "", "", 0, old)).signature } }), generation: 3 }, replaced.id), 425);
+  await rejects(replaced.relay.setMembers(replaced.owner.key, { generation: 3, members: [replaced.c(replaced.owner)], primary: replaced.owner.key, deputyVersion: -1 }, replaced.id), 400);
+  // With no group ID there is nothing to check the signatures against.
+  await agreed.setMembers(owner.key, { generation: 1, members: [{ key: owner.key, role: "coordinator" }, { key: second.key, role: "coordinator" }], primary: owner.key });
+  await rejects(agreed.setMembers(second.key, list(second, { signatures: [mine, await sign(third)] })), 400);
+});
+
+test("a group registered before the relay kept watch starts its seven days at the first takeover", async () => {
+  const { relay, second, id, sign, list } = await takeoverSetUp();
+  await relay.storage.delete("ownerSeenAt");
+  const mine = await sign(second);
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine] }), id), 425);
+  takeoverSetUp.now += TAKEOVER_SILENCE_MS - 1000;
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine] }), id), 425, "not seven days since the relay began to watch");
+  takeoverSetUp.now += 1000;
+  await relay.setMembers(second.key, list(second, { signatures: [mine] }), id);
+  assert.equal(await relay.storage.get("owner"), second.key);
 });

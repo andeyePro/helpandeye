@@ -189,3 +189,40 @@ final class SignedFrameTests: XCTestCase {
         XCTAssertTrue(f.mayGoOnGroupChannel)
     }
 }
+
+extension HelpFrameTests {
+    /// Decision 20: the deputy naming and the takeover carry their own signatures and fit the radio.
+    func testDeputyAndTakeoverFramesRoundTripAndFitTheRadio() {
+        let first = DeviceIdentity(), deputy = DeviceIdentity(), other = DeviceIdentity()
+        let group = Data(repeating: 3, count: 16)
+        let naming = HelpFrame.signedDeputy(member: 1002, key: deputy.signingPublicKey, version: 2, identity: first, group: group)
+        XCTAssertEqual(HelpFrame(naming.encoded()), naming)
+        XCTAssertTrue(naming.isValidDeputy(signedBy: first.signingPublicKey, group: group))
+        XCTAssertFalse(naming.isValidDeputy(signedBy: other.signingPublicKey, group: group))
+        XCTAssertFalse(naming.isValidDeputy(signedBy: first.signingPublicKey, group: Data(repeating: 4, count: 16)), "one group's naming is worthless in another")
+        let sig = { (by: DeviceIdentity, n: UInt16) in Takeover.Signature(signer: n, signature: HelpFrame.takeoverSignature(fromKey: first.signingPublicKey, toKey: deputy.signingPublicKey, identity: by, group: group)) }
+        var asDeputy = Takeover(from: 1, to: 1002, version: 9, signatures: [sig(deputy, 1002)])
+        guard case let .deputy(_, _, _, namingSig) = naming else { return XCTFail() }
+        asDeputy.deputyVersion = 2; asDeputy.deputySignature = namingSig
+        let agreed = Takeover(from: 1, to: 1002, version: 9, signatures: [sig(deputy, 1002), sig(other, 2001)])
+        let alone = Takeover(from: 1, to: 1002, version: 9, signatures: [sig(deputy, 1002)])
+        for t in [asDeputy, agreed, alone] {
+            let f = HelpFrame.takeover(t)
+            XCTAssertEqual(HelpFrame(f.encoded()), f)
+            XCTAssertLessThanOrEqual(f.encoded().count, HelpFrame.maxPayload)
+            XCTAssertTrue(f.mayGoOnGroupChannel)
+        }
+        XCTAssertTrue(asDeputy.namedDeputy(fromKey: first.signingPublicKey, toKey: deputy.signingPublicKey, group: group))
+        XCTAssertFalse(agreed.namedDeputy(fromKey: first.signingPublicKey, toKey: deputy.signingPublicKey, group: group))
+        let consent = HelpFrame.takeoverConsent(from: 1, to: 1002, signer: 2001, signature: sig(other, 2001).signature)
+        XCTAssertEqual(HelpFrame(consent.encoded()), consent)
+        XCTAssertEqual(consent.encoded().count, 71)
+        // No signatures, three signatures, or bytes left over: not a frame.
+        var d = HelpFrame.takeover(alone).encoded()
+        d[13] = 0
+        XCTAssertNil(HelpFrame(d))
+        d[13] = 3
+        XCTAssertNil(HelpFrame(d))
+        XCTAssertNil(HelpFrame(HelpFrame.takeover(alone).encoded() + [0]))
+    }
+}

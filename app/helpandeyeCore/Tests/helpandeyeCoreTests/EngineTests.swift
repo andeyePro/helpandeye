@@ -76,10 +76,16 @@ final class RelayModel {
     /// People a removed coordinator added, taken off with them, whom only the owner can list again.
     var dropped: Set<String> = []
     private var started = false
+    /// When the owner last made any request, for a takeover after seven days' silence.
+    var ownerSeenAt: Date?
+    var deputyVersion: UInt32 = 0
     static let maxMembers = 256
 
+    func heard(_ key: String, at now: Date) { if key == owner { ownerSeenAt = now } }
+
     /// 200, or the status the relay would refuse with.
-    func setMembers(signer: String, generation g: UInt32, members list: [Entry], removed named: [String], primary: String?, groupID: Data?) -> Int {
+    func setMembers(signer: String, generation g: UInt32, members list: [Entry], removed named: [String], primary: String?, groupID: Data?,
+                    takeover: RelayProtocol.Takeover? = nil, deputyVersion: UInt32? = nil, now: Date = Date()) -> Int {
         // As relay.js: 32 bytes of standard base64, written the one way they encode (no stray bits).
         let isKey: (String) -> Bool = { k in
             k.range(of: #"^[A-Za-z0-9+/]{43}=$"#, options: .regularExpression) != nil && Data(base64Encoded: k)?.base64EncodedString() == k
@@ -89,14 +95,23 @@ final class RelayModel {
         if list.count > Self.maxMembers || named.count > 1024 { return 413 }
         if Set(list.map(\.key)).count != list.count { return 400 }
         var owner = self.owner
+        var seen = ownerSeenAt
         if !started {
             guard let primary, list.contains(where: { $0.key == primary && $0.role == "coordinator" }) else { return 400 }
             if let groupID, let key = Data(base64Encoded: primary), !GroupSecrets(groupID: groupID, channelSecret: Data(), groupKey: Data(), generation: 0).isOwned(by: key) { return 403 }
             // Not yet: only the first coordinator registers the group.
             if signer != primary { return 425 }
             owner = primary
+            seen = now
         } else {
             if !members.contains(where: { $0.key == signer && $0.role == "coordinator" }) { return 403 }
+            if let t = takeover, t.to != owner {
+                if signer != t.to { return 425 }
+                if let status = takeoverProblem(t, owner: owner!, groupID: groupID, now: now) { return status }
+                if !named.contains(owner!) { return 400 }
+                owner = t.to
+                seen = now
+            }
             if let primary, primary != owner { return 409 }
         }
         var removed = self.removed
@@ -134,7 +149,29 @@ final class RelayModel {
         if ownerFresh { ownerGeneration = Int64(g) }
         generation = max(generation, g)
         members = order.compactMap { k in roles[k].map { Entry(key: k, role: $0) } }
+        ownerSeenAt = seen
+        if signer == owner, let v = deputyVersion { self.deputyVersion = max(self.deputyVersion, v) }
         return 200
+    }
+
+    /// As relay.js `takeoverProven`: nil when the takeover is proven, else the status.
+    private func takeoverProblem(_ t: RelayProtocol.Takeover, owner: String, groupID: Data?, now: Date) -> Int? {
+        guard let groupID, (1...2).contains(t.signatures.count), let fromKey = Data(base64Encoded: t.from), let toKey = Data(base64Encoded: t.to) else { return 400 }
+        let coordinators = Set(members.filter { $0.role == "coordinator" }.map(\.key))
+        guard t.from == owner, t.to != owner, coordinators.contains(t.to) else { return 403 }
+        var signers: Set<String> = []
+        for s in t.signatures {
+            guard s.key != owner, coordinators.contains(s.key), !signers.contains(s.key), let sig = Data(base64Encoded: s.signature),
+                  HelpFrame.isValidTakeoverSignature(sig, by: Data(base64Encoded: s.key), fromKey: fromKey, toKey: toKey, group: groupID) else { return 403 }
+            signers.insert(s.key)
+        }
+        guard signers.contains(t.to) else { return 403 }
+        if let d = t.deputy, d.version >= deputyVersion, let sig = Data(base64Encoded: d.signature),
+           HelpFrame.isValidDeputySignature(sig, by: fromKey, deputyKey: toKey, version: d.version, group: groupID) { return nil }
+        if signers.count >= 2 { return nil }
+        if let seen = ownerSeenAt, now.timeIntervalSince(seen) >= GroupState.takeoverSilence { return nil }
+        if ownerSeenAt == nil { ownerSeenAt = now }
+        return 425
     }
 
     func isMember(_ key: String) -> Bool { members.contains { $0.key == key } }
@@ -165,15 +202,18 @@ final class RelayModel {
         publishes += 1
         if requiresPass, group.pass == nil { lastProblem = Self.needsPass; return .refused }
         let list = RelayProtocol.memberList(group)
+        air.relay.heard(key, at: phone?.engine.now() ?? Date())
         let status = air.relay.setMembers(signer: key, generation: list.generation, members: list.members.map { .init(key: $0.key, role: $0.role) },
-                                          removed: list.removed, primary: list.primary, groupID: group.secrets.groupID)
+                                          removed: list.removed, primary: list.primary, groupID: group.secrets.groupID,
+                                          takeover: list.takeover, deputyVersion: list.deputyVersion, now: phone?.engine.now() ?? Date())
         air.relayLog.append((key, list, status, group.secrets.groupID))
-        return status == 200 ? .accepted : .refused
+        return status == 200 ? .accepted : status == 425 ? .notYet : .refused
     }
 
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String? {
         guard isConfigured, let air, let me = phone, let key else { return "No internet" }
         if requiresPass, group?.pass == nil { return Self.needsPass }
+        air.relay.heard(key, at: me.engine.now())
         guard air.relay.isMember(key) else { return "Relay refused it (403)" }
         sent.append((frame, wake))
         sentVia.append(group?.relayURL)

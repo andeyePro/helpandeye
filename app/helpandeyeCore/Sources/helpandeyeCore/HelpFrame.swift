@@ -107,12 +107,24 @@ public enum HelpFrame: Equatable, Sendable {
     /// A coordinator acknowledged a notice, such as a rota gap or the relay allowance running low,
     /// so other phones need not widen it.
     case noticeAck(notice: Notice, by: UInt16, at: UInt32)
+    /// The first coordinator names a deputy (member 0 clears it), whose phone may take over if
+    /// theirs is lost (decision 20). Carries the deputy's signing key and the first coordinator's
+    /// signature over it, so the naming can be checked by the relay, which knows keys not numbers.
+    case deputy(member: UInt16, key: Data, version: UInt32, signature: Data)
+    /// A coordinator took over as first coordinator from a lost phone (decision 20).
+    case takeover(Takeover)
+    /// A coordinator agrees that another may take over from the first coordinator: their
+    /// signature over the same input as the takeover's, for the other to carry in it.
+    case takeoverConsent(from: UInt16, to: UInt16, signer: UInt16, signature: Data)
 
     public static let formatVersion: UInt8 = 1
     static let settingsHeader: UInt8 = 0x21
     static let callStateHeader: UInt8 = 0x22
     static let changeRequestHeader: UInt8 = 0x23
     static let changeoverHeader: UInt8 = 0x24
+    static let deputyHeader: UInt8 = 0x25
+    static let takeoverHeader: UInt8 = 0x26
+    static let consentHeader: UInt8 = 0x27
     /// Room for what someone writes in a change request inside a signed frame.
     public static let maxRequestBytes = 60
     /// Room for a coordinator's reason inside a signed frame.
@@ -229,6 +241,16 @@ public enum HelpFrame: Equatable, Sendable {
         case let .memberPhone(member, phone, at):
             let bytes = Data(phone.prefix(Self.maxPhoneBytes).utf8)
             w.u8(Self.header(.memberPhone)); w.u16(member); w.u32(at); w.u8(UInt8(bytes.count)); w.bytes(bytes)
+        case let .deputy(member, key, version, signature):
+            w.u8(Self.deputyHeader); w.u16(member); w.bytes(key.count == 32 ? key : Data(count: 32)); w.u32(version)
+            w.bytes(signature.count == 64 ? signature : Data(count: 64))
+        case let .takeover(t):
+            w.u8(Self.takeoverHeader); w.u16(t.from); w.u16(t.to); w.u32(t.version); w.u32(t.deputySignature == nil ? 0 : t.deputyVersion)
+            w.u8(UInt8(min(t.signatures.count, 2)))
+            for s in t.signatures.prefix(2) { w.u16(s.signer); w.bytes(s.signature.count == 64 ? s.signature : Data(count: 64)) }
+            if let d = t.deputySignature { w.bytes(d.count == 64 ? d : Data(count: 64)) }
+        case let .takeoverConsent(from, to, signer, signature):
+            w.u8(Self.consentHeader); w.u16(from); w.u16(to); w.u16(signer); w.bytes(signature.count == 64 ? signature : Data(count: 64))
         case let .signed(signer, inner, signature):
             w.u8(Self.header(.signed)); w.u16(signer); w.u8(UInt8(min(inner.count, 80))); w.bytes(inner.prefix(80))
             w.bytes(signature.count == 64 ? signature : Data(count: 64))
@@ -258,6 +280,32 @@ public enum HelpFrame: Equatable, Sendable {
             let all = Profile.Setting.allCases
             let setting = code > 0 && Int(code) <= all.count ? all[Int(code) - 1] : nil
             self = .changeRequest(member: member, setting: setting, at: at, text: words)
+            return
+        }
+        if head == Self.deputyHeader {
+            guard let member = r.u16(), let key = r.take(32), let version = r.u32(), let sig = r.take(64), r.isAtEnd else { return nil }
+            self = .deputy(member: member, key: Data(key), version: version, signature: Data(sig))
+            return
+        }
+        if head == Self.takeoverHeader {
+            guard let from = r.u16(), let to = r.u16(), let version = r.u32(), let deputyVersion = r.u32(), let n = r.u8(), (1...2).contains(n) else { return nil }
+            var signatures: [Takeover.Signature] = []
+            for _ in 0..<n {
+                guard let signer = r.u16(), let sig = r.take(64) else { return nil }
+                signatures.append(.init(signer: signer, signature: Data(sig)))
+            }
+            var t = Takeover(from: from, to: to, version: version, signatures: signatures)
+            if deputyVersion > 0 {
+                guard let d = r.take(64) else { return nil }
+                t.deputyVersion = deputyVersion; t.deputySignature = Data(d)
+            }
+            guard r.isAtEnd else { return nil }
+            self = .takeover(t)
+            return
+        }
+        if head == Self.consentHeader {
+            guard let from = r.u16(), let to = r.u16(), let signer = r.u16(), let sig = r.take(64), r.isAtEnd else { return nil }
+            self = .takeoverConsent(from: from, to: to, signer: signer, signature: Data(sig))
             return
         }
         if head == Self.callStateHeader {
@@ -408,6 +456,79 @@ public enum HelpFrame: Equatable, Sendable {
         guard case let .ack(unit, request, responder, at, sig) = self, let key,
               let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key) else { return false }
         return pub.isValidSignature(sig, for: Self.ackInput(unit: unit, request: request, responder: responder, ackedAt: at, group: group))
+    }
+
+    // The deputy naming and the takeover are signed over keys, not member numbers, so the relay,
+    // which holds keys only, checks the same bytes the phones do (relay.js `takeoverProven`).
+
+    static func deputyInput(key: Data, version: UInt32, group: Data) -> Data {
+        var w = ByteWriter()
+        w.bytes(Data("HELPA-DEPUTY-1".utf8)); w.bytes(group); w.bytes(key); w.u32(version)
+        return w.data
+    }
+
+    public static func signedDeputy(member: UInt16, key: Data, version: UInt32, identity: DeviceIdentity, group: Data) -> HelpFrame {
+        let sig = (try? identity.signingKey.signature(for: deputyInput(key: key, version: version, group: group))) ?? Data(count: 64)
+        return .deputy(member: member, key: key, version: version, signature: sig)
+    }
+
+    /// True only for a deputy naming signed by the given key: the first coordinator's.
+    public func isValidDeputy(signedBy key: Data?, group: Data) -> Bool {
+        guard case let .deputy(_, deputyKey, version, sig) = self else { return false }
+        return Self.isValidDeputySignature(sig, by: key, deputyKey: deputyKey, version: version, group: group)
+    }
+
+    static func isValidDeputySignature(_ sig: Data, by key: Data?, deputyKey: Data, version: UInt32, group: Data) -> Bool {
+        guard let key, let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key) else { return false }
+        return pub.isValidSignature(sig, for: deputyInput(key: deputyKey, version: version, group: group))
+    }
+
+    static func takeoverInput(fromKey: Data, toKey: Data, group: Data) -> Data {
+        Data("HELPA-TAKEOVER-1".utf8) + group + fromKey + toKey
+    }
+
+    /// A coordinator's signature that `toKey` may take over from `fromKey`: the new first
+    /// coordinator's own, or another coordinator's agreement.
+    public static func takeoverSignature(fromKey: Data, toKey: Data, identity: DeviceIdentity, group: Data) -> Data {
+        (try? identity.signingKey.signature(for: takeoverInput(fromKey: fromKey, toKey: toKey, group: group))) ?? Data(count: 64)
+    }
+
+    static func isValidTakeoverSignature(_ sig: Data, by key: Data?, fromKey: Data, toKey: Data, group: Data) -> Bool {
+        guard let key, let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key) else { return false }
+        return pub.isValidSignature(sig, for: takeoverInput(fromKey: fromKey, toKey: toKey, group: group))
+    }
+}
+
+/// A coordinator taking over as first coordinator from a lost phone (decision 20). Anyone who
+/// knows the members' keys can check it, the relay included: the new first coordinator's
+/// signature, and with it the lost phone's signed naming of them as deputy, or a second
+/// coordinator's signature, or nothing more where the lost phone has not been heard from for
+/// seven days. Taking over removes the lost phone and makes new keys, as a removal does.
+public struct Takeover: Codable, Equatable, Sendable {
+    public struct Signature: Codable, Equatable, Sendable {
+        public let signer: UInt16
+        public let signature: Data
+        public init(signer: UInt16, signature: Data) { self.signer = signer; self.signature = signature }
+    }
+    public let from: UInt16
+    public let to: UInt16
+    /// The membership version the removal of the lost phone makes.
+    public let version: UInt32
+    public var signatures: [Signature]
+    public var deputyVersion: UInt32 = 0
+    public var deputySignature: Data?
+    /// The lost phone's signing key, kept by the phone that applies the takeover for the relay's
+    /// benefit, as the member is gone from the list by then. Not sent on air.
+    public var fromKey: Data = Data()
+
+    public init(from: UInt16, to: UInt16, version: UInt32, signatures: [Signature]) {
+        self.from = from; self.to = to; self.version = version; self.signatures = signatures
+    }
+
+    /// Whether the lost phone named the new first coordinator as deputy, given both keys.
+    public func namedDeputy(fromKey: Data, toKey: Data, group: Data) -> Bool {
+        guard let d = deputySignature else { return false }
+        return HelpFrame.isValidDeputySignature(d, by: fromKey, deputyKey: toKey, version: deputyVersion, group: group)
     }
 }
 

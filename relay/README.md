@@ -98,7 +98,20 @@ After that, any coordinator's list adds people, as members; only the owner sets 
 newest list, and removes people, by naming them in `removed`; nobody removed is ever listed
 again. When the owner removes a coordinator, people only that coordinator added, and the owner
 does not list, go too, and only the owner can list them again. A list holds at most 256 members,
-and every key must be a 32-byte key. Each message is its own storage key, its sealed text at most
+and every key must be a 32-byte key.
+
+If the owner's phone is lost, another coordinator takes over (decision 20) and the group keeps its
+ID. Their list carries `"takeover": {"from": "lost owner's key", "to": "their key", "signatures":
+[{"key": "...", "signature": "..."}], "deputy": {"version": n, "signature": "..."}}`, with the lost
+owner in `removed`. Each signature is over `HELPA-TAKEOVER-1`, the group's 16-byte ID and the two
+keys; the new owner's own is required, and every signer must be a coordinator other than the owner.
+The relay takes it with proof: the owner's naming of them as deputy (signed over `HELPA-DEPUTY-1`,
+the ID, the deputy's key and the version, little-endian), a second coordinator's signature, or no
+request from the owner for seven days (counted from the first takeover tried, for a group the relay
+began watching only then). Only the new owner's own list brings a takeover; anyone else's waits
+with 425 until it has.
+
+Each message is its own storage key, its sealed text at most
 4,096 characters, kept for seven days, 2,000 at most. The group's alarm deletes expired messages
 whether or not anyone posts.
 

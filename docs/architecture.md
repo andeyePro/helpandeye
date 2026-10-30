@@ -38,7 +38,7 @@ For contributors. What each part does and where its code is. The rules it follow
 `app/helpandeyeCore/Sources/helpandeyeCore/HelpFrame.swift` is the reference; this table follows
 it. Every frame starts with one byte: format version 1 in the high nibble, kind in the low nibble.
 The first 16 kinds used the low nibble up, so later kinds have whole header bytes of their own
-(0x21 to 0x24). Integers are little-endian.
+(0x21 to 0x27). Integers are little-endian.
 
 | Kind | Name | Fields after the first byte | Group channel |
 |---|---|---|---|
@@ -62,8 +62,11 @@ The first 16 kinds used the low nibble up, so later kinds have whole header byte
 | 0x22 | call state | unit u32, request u16, state u8, at u32, length u8, reason (up to 56) | inside 10, without a reason; a coordinator's reason goes inside 0 (signed by the coordinator, sealed for responders) over the internet and home Wi-Fi only, and the radio gets the close without it |
 | 0x23 | change request | member u16, setting u8, at u32, length u8, text (up to 60) | no; inside 10, from that member |
 | 0x24 | changeover ends | generation u32, at u32: when the keys before that generation stop | inside 10, from the first coordinator |
+| 0x25 | deputy | member u16 (0 for no one), the deputy's signing key (32), version u32, the first coordinator's Ed25519 signature (64) | yes |
+| 0x26 | takeover | lost first coordinator u16, new first coordinator u16, membership version u32, deputy naming's version u32 (0 for none), count u8 (1 or 2), then signer u16 and Ed25519 signature (64) for each, then the deputy naming's signature (64) if its version is not 0 | yes |
+| 0x27 | takeover agreed | lost first coordinator u16, the coordinator who may take over u16, signer u16, Ed25519 signature (64) | yes |
 
-Every signature (kinds 3, 9, 10 and 0x21) also covers the group's ID, so one made in one group is
+Every signature (kinds 3, 9, 10, 0x21 and 0x25 to 0x27) also covers the group's ID, so one made in one group is
 worthless in another.
 
 Availability (4), notice acknowledgements (5), membership (11 to 15), call states (0x22) and
@@ -117,6 +120,24 @@ nobody has been told.
   of a removal of someone who could respond before it has its update code sends nothing personal
   (choices, typed messages, position) until it is scanned, as the removed phone still holds the
   responders' key it would seal with; the call itself still goes.
+- If the first coordinator's phone is lost, another coordinator takes over (decision 20). The
+  first coordinator may name a deputy (0x25): signed over the group ID, the deputy's signing key
+  and a version, so a later naming, of someone else or no one, replaces it. A takeover (0x26) is
+  signed by the coordinator taking over, over the group ID, the lost phone's signing key and their
+  own, and carries its proof: the deputy naming, a second coordinator's signature over the same
+  bytes (sent to them as 0x27), or nothing more, which each phone accepts only once it has itself
+  heard nothing signed by the first coordinator for seven days. Every phone checks it against its
+  own member list, removes the lost phone and follows the new first coordinator; the new first
+  coordinator's phone makes new keys as after any removal. The takeover is repeated with the
+  member list during the changeover and travels inside each update code, so a phone that missed it
+  catches up from either. Signing over keys rather than member numbers lets the relay check the
+  same bytes.
+- The group keeps its ID through a takeover. The relay, which made the group's owner the key the
+  ID was made from, takes a new owner only from a member list sent by that new owner with the
+  takeover in keys (`takeover` in `PUT /members`): every signature a current coordinator's, the
+  lost owner among the removed, and proof as above, where the seven days are the relay's own: no
+  request from the owner in that time. A list sent by anyone else carrying a takeover the relay has
+  not taken waits (425).
 - A new group uses Help&I's relay unless its coordinator sets their own or none (Group, Internet
   route). Help&I's relay is free to groups only while it costs Help&I nothing; once Help&I pays
   for it, it requires a relay pass for each group: a compact token naming the group and an

@@ -116,6 +116,10 @@ public struct SavedState: Codable, Equatable, Sendable {
     /// settings they have chosen for themselves.
     public var own: Profile?
     public var ownChosen: Set<Profile.Setting> = []
+    /// When this phone last had something signed by the first coordinator (decision 20): the
+    /// member list they repeat daily, an acknowledgement, their box. Seven days without, and one
+    /// other coordinator alone may take over.
+    public var primaryHeardAt: Date?
 
     public init(group: GroupState, me: UInt16) { self.group = group; self.me = me }
 
@@ -152,6 +156,10 @@ public struct Activity: Codable, Sendable {
     /// When the first coordinator last repeated the member list, kept so a relaunch does not
     /// repeat it again within the day and use up radio time.
     public var lastMembershipRepeat: Date?
+    /// On a coordinator's phone: other coordinators' signed agreement that this phone may take
+    /// over from the first coordinator, by signer (decision 20); and whom this phone has agreed to.
+    public var takeoverConsents: [UInt16: Data] = [:]
+    public var takeoverAgreed: Set<UInt16> = []
 
     public init() {}
 }
@@ -265,6 +273,7 @@ public final class HelpEngine: ObservableObject {
         s.invitedBy = invitedBy
         s.confirmed = invitedBy == nil || invitedBy == group.primaryCoordinator
         s.joinedAt = now()
+        s.primaryHeardAt = now()
         setState(s)
         followProfileCheckIns()
     }
@@ -1014,6 +1023,10 @@ public final class HelpEngine: ObservableObject {
                 await sendToAll(.signing(.memberRemoved(member: n, version: g.membershipVersion), as: myNumber, identity: identity, group: gid), in: gid)
             }
             if let f = g.changeoverFrame(at: now()) { await sendToAll(.signing(f, as: myNumber, identity: identity, group: gid), in: gid) }
+            if let f = g.deputyFrame() { await sendToAll(f, in: gid) }
+            // How this phone came to be first coordinator, for phones that missed it, while they
+            // can still hear: after the changeover they need an update code, which carries it.
+            if let t = g.takeover, g.changeoverFrame(at: now()) != nil { await sendToAll(.takeover(t), in: gid) }
         }
     }
 
@@ -1092,6 +1105,7 @@ public final class HelpEngine: ObservableObject {
         case let .ack(unit, request, who, at, _):
             // Only a current responder's own signature counts (decision 6, AGENTS.md).
             guard group?.acceptsAck(frame) == true else { return }
+            if who == group?.primaryCoordinator { heardPrimary() }
             let k = IncomingRequest.Key(unit: unit, request: request)
             let pressed = activity.inbox.requests[k]?.sentAt ?? activity.outgoing.first(where: { $0.unit == unit && $0.number == request })?.createdAt
             // Logged only when it will count: for a call heard, and made after it was pressed.
@@ -1107,8 +1121,36 @@ public final class HelpEngine: ObservableObject {
         case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .callState, .changeRequest, .changeoverEnds:
             // Counted only when signed (below), so a removed phone cannot fake them.
             return
+        case .deputy:
+            guard var s = saved, s.group.apply(deputy: frame) else { return }
+            let first = s.group.primaryCoordinator
+            setState(s)
+            heardPrimary()
+            log(s.group.deputy.map { "\(name(ofMember: first ?? 0)) named \(name(ofMember: $0)) as deputy" } ?? "\(name(ofMember: first ?? 0)) named no deputy")
+            return
+        case let .takeover(t):
+            guard var s = saved, s.group.accepts(t, silent: primaryIsSilent) else { return }
+            let words = "\(name(ofMember: t.to)) took over as first coordinator from \(t.from == s.me ? "you" : name(ofMember: t.from)), \(how(t))"
+            s.group.apply(takeover: t, at: now())
+            s.primaryHeardAt = now()
+            setState(s)
+            activity.takeoverConsents = [:]
+            activity.takeoverAgreed = []
+            log(words)
+            // The lost phone, found: it is out of the group, so nothing should keep alerting it.
+            if t.from == s.me { for k in activity.inbox.requests.keys { alerts.cancel(k) } }
+            return
+        case let .takeoverConsent(from, to, signer, sig):
+            guard to == saved?.me, let g = group, from == g.primaryCoordinator, signer != to, signer != from,
+                  let by = g.member(signer), by.role == .coordinator, let fromKey = g.member(from)?.signingKey,
+                  HelpFrame.isValidTakeoverSignature(sig, by: by.signingKey, fromKey: fromKey, toKey: identity.signingPublicKey, group: groupID),
+                  activity.takeoverConsents[signer] != sig else { return }
+            activity.takeoverConsents[signer] = sig
+            log("\(name(ofMember: signer)) agreed that you may take over as first coordinator")
+            return
         case let .signed(signer, _, _):
             guard let sender = group?.member(signer), let inner = frame.verifiedInner(signedBy: sender.signingKey, group: groupID) else { return }
+            if signer == group?.primaryCoordinator { heardPrimary() }
             switch inner {
             case let .noticeAck(notice, by, at):
                 // An old acknowledgement, replayed, must not clear a newer notice.
@@ -1192,8 +1234,9 @@ public final class HelpEngine: ObservableObject {
             return
         case let .board(member, key, _):
             // A watch has no box: other members' boxes are the phone's business.
-            guard !companion, member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey, group: groupID),
-                  activity.boardKeys[member] != key else { return }
+            guard !companion, member != saved?.me, frame.isValidBoard(signedBy: group?.member(member)?.signingKey, group: groupID) else { return }
+            if member == group?.primaryCoordinator { heardPrimary() }
+            guard activity.boardKeys[member] != key else { return }
             activity.boardKeys[member] = key
             spawn {
                 await self.mesh.addContact(key, name: "Help&I \(member)")
@@ -1443,6 +1486,101 @@ public final class HelpEngine: ObservableObject {
         // A pass is only ever replaced, never taken away, so an update without one keeps this phone's.
         if merged.relayPass == nil { merged.relayPass = current.relayPass }
         changeGroup(edit: false) { $0 = merged }
+        // Only the first coordinator could have sealed it.
+        heardPrimary()
+    }
+
+    // MARK: If the first coordinator's phone is lost (decision 20)
+
+    private func heardPrimary() {
+        guard var s = saved, now().timeIntervalSince(s.primaryHeardAt ?? .distantPast) > 60 else { return }
+        s.primaryHeardAt = now()
+        saved = s
+        store.save(s)
+    }
+
+    /// When one other coordinator alone may take over: seven days after the first coordinator
+    /// was last heard from. Nil on the first coordinator's own phone.
+    public var takeoverOpensAt: Date? {
+        guard !isPrimaryCoordinator else { return nil }
+        return saved?.primaryHeardAt.map { $0.addingTimeInterval(GroupState.takeoverSilence) }
+    }
+
+    public var primaryIsSilent: Bool { takeoverOpensAt.map { now() >= $0 } ?? false }
+
+    public enum TakeoverPath: Equatable, Sendable { case deputy, agreed(by: UInt16), silence }
+
+    /// How this coordinator may take over now, if at all (decision 20): as the deputy the first
+    /// coordinator named, with another coordinator's agreement, or alone after seven days' silence.
+    public var takeoverPath: TakeoverPath? {
+        guard let g = group, let me = saved?.me, actsAsCoordinator, !isPrimaryCoordinator else { return nil }
+        if g.currentDeputy == me, g.deputySignature != nil { return .deputy }
+        if let by = activity.takeoverConsents.keys.sorted().first(where: { g.member($0)?.role == .coordinator }) { return .agreed(by: by) }
+        return primaryIsSilent ? .silence : nil
+    }
+
+    /// The first coordinator names a coordinator to take over if their phone is lost, or no one.
+    public func nameDeputy(_ number: UInt16?) {
+        guard isPrimaryCoordinator, !companion, let g = group, let me = saved?.me, number != me else { return }
+        let key: Data
+        if let number {
+            guard let m = g.member(number), m.role == .coordinator, let k = m.signingKey else { return }
+            key = k
+        } else {
+            key = Data(count: 32)
+        }
+        let frame = HelpFrame.signedDeputy(member: number ?? 0, key: key, version: g.deputyVersion + 1, identity: identity, group: groupID)
+        guard case let .deputy(_, _, version, sig) = frame else { return }
+        updateGroup { $0.deputy = number; $0.deputyVersion = version; $0.deputySignature = sig }
+        log(number.map { "You named \(name(ofMember: $0)) as deputy" } ?? "You named no deputy")
+        let gid = groupID
+        spawn { await self.sendToAll(frame, in: gid) }
+    }
+
+    /// A coordinator agrees that another may take over from the first coordinator: with two
+    /// coordinators behind it, a takeover needs no waiting.
+    public func agreeToTakeover(by number: UInt16) {
+        guard let g = group, let me = saved?.me, actsAsCoordinator, let from = g.primaryCoordinator, number != me, number != from,
+              let to = g.member(number), to.role == .coordinator, let fromKey = g.member(from)?.signingKey, let toKey = to.signingKey else { return }
+        let sig = HelpFrame.takeoverSignature(fromKey: fromKey, toKey: toKey, identity: identity, group: groupID)
+        activity.takeoverAgreed.insert(number)
+        log("You agreed that \(to.name) may take over as first coordinator")
+        let gid = groupID
+        spawn { await self.sendToAll(.takeoverConsent(from: from, to: number, signer: me, signature: sig), in: gid) }
+    }
+
+    /// Takes over as first coordinator, by whichever path is open. The lost phone is removed and
+    /// the group gets new keys, which this phone then hands out as after any removal. Returns
+    /// whether it happened.
+    @discardableResult
+    public func takeOver() -> Bool {
+        guard let g = group, let me = saved?.me, let path = takeoverPath, let from = g.primaryCoordinator, let fromKey = g.member(from)?.signingKey else { return false }
+        let mine = Takeover.Signature(signer: me, signature: HelpFrame.takeoverSignature(fromKey: fromKey, toKey: identity.signingPublicKey, identity: identity, group: groupID))
+        var t = Takeover(from: from, to: me, version: g.membershipVersion + 1, signatures: [mine])
+        switch path {
+        case .deputy: t.deputyVersion = g.deputyVersion; t.deputySignature = g.deputySignature
+        case let .agreed(by): if let sig = activity.takeoverConsents[by] { t.signatures.append(.init(signer: by, signature: sig)) }
+        case .silence: break
+        }
+        guard g.accepts(t, silent: primaryIsSilent) else { return false }
+        let words = "You took over as first coordinator from \(name(ofMember: from)), \(how(t))"
+        updateGroup { $0.takeOver(t, at: self.now()) }
+        activity.takeoverConsents = [:]
+        activity.takeoverAgreed = []
+        log(words)
+        let gid = groupID
+        spawn { await self.sendToAll(.takeover(t), in: gid) }
+        return true
+    }
+
+    /// The path a takeover came by, for the log; from the group before it is applied.
+    private func how(_ t: Takeover) -> String {
+        guard let g = group, let fromKey = g.member(t.from)?.signingKey, let toKey = g.member(t.to)?.signingKey else { return "" }
+        if t.namedDeputy(fromKey: fromKey, toKey: toKey, group: groupID) { return "as the deputy they named" }
+        if let other = t.signatures.first(where: { $0.signer != t.to }) {
+            return other.signer == saved?.me ? "with your agreement" : "with \(name(ofMember: other.signer))'s agreement"
+        }
+        return "after seven days without word from them"
     }
 
     /// Only the first coordinator makes new coordinators.
@@ -1599,6 +1737,8 @@ extension SavedState {
         joinedAt = try c.decodeIfPresent(Date.self, forKey: .joinedAt)
         own = try c.decodeIfPresent(Profile.self, forKey: .own)
         ownChosen = try c.value(.ownChosen, or: [])
+        // Saved before decision 20: the seven days start when this version first opens it.
+        primaryHeardAt = try c.decodeIfPresent(Date.self, forKey: .primaryHeardAt) ?? Date()
     }
 }
 
@@ -1620,5 +1760,7 @@ extension Activity {
         changeRequests = c.values(.changeRequests)
         closeRepeats = c.values(.closeRepeats)
         lastMembershipRepeat = try? c.decodeIfPresent(Date.self, forKey: .lastMembershipRepeat)
+        takeoverConsents = try c.value(.takeoverConsents, or: [:])
+        takeoverAgreed = try c.value(.takeoverAgreed, or: [])
     }
 }

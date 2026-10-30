@@ -136,6 +136,13 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// Goes up whenever someone joins or leaves, so the relay can tell a newer member list from
     /// an out-of-date phone's older one.
     public var membershipVersion: UInt32 = 1
+    /// The coordinator the first coordinator named to take over if their phone is lost (decision
+    /// 20), with the signature that proves it, so everyone can show it and the relay can check it.
+    public var deputy: UInt16?
+    public var deputyVersion: UInt32 = 0
+    public var deputySignature: Data?
+    /// How the first coordinator came to be, where it is not whoever started the group.
+    public var takeover: Takeover?
 
     public struct StoredPolicy: Codable, Equatable, Sendable {
         public var useDistance = false
@@ -187,6 +194,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, removalsWithoutKeys, keysOutdatedSince, keysEndAt, highestMember, roleVersions
         case policy, relayURL, relayPass, membershipVersion, roleBlocksSeen, phoneVersions, settingsVersion, settingsSigner
+        case deputy, deputyVersion, deputySignature, takeover
     }
 
     /// Fields added after the first release are optional when reading, so a group saved by an
@@ -214,13 +222,86 @@ public struct GroupState: Codable, Equatable, Sendable {
         relayPass = try c.decodeIfPresent(String.self, forKey: .relayPass)
         membershipVersion = try c.decodeIfPresent(UInt32.self, forKey: .membershipVersion) ?? 1
         roleBlocksSeen = try c.decodeIfPresent(UInt16.self, forKey: .roleBlocksSeen) ?? 0
+        deputy = try c.decodeIfPresent(UInt16.self, forKey: .deputy)
+        deputyVersion = try c.decodeIfPresent(UInt32.self, forKey: .deputyVersion) ?? 0
+        deputySignature = try c.decodeIfPresent(Data.self, forKey: .deputySignature)
+        takeover = try c.decodeIfPresent(Takeover.self, forKey: .takeover)
     }
 
     /// The group's first coordinator: the only one who removes people (which changes the keys) or
     /// makes new coordinators, so two coordinators out of touch can never split the group onto
-    /// different keys or hand out the same numbers. Any coordinator can invite.
+    /// different keys or hand out the same numbers. Any coordinator can invite. Whoever started
+    /// the group, unless a coordinator has taken over from a lost phone (decision 20).
     public var primaryCoordinator: UInt16? {
-        members.filter { $0.role == .coordinator && ($0.block ?? 0) == 0 }.map(\.number).min()
+        if let t = takeover, member(t.to)?.role == .coordinator { return t.to }
+        return members.filter { $0.role == .coordinator && ($0.block ?? 0) == 0 }.map(\.number).min()
+    }
+
+    /// The deputy, while they are still a coordinator.
+    public var currentDeputy: UInt16? { deputy.flatMap { member($0)?.role == .coordinator ? $0 : nil } }
+
+    /// How long the first coordinator must go unheard before one other coordinator alone can take
+    /// over. Their phone repeats the member list daily, so a week is well clear of a day away.
+    public static let takeoverSilence: TimeInterval = 7 * 24 * 3600
+
+    /// The deputy naming as the first coordinator signed it, to repeat for phones that missed it.
+    public func deputyFrame() -> HelpFrame? {
+        guard let sig = deputySignature else { return nil }
+        guard let d = deputy else { return .deputy(member: 0, key: Data(count: 32), version: deputyVersion, signature: sig) }
+        guard let key = member(d)?.signingKey else { return nil }
+        return .deputy(member: d, key: key, version: deputyVersion, signature: sig)
+    }
+
+    /// Takes in the first coordinator's naming of a deputy, newer than the one held and signed by
+    /// them, naming a member whose key it carries. Returns whether it was.
+    @discardableResult
+    public mutating func apply(deputy frame: HelpFrame) -> Bool {
+        guard case let .deputy(number, key, version, sig) = frame, version > deputyVersion, let first = primaryCoordinator,
+              frame.isValidDeputy(signedBy: member(first)?.signingKey, group: secrets.groupID) else { return false }
+        if number != 0 { guard member(number)?.signingKey == key else { return false } }
+        deputy = number == 0 ? nil : number
+        deputyVersion = version
+        deputySignature = sig
+        return true
+    }
+
+    /// Whether this phone accepts a takeover: from its first coordinator, by a coordinator, every
+    /// signature a current coordinator's, and the proof enough (decision 20). `silent` is whether
+    /// this phone itself has not heard from the first coordinator for `takeoverSilence`.
+    public func accepts(_ t: Takeover, silent: Bool) -> Bool {
+        guard let from = primaryCoordinator, t.from == from, t.to != from, let fromKey = member(from)?.signingKey,
+              let to = member(t.to), to.role == .coordinator, let toKey = to.signingKey else { return false }
+        let signers = Set(t.signatures.map(\.signer))
+        guard signers.count == t.signatures.count, signers.contains(t.to), !signers.contains(from) else { return false }
+        for s in t.signatures {
+            guard let m = member(s.signer), m.role == .coordinator,
+                  HelpFrame.isValidTakeoverSignature(s.signature, by: m.signingKey, fromKey: fromKey, toKey: toKey, group: secrets.groupID) else { return false }
+        }
+        // A naming this phone knows was replaced, by another deputy or none, proves nothing.
+        let named = t.deputyVersion >= deputyVersion && t.namedDeputy(fromKey: fromKey, toKey: toKey, group: secrets.groupID)
+        return named || t.signatures.count >= 2 || silent
+    }
+
+    /// Applies a takeover this phone accepts: the lost phone is out, as if removed, and the new
+    /// first coordinator names their own deputy.
+    public mutating func apply(takeover t: Takeover, at now: Date) {
+        var t = t
+        t.fromKey = member(t.from)?.signingKey ?? Data()
+        apply(membership: .memberRemoved(member: t.from, version: t.version), at: now)
+        takeover = t
+        deputy = nil
+        deputySignature = nil
+    }
+
+    /// On the phone taking over: removes the lost phone and makes new keys, as `remove` does, and
+    /// records how this phone came to be first coordinator.
+    public mutating func takeOver(_ t: Takeover, at now: Date) {
+        var t = t
+        t.fromKey = member(t.from)?.signingKey ?? Data()
+        remove(t.from, at: now)
+        takeover = t
+        deputy = nil
+        deputySignature = nil
     }
 
     public func member(_ number: UInt16) -> Member? { members.first { $0.number == number } }
@@ -507,17 +588,21 @@ public enum Joining {
         return Welcome(groupID: group.secrets.groupID, memberNumber: member.number, sealed: box)
     }
 
-    /// Opens an update with the group this phone already has. Only a coordinator of that group can
-    /// have sealed it, and an update can never take the group back to older secrets.
-    public static func openUpdate(_ welcome: Welcome, current: GroupState, me: DeviceIdentity) throws -> GroupState {
+    /// Opens an update with the group this phone already has. Only the first coordinator of that
+    /// group can have sealed it, and an update can never take the group back to older secrets.
+    /// `primarySilent` is whether this phone has not heard from its first coordinator for
+    /// `GroupState.takeoverSilence`, for an update from a coordinator who took over (decision 20).
+    public static func openUpdate(_ welcome: Welcome, current: GroupState, me: DeviceIdentity, primarySilent: Bool = false) throws -> GroupState {
         guard welcome.groupID == current.secrets.groupID else { throw Failure.wrongGroup }
-        // Only the first coordinator changes the keys, so the group can never be split onto two.
-        for c in current.members where c.number == current.primaryCoordinator {
-            if let plain = try? unseal(welcome.sealed, from: c.publicKey, me: me, context: current.secrets.groupID),
-               let g = try? unpack(plain) {
-                guard g.secrets.generation > current.secrets.generation else { throw Failure.cannotOpen }
-                return g
-            }
+        // Only the first coordinator changes the keys, so the group can never be split onto two:
+        // the one this phone knows, or one who took over from them with proof this phone accepts.
+        for c in current.members where c.role == .coordinator {
+            guard let plain = try? unseal(welcome.sealed, from: c.publicKey, me: me, context: current.secrets.groupID),
+                  let g = try? unpack(plain) else { continue }
+            guard g.secrets.generation > current.secrets.generation else { throw Failure.cannotOpen }
+            if c.number == current.primaryCoordinator { return g }
+            if let t = g.takeover, t.to == c.number, current.accepts(t, silent: primarySilent) { return g }
+            throw Failure.cannotOpen
         }
         throw Failure.cannotOpen
     }

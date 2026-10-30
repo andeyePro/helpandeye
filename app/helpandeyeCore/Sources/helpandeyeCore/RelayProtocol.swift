@@ -54,12 +54,51 @@ public enum RelayProtocol {
         public let removed: [String]
         /// The group's first coordinator, who owns the group on the relay and alone registers it.
         public let primary: String?
+        /// How `primary` came to own the group, where it was not whoever registered it: the
+        /// takeover as the phones signed it, in keys, for the relay to check (decision 20).
+        public var takeover: Takeover?
+        /// The first coordinator's newest naming of a deputy, so the relay takes no older one.
+        public var deputyVersion: UInt32?
+    }
+
+    public struct Takeover: Codable, Equatable, Hashable, Sendable {
+        public struct Signature: Codable, Equatable, Hashable, Sendable {
+            public let key: String
+            public let signature: String
+            public init(key: String, signature: String) { self.key = key; self.signature = signature }
+        }
+        public struct Deputy: Codable, Equatable, Hashable, Sendable {
+            public let version: UInt32
+            public let signature: String
+            public init(version: UInt32, signature: String) { self.version = version; self.signature = signature }
+        }
+        public let from: String
+        public let to: String
+        public let signatures: [Signature]
+        public let deputy: Deputy?
+
+        public init(from: String, to: String, signatures: [Signature], deputy: Deputy?) {
+            self.from = from; self.to = to; self.signatures = signatures; self.deputy = deputy
+        }
+
+        init?(_ t: helpandeyeCore.Takeover, in group: GroupState) {
+            guard t.fromKey.count == 32, let toKey = group.member(t.to)?.signingKey else { return nil }
+            from = t.fromKey.base64EncodedString()
+            to = toKey.base64EncodedString()
+            signatures = t.signatures.compactMap { s in
+                group.member(s.signer)?.signingKey.map { .init(key: $0.base64EncodedString(), signature: s.signature.base64EncodedString()) }
+            }
+            deputy = t.deputySignature.map { .init(version: t.deputyVersion, signature: $0.base64EncodedString()) }
+        }
     }
 
     public static func memberList(_ group: GroupState) -> MemberList {
-        MemberList(generation: group.membershipVersion, members: group.members.compactMap { m in
+        var list = MemberList(generation: group.membershipVersion, members: group.members.compactMap { m in
             m.signingKey.map { .init(key: $0.base64EncodedString(), role: m.role == .coordinator ? "coordinator" : "member") }
         }, removed: group.removedKeys.map { $0.base64EncodedString() }.sorted(),
         primary: group.primaryCoordinator.flatMap { group.member($0)?.signingKey }?.base64EncodedString())
+        list.takeover = group.takeover.flatMap { Takeover($0, in: group) }
+        list.deputyVersion = group.deputyVersion > 0 ? group.deputyVersion : nil
+        return list
     }
 }

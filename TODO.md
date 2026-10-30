@@ -6,7 +6,6 @@
 
 ### Decisions for Martin
 
-- [ ] **If the first coordinator is lost.** Only the group's first coordinator can remove people or make coordinators, so two coordinators can never split the group onto different keys. If that phone is lost, nobody can remove it. Should another coordinator be able to take over (say, with a second coordinator's confirmation), or should the group be started again?
 - [ ] **Signing.** The app is built unsigned for the simulator. Running it on real phones needs an Apple team in Xcode on the build Mac and a bundle ID prefix; `com.andeye.help` is used for now.
 - [ ] **MeshCore data_type.** Help&I frames use `0xFF48` from MeshCore's testing range, which needs no registration. Register a permanent value in MeshCore's `docs/number_allocations.md` before release?
 - [ ] **Critical Alerts entitlement.** Apply for it (see the app spec).
@@ -50,4 +49,5 @@
   - Check on devices: a watch app installed after the phone's session started gets its handover.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4) - built in the firmware core as a sealed report (firmware/DESIGN.md section 10); the app shows it only as a request with a Power cut follow-up and notes until the app side above is done. **Blocked:** a board to run tests/MANUAL-TESTS.md section 52 on.
 - [ ] Battery and power-cut reports from the box (decisions 3 and 4) - personal, so sealed for responders (decision 8, 2026-10-30). **Blocked:** Help&I's own firmware (`firmware/DESIGN.md`).
+- [ ] **Takeover from a lost first coordinator: what is left** (decision 20; built 2026-10-30). The app's screens are next. Not covered yet: a phone that missed two takeovers in a row catches up only from the newer first coordinator's daily repeat after the older one's, as an update code carries only the latest; a relay that lost its storage cannot be registered again by a first coordinator who took over (the group ID is made from the original key); a first coordinator still in use whose group took over after seven days' silence on the other phones (out of range and off the internet) is split from it until it hears the takeover, and is not told.
 - [ ] **Audit findings on the large iPhone and iPad** - the contrast misreads at another scroll position are now measured again on a still screenshot (2026-10-30), and the small iPhone passes at normal size. Still to confirm: the large iPhone and iPad on the build Mac.

@@ -134,6 +134,7 @@ export class Group {
       const body = await request.text();
       // Only the Worker reaches a group, and it has checked this key's signature.
       const key = request.headers.get("X-HelpA-Key") ?? "";
+      await this.relay.heard(key);
       if (kind === "members" && request.method === "PUT") {
         const list = JSON.parse(body);
         const registering = !(await this.relay.members());

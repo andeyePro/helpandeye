@@ -30,6 +30,9 @@ export const MAX_WAKES_PER_MINUTE = 2;
 export const RESEND_WINDOW_MS = 15 * 60 * 1000;
 export const MAX_MEMBERS = 256;
 export const MAX_REMOVED = 1024;
+// How long the first coordinator must go unheard by the relay before one other coordinator alone
+// can take the group over (decision 20). The app waits the same.
+export const TAKEOVER_SILENCE_MS = 7 * 24 * 3600 * 1000;
 // Durable Object storage takes at most 128 keys in one delete or put.
 const STORAGE_BATCH = 128;
 
@@ -126,6 +129,7 @@ export class GroupRelay {
     if (!list || typeof list !== "object" || !Array.isArray(list.members) || !Number.isInteger(list.generation) || list.generation < 0) throw new RelayError(400, "bad member list");
     const named = list.removed ?? [];
     if (!Array.isArray(named)) throw new RelayError(400, "bad removed list");
+    if (list.deputyVersion !== undefined && !(Number.isInteger(list.deputyVersion) && list.deputyVersion >= 0 && list.deputyVersion <= 0xFFFFFFFF)) throw new RelayError(400, "bad deputy version");
     for (const k of named) if (!isKey(k)) throw new RelayError(400, "bad removed key");
     for (const m of list.members) {
       if (!m || typeof m !== "object" || !isKey(m.key) || !["coordinator", "member"].includes(m.role)) throw new RelayError(400, "bad member");
@@ -134,13 +138,26 @@ export class GroupRelay {
     if (new Set(list.members.map((m) => m.key)).size !== list.members.length) throw new RelayError(400, "a key listed twice");
     const current = await this.members();
     let owner = await this.storage.get("owner");
+    let ownerSeenAt;
     if (!current) {
       if (!list.members.some((m) => m.key === list.primary && m.role === "coordinator")) throw new RelayError(400, "the list must name its first coordinator");
       if (groupId && !(await ownsGroup(groupId, list.primary))) throw new RelayError(403, "not this group's first coordinator");
       if (signer !== list.primary) throw new RelayError(425, "the group's first coordinator registers it first");
       owner = list.primary;
+      ownerSeenAt = this.now();
     } else {
       if (!current.members.some((m) => m.key === signer && m.role === "coordinator")) throw new RelayError(403, "only a coordinator can change members");
+      // A coordinator took over from the owner's lost phone (decision 20): the group keeps its ID
+      // and the relay checks the takeover as the phones did, so the new owner can go on. Only the
+      // new owner's own list brings it; the others' lists wait for that.
+      if (list.takeover !== undefined && list.takeover?.to !== owner) {
+        if (!list.takeover || typeof list.takeover !== "object") throw new RelayError(400, "bad takeover");
+        if (signer !== list.takeover.to) throw new RelayError(425, "the new first coordinator sends the takeover first");
+        await this.takeoverProven(list.takeover, owner, current, groupId);
+        if (!named.includes(owner)) throw new RelayError(400, "a takeover removes the first coordinator");
+        owner = list.takeover.to;
+        ownerSeenAt = this.now();
+      }
       if (list.primary !== undefined && list.primary !== owner) throw new RelayError(409, "this group has another first coordinator");
     }
     const removed = new Set((await this.storage.get("removed")) ?? []);
@@ -184,11 +201,50 @@ export class GroupRelay {
       addedBy: [...addedBy].filter(([k]) => roles.has(k)),
       members: { generation: Math.max(current?.generation ?? 0, list.generation), members },
       ...(ownerFresh ? { ownerGeneration: list.generation } : {}),
+      ...(ownerSeenAt !== undefined ? { ownerSeenAt } : {}),
+      // The owner's newest naming of a deputy, so a naming they have since replaced proves nothing.
+      ...(signer === owner && list.deputyVersion !== undefined ? { deputyVersion: Math.max(list.deputyVersion, (await this.storage.get("deputyVersion")) ?? 0) } : {}),
     });
     // Push tokens, rate and wake records of anyone no longer listed are deleted, not just ignored.
     const perMember = [];
     for (const prefix of ["p:", "w:", "r:", "k:"]) perMember.push(...(await this.storage.list({ prefix })).keys());
     await deleteAll(this.storage, perMember.filter((k) => !roles.has(k.slice(2))));
+  }
+
+  /// Checks a takeover as the phones do (HelpFrame.swift, `Takeover`): from the owner, to a
+  /// coordinator, every signature a current coordinator's over the group, the owner's key and the
+  /// new one's; and proof enough: the owner's signed naming of the new one as deputy, a second
+  /// coordinator's signature, or seven days in which the relay heard nothing from the owner.
+  async takeoverProven(t, owner, current, groupId) {
+    if (!isKey(t.from) || !isKey(t.to) || !Array.isArray(t.signatures) || t.signatures.length < 1 || t.signatures.length > 2 || !groupId) throw new RelayError(400, "bad takeover");
+    const coordinators = new Set(current.members.filter((m) => m.role === "coordinator").map((m) => m.key));
+    if (t.from !== owner || t.to === owner || !coordinators.has(t.to)) throw new RelayError(403, "not a takeover from this group's first coordinator");
+    const input = new Uint8Array([...enc.encode("HELPA-TAKEOVER-1"), ...groupId, ...unb64(t.from), ...unb64(t.to)]);
+    const signers = new Set();
+    for (const s of t.signatures) {
+      if (!s || !isKey(s.key) || s.key === owner || !coordinators.has(s.key) || signers.has(s.key) || !(await verify(s.key, s.signature, input))) {
+        throw new RelayError(403, "bad takeover signature");
+      }
+      signers.add(s.key);
+    }
+    if (!signers.has(t.to)) throw new RelayError(403, "the new first coordinator must sign");
+    const deputyVersion = (await this.storage.get("deputyVersion")) ?? 0;
+    if (t.deputy && Number.isInteger(t.deputy.version) && t.deputy.version >= deputyVersion && t.deputy.version <= 0xFFFFFFFF) {
+      const v = t.deputy.version;
+      const named = new Uint8Array([...enc.encode("HELPA-DEPUTY-1"), ...groupId, ...unb64(t.to), v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]);
+      if (await verify(owner, t.deputy.signature, named)) return;
+    }
+    if (signers.size >= 2) return;
+    const seen = await this.storage.get("ownerSeenAt");
+    if (seen !== undefined && this.now() - seen >= TAKEOVER_SILENCE_MS) return;
+    // A group registered before the relay kept watch: its seven days start now.
+    if (seen === undefined) await this.storage.put("ownerSeenAt", this.now());
+    throw new RelayError(425, "the first coordinator has been heard from within seven days");
+  }
+
+  /// Notes a request from the owner, so a takeover after silence can be checked.
+  async heard(key) {
+    if (key === (await this.storage.get("owner"))) await this.storage.put("ownerSeenAt", this.now());
   }
 
   async isMember(key) {

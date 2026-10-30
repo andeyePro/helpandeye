@@ -1,0 +1,284 @@
+import XCTest
+@testable import helpandeyeCore
+
+// If the first coordinator's phone is lost (decision 20): a deputy, two coordinators, or one after
+// seven days' silence take over; the lost phone is removed, the keys change, and the relay follows.
+
+@MainActor final class TakeoverTests: XCTestCase {
+    var t: EngineTests!
+    var second: Phone!
+    var third: Phone!
+    var n2: UInt16 { second.engine.saved!.me }
+    var n3: UInt16 { third.engine.saved!.me }
+    var coordinator: Phone { t.coordinator }
+    var caller: Phone { t.caller }
+    var responder: Phone { t.responder }
+    var air: Air { t.air }
+
+    override func setUp() async throws {
+        t = EngineTests()
+        try await t.setUp()
+        second = Phone(air: air, clock: t.clock)
+        third = Phone(air: air, clock: t.clock)
+        t.join(second, call: false, respond: true)
+        t.join(third, call: false, respond: true)
+        await air.run()
+        coordinator.engine.promote(n2)
+        coordinator.engine.promote(n3)
+        for p in air.phones { p.relay.isConfigured = true }
+        await t.relaySetUp()
+        XCTAssertEqual(air.relay.owner, coordinator.relay.key)
+        XCTAssertEqual(caller.engine.group?.member(n3)?.role, .coordinator)
+    }
+
+    /// The first coordinator's phone is lost: nothing more comes from it.
+    func lose(_ p: Phone) { p.mesh.isReady = false; p.relay.isConfigured = false }
+
+    func everyoneFollows(_ newFirst: Phone, file: StaticString = #filePath, line: UInt = #line) {
+        let n = newFirst.engine.saved!.me
+        let phones: [Phone] = [caller, responder, second, third]
+        for p in phones where p !== newFirst {
+            XCTAssertEqual(p.engine.group?.primaryCoordinator, n, "\(p.engine.saved!.me) follows the new first coordinator", file: file, line: line)
+            XCTAssertNil(p.engine.group?.member(1), "the lost phone is out", file: file, line: line)
+            XCTAssertTrue(p.engine.group?.removedMembers.contains(1) == true, file: file, line: line)
+            XCTAssertEqual(p.engine.group?.membershipVersion, newFirst.engine.group?.membershipVersion, file: file, line: line)
+        }
+        XCTAssertTrue(newFirst.engine.isPrimaryCoordinator, file: file, line: line)
+        XCTAssertNotNil(newFirst.engine.group?.previousSecrets, "new keys, as after any removal", file: file, line: line)
+        XCTAssertEqual(air.relay.owner, newFirst.relay.key, "the relay takes the new first coordinator, under the same group ID", file: file, line: line)
+        XCTAssertTrue(air.relay.removed.contains(coordinator.relay.key!), "and has the lost phone's key as removed", file: file, line: line)
+    }
+
+    func testTheDeputyTakesOverAtOnce() async {
+        coordinator.engine.nameDeputy(n2)
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.currentDeputy, n2, "everyone is told who the deputy is")
+        XCTAssertEqual(third.engine.group?.currentDeputy, n2)
+        XCTAssertEqual(coordinator.engine.activity.log.entries.last?.text, "You named Responder as deputy")
+        XCTAssertEqual(third.engine.activity.log.entries.last?.text, "Sam named \(third.engine.name(ofMember: n2)) as deputy")
+        XCTAssertNil(third.engine.takeoverPath, "only the deputy may take over at once")
+        lose(coordinator)
+        XCTAssertEqual(second.engine.takeoverPath, .deputy)
+        XCTAssertTrue(second.engine.takeOver())
+        await air.run()
+        everyoneFollows(second)
+        XCTAssertEqual(second.engine.activity.log.entries.last?.text, "You took over as first coordinator from Sam, as the deputy they named")
+        XCTAssertEqual(third.engine.activity.log.entries.last?.text, "\(third.engine.name(ofMember: n2)) took over as first coordinator from Sam, as the deputy they named")
+        XCTAssertNil(second.engine.group?.deputy, "the new first coordinator names their own")
+        // The group went on with its keys changed: the caller waits for an update code, as after
+        // any removal of someone who could respond, and the new first coordinator can remove people.
+        XCTAssertTrue(caller.engine.group!.needsKeyUpdate)
+        second.engine.removeMember(responder.engine.saved!.me)
+        await air.run()
+        XCTAssertNil(caller.engine.group?.member(responder.engine.saved!.me), "the new first coordinator's removals are followed")
+        XCTAssertFalse(air.relay.isMember(responder.relay.key!), "by the relay too")
+    }
+
+    func testAReplacedDeputyCannotTakeOverAtOnce() async {
+        coordinator.engine.nameDeputy(n2)
+        await air.run()
+        let first = second.engine.group!
+        let naming = first.deputySignature
+        coordinator.engine.nameDeputy(nil)
+        await air.run()
+        XCTAssertNil(caller.engine.group?.currentDeputy, "everyone is told there is no deputy now")
+        coordinator.engine.tick()
+        await air.run()
+        XCTAssertEqual(air.relay.deputyVersion, coordinator.engine.group?.deputyVersion, "and the relay, with the member list")
+        XCTAssertNil(second.engine.takeoverPath)
+        lose(coordinator)
+        // The old naming, kept and sent anyway, moves no one.
+        var t = Takeover(from: 1, to: n2, version: 99, signatures: [signature(of: second, to: second)])
+        t.deputyVersion = first.deputyVersion; t.deputySignature = naming
+        caller.engine.receive(.takeover(t), via: .mesh)
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1)
+    }
+
+    func testTwoCoordinatorsTakeOverAtOnce() async {
+        lose(coordinator)
+        XCTAssertNil(third.engine.takeoverPath)
+        XCTAssertFalse(third.engine.takeOver(), "one coordinator alone must wait")
+        second.engine.agreeToTakeover(by: n3)
+        await air.run()
+        XCTAssertEqual(third.engine.takeoverPath, .agreed(by: n2))
+        XCTAssertEqual(third.engine.activity.log.entries.last?.text, "\(third.engine.name(ofMember: n2)) agreed that you may take over as first coordinator")
+        XCTAssertNil(second.engine.takeoverPath, "agreeing to another's takeover opens nothing for oneself")
+        XCTAssertTrue(third.engine.takeOver())
+        await air.run()
+        everyoneFollows(third)
+        XCTAssertEqual(second.engine.activity.log.entries.last?.text,
+                       "\(second.engine.name(ofMember: n3)) took over as first coordinator from Sam, with your agreement")
+    }
+
+    func testOneCoordinatorTakesOverAfterSevenDaysOfSilence() async {
+        lose(coordinator)
+        await t.advance(6 * 86_400)
+        XCTAssertNil(second.engine.takeoverPath)
+        XCTAssertFalse(second.engine.takeOver(), "not before seven days")
+        // Nor does a frame claiming it, signed by a coordinator alone, move anyone before then.
+        let early = forgedTakeover(by: second, from: 1)
+        caller.engine.receive(early, via: .mesh)
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1)
+        await t.advance(86_400 + 60)
+        XCTAssertEqual(second.engine.takeoverPath, .silence)
+        XCTAssertEqual(second.engine.takeoverOpensAt!.timeIntervalSince(t.clock.now), -60, accuracy: 1)
+        XCTAssertTrue(second.engine.takeOver())
+        await air.run()
+        everyoneFollows(second)
+        XCTAssertEqual(third.engine.activity.log.entries.last?.text, "\(third.engine.name(ofMember: n2)) took over as first coordinator from Sam, after seven days without word from them")
+    }
+
+    func testTheFirstCoordinatorBeingHeardKeepsTheSilencePathShut() async {
+        // The first coordinator's daily member list is heard, so the seven days never run out.
+        await t.advance(10 * 86_400)
+        XCTAssertNil(second.engine.takeoverPath)
+        XCTAssertFalse(second.engine.takeOver())
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1)
+        XCTAssertEqual(air.relay.owner, coordinator.relay.key)
+    }
+
+    func testOnlyACoordinatorCanTakeOverOrAgree() async {
+        lose(coordinator)
+        // A responder's agreement opens nothing.
+        responder.engine.agreeToTakeover(by: n3)
+        await air.run()
+        XCTAssertNil(third.engine.takeoverPath)
+        XCTAssertTrue(third.engine.activity.takeoverConsents.isEmpty)
+        await t.advance(8 * 86_400)
+        XCTAssertNil(responder.engine.takeoverPath)
+        XCTAssertFalse(responder.engine.takeOver())
+        // A responder's signature is worth nothing on anyone's phone, even after seven days.
+        caller.engine.receive(forgedTakeover(by: responder, from: 1), via: .mesh)
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1)
+        // Nor can the first coordinator's own signature, or one coordinator's twice, stand for two.
+        var t2 = Takeover(from: 1, to: n3, version: 99, signatures: [signature(of: third, to: third), signature(of: coordinator, to: third)])
+        t.caller.engine.receive(.takeover(t2), via: .mesh)
+        t2 = Takeover(from: 1, to: n3, version: 99, signatures: [signature(of: third, to: third), signature(of: third, to: third)])
+        t.caller.engine.receive(.takeover(t2), via: .mesh)
+        // A takeover of someone who is not the first coordinator changes nothing either.
+        t.caller.engine.receive(forgedTakeover(by: third, from: n2), via: .mesh)
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1)
+    }
+
+    func testTheLostPhonesLaterFramesCountForNothing() async {
+        coordinator.engine.nameDeputy(n2)
+        await air.run()
+        lose(coordinator)
+        XCTAssertTrue(second.engine.takeOver())
+        await air.run()
+        // The lost phone turns up again, still believing it runs the group.
+        coordinator.mesh.isReady = true; coordinator.relay.isConfigured = true
+        let sentBefore = coordinator.relay.sent.count
+        caller.engine.press(.red)
+        await air.run()
+        caller.engine.receive(.signedAck(unit: t.key.unit, request: t.key.request, responder: 1, at: t.clock.now, identity: coordinator.identity, group: t.gid), via: .mesh)
+        coordinator.engine.removeMember(n3)
+        coordinator.engine.nameDeputy(n3)
+        await air.run()
+        XCTAssertEqual(caller.request?.status, .waitingForResponder, "its acknowledgement does not reassure")
+        XCTAssertEqual(caller.engine.group?.member(n3)?.role, .coordinator, "its removals change nothing")
+        XCTAssertNil(caller.engine.group?.deputy)
+        XCTAssertEqual(coordinator.relay.sent.count, sentBefore, "the relay refuses it")
+        XCTAssertFalse(air.relay.isMember(coordinator.relay.key!))
+        // Found with its deputy naming and a takeover of its own, it cannot take the group back.
+        XCTAssertNil(coordinator.engine.takeoverPath)
+    }
+
+    func testAPhoneThatMissedTheTakeoverCatchesUpFromTheKeyUpdate() async {
+        coordinator.engine.nameDeputy(n2)
+        await air.run()
+        lose(coordinator)
+        air.keep = { frame, _, to in !(to === self.caller && { if case .takeover = frame { true } else { false } }()) }
+        caller.relay.isConfigured = false
+        XCTAssertTrue(second.engine.takeOver())
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1, "the caller never heard")
+        XCTAssertNotNil(caller.engine.group?.member(1))
+        let g = second.engine.group!
+        let update = try! Joining.update(g, for: g.member(caller.engine.saved!.me)!, coordinator: second.identity)
+        let opened = try! Joining.openUpdate(update, current: caller.engine.group!, me: caller.identity)
+        caller.engine.applyKeyUpdate(opened)
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, n2)
+        XCTAssertNil(caller.engine.group?.member(1))
+        XCTAssertEqual(caller.engine.group?.secrets, g.secrets.sanitised)
+        XCTAssertFalse(caller.engine.group!.needsKeyUpdate)
+        // An update sealed by a coordinator who did not take over still opens nothing.
+        XCTAssertThrowsError(try Joining.openUpdate(try! Joining.update(g, for: g.member(caller.engine.saved!.me)!, coordinator: third.identity),
+                                                    current: responder.engine.group!, me: responder.identity))
+    }
+
+    func testTheDailyRepeatCarriesTheTakeoverToAPhoneThatMissedIt() async {
+        lose(coordinator)
+        second.engine.agreeToTakeover(by: n3)
+        await air.run()
+        air.keep = { frame, _, to in !(to === self.caller && { if case .takeover = frame { true } else { false } }()) }
+        caller.relay.isConfigured = false
+        XCTAssertTrue(third.engine.takeOver())
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1)
+        air.keep = { _, _, _ in true }
+        await t.advance(86_400 + 60)
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, n3, "repeated with the member list during the changeover")
+    }
+
+    func testTheRelayTakesTheNewAuthorityOnlyWithProof() async {
+        lose(coordinator)
+        let relay = air.relay
+        let c = { (p: Phone) in RelayModel.Entry(key: p.relay.key!, role: "coordinator") }
+        let m = { (p: Phone) in RelayModel.Entry(key: p.relay.key!, role: "member") }
+        let list = [c(second), c(third), m(caller), m(responder)]
+        let gid = caller.engine.group!.secrets.groupID
+        let sig = { (by: Phone, to: Phone) in
+            RelayProtocol.Takeover.Signature(key: by.relay.key!, signature: HelpFrame.takeoverSignature(fromKey: self.coordinator.identity.signingPublicKey, toKey: to.identity.signingPublicKey, identity: by.identity, group: gid).base64EncodedString())
+        }
+        let alone = RelayProtocol.Takeover(from: coordinator.relay.key!, to: second.relay.key!, signatures: [sig(second, second)], deputy: nil)
+        // One coordinator alone, within seven days: not yet; a stranger's or a member's signature: never.
+        XCTAssertEqual(relay.setMembers(signer: second.relay.key!, generation: 9, members: list, removed: [coordinator.relay.key!], primary: second.relay.key!, groupID: gid, takeover: alone, now: t.clock.now), 425)
+        let byMember = RelayProtocol.Takeover(from: coordinator.relay.key!, to: second.relay.key!, signatures: [sig(second, second), sig(responder, second)], deputy: nil)
+        XCTAssertEqual(relay.setMembers(signer: second.relay.key!, generation: 9, members: list, removed: [coordinator.relay.key!], primary: second.relay.key!, groupID: gid, takeover: byMember, now: t.clock.now), 403)
+        XCTAssertEqual(relay.setMembers(signer: third.relay.key!, generation: 9, members: list, removed: [coordinator.relay.key!], primary: second.relay.key!, groupID: gid, takeover: alone, now: t.clock.now), 425, "only the new first coordinator's own list brings it")
+        XCTAssertEqual(relay.setMembers(signer: second.relay.key!, generation: 9, members: list, removed: [], primary: second.relay.key!, groupID: gid, takeover: alone, now: t.clock.now.addingTimeInterval(8 * 86_400)), 400, "a takeover removes the lost phone")
+        XCTAssertEqual(relay.owner, coordinator.relay.key)
+        // The relay's own seven days, then accepted; and a wrongly named deputy does not shorten them.
+        let fake = RelayProtocol.Takeover(from: coordinator.relay.key!, to: second.relay.key!, signatures: [sig(second, second)],
+                                          deputy: .init(version: 1, signature: Data(count: 64).base64EncodedString()))
+        XCTAssertEqual(relay.setMembers(signer: second.relay.key!, generation: 9, members: list, removed: [coordinator.relay.key!], primary: second.relay.key!, groupID: gid, takeover: fake, now: t.clock.now), 425)
+        XCTAssertEqual(relay.setMembers(signer: second.relay.key!, generation: 9, members: list, removed: [coordinator.relay.key!], primary: second.relay.key!, groupID: gid, takeover: alone, now: t.clock.now.addingTimeInterval(8 * 86_400)), 200)
+        XCTAssertEqual(relay.owner, second.relay.key)
+        XCTAssertFalse(relay.isMember(coordinator.relay.key!))
+        // Done once, the record on later lists changes nothing, from anyone.
+        XCTAssertEqual(relay.setMembers(signer: third.relay.key!, generation: 10, members: list, removed: [coordinator.relay.key!], primary: second.relay.key!, groupID: gid, takeover: alone, now: t.clock.now), 200)
+        XCTAssertEqual(relay.owner, second.relay.key)
+    }
+
+    func testAnOlderGroupLoadsWithNoDeputyAndNoTakeover() throws {
+        let saved = try JSONEncoder().encode(caller.engine.group!)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        for k in ["deputy", "deputyVersion", "deputySignature", "takeover"] { json[k] = nil }
+        let g = try JSONDecoder().decode(GroupState.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(g.deputy); XCTAssertNil(g.takeover); XCTAssertEqual(g.primaryCoordinator, 1)
+    }
+
+    func testAPhoneSavedBeforeStartsItsSevenDaysWhenItFirstOpens() throws {
+        var saved = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(caller.engine.saved!)) as? [String: Any])
+        saved["primaryHeardAt"] = nil
+        let s = try JSONDecoder().decode(SavedState.self, from: JSONSerialization.data(withJSONObject: saved))
+        XCTAssertEqual(try XCTUnwrap(s.primaryHeardAt).timeIntervalSinceNow, 0, accuracy: 5)
+    }
+
+    /// A takeover frame from `from` to `by`, with `by`'s signature alone.
+    private func forgedTakeover(by: Phone, from: UInt16) -> HelpFrame {
+        .takeover(Takeover(from: from, to: by.engine.saved!.me, version: 99, signatures: [signature(of: by, to: by, from: from)]))
+    }
+
+    private func signature(of by: Phone, to: Phone, from: UInt16 = 1) -> Takeover.Signature {
+        let g = caller.engine.group!
+        let fromKey = g.member(from)?.signingKey ?? coordinator.identity.signingPublicKey
+        return .init(signer: by.engine.saved!.me, signature: HelpFrame.takeoverSignature(fromKey: fromKey, toKey: to.identity.signingPublicKey, identity: by.identity, group: g.secrets.groupID))
+    }
+}
+
+extension GroupSecrets {
+    /// As a caller holds them: without the responders' private key.
+    var sanitised: GroupSecrets { var s = self; s.responderPrivateKey = nil; return s }
+}
