@@ -2,6 +2,10 @@
 
 Done work, newest first. Open items live in the issue tracker.
 
+## 2026-10-30
+
+- [x] **Closes are repeated** (Codex re-review) - the phone that closes a call (the caller's, or a coordinator's) sends the close again on the call's resend times, four times over about eight minutes, then stops, so a phone that missed it no longer goes on alerting. The repeats survive a relaunch. Tests: a responder who missed a caller's close, and a coordinator's, hears it on the next repeat. 254 core tests.
+
 ## 2026-10-29
 
 - [x] **Screen tests on the build Mac** - first run there (iOS 27, small iPhone): at the largest text every screen passes, after two test fixes. Scrolling to a button now comes back up slowly if a fast swipe carried it past (Profiles was missed), and text scrolled under the status bar on a screen with no title bar counts as being in the bar's fade, as under other bars. The one-column choices at the largest text are confirmed. At normal size the audit still reports contrast on text it reads at another scroll position than the screenshot (TODO, audit findings).

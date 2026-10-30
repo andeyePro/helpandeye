@@ -95,6 +95,35 @@ import XCTest
         XCTAssertFalse(responder.engine.activity.inbox.requests[t.key]!.isOpen)
     }
 
+    /// Codex re-review: a close lost on the way is repeated, as I'm OK is, then left.
+    func testAResponderWhoMissedACloseHearsItRepeated() async {
+        await callerProfile { $0.callerMayClose = true }
+        caller.engine.press(.red)
+        await t.air.run()
+        t.air.keep = { _, _, to in to !== self.responder }
+        caller.engine.closeMyCall()
+        await t.air.run()
+        XCTAssertTrue(responder.engine.activity.inbox.requests[t.key]!.isOpen, "missed the close")
+        t.air.keep = { _, _, _ in true }
+        await t.advance(31)
+        XCTAssertFalse(responder.engine.activity.inbox.requests[t.key]!.isOpen)
+        XCTAssertNil(responder.alerts.scheduled[t.key])
+        await t.advance(Resend.gaps.reduce(0, +))
+        XCTAssertTrue(caller.engine.activity.closeRepeats.isEmpty, "repeated a few times, then left")
+    }
+
+    func testACoordinatorsCloseIsRepeatedToo() async {
+        caller.engine.press(.red)
+        await t.air.run()
+        t.air.keep = { _, _, to in to !== self.responder }
+        XCTAssertTrue(coordinator.engine.close(t.key, consent: true))
+        await t.air.run()
+        XCTAssertTrue(responder.engine.activity.inbox.requests[t.key]!.isOpen)
+        t.air.keep = { _, _, _ in true }
+        await t.advance(31)
+        XCTAssertFalse(responder.engine.activity.inbox.requests[t.key]!.isOpen)
+    }
+
     /// Codex NR19: a close the caller's profile does not allow, though signed by them (an old or
     /// altered app), closes nothing on other phones.
     func testACallersCloseTheirProfileDoesNotAllowCountsNowhere() async {

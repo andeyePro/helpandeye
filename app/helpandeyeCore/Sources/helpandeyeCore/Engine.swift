@@ -143,8 +143,20 @@ public struct Activity: Codable, Sendable {
     public var lastSettingsChange: GroupLog.Entry?
     /// On a coordinator's phone: people's requests to change their settings, until dealt with.
     public var changeRequests: [ChangeRequest] = []
+    /// Closes this phone sent, repeated a few times like I'm OK, so a phone that missed one does
+    /// not go on alerting.
+    public var closeRepeats: [CloseRepeat] = []
 
     public init() {}
+}
+
+public struct CloseRepeat: Codable, Equatable, Sendable {
+    public let call: IncomingRequest.Key
+    /// The close with any reason, for the internet and home Wi-Fi, and without it, for the radio.
+    public let full: HelpFrame
+    public let onAir: HelpFrame
+    public let at: Date
+    public internal(set) var resends = 0
 }
 
 @MainActor
@@ -603,6 +615,14 @@ public final class HelpEngine: ObservableObject {
         let full = HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: s.reason), as: n, identity: identity, group: groupID)
         let onAir = s.reason.isEmpty ? full
             : HelpFrame.signing(.callState(unit: unit, request: request, state: s.state, at: at, reason: ""), as: n, identity: identity, group: groupID)
+        if s.state.closes {
+            activity.closeRepeats.removeAll { $0.call == key }
+            activity.closeRepeats.append(CloseRepeat(call: key, full: full, onAir: onAir, at: now()))
+        }
+        sendClose(full, onAir)
+    }
+
+    private func sendClose(_ full: HelpFrame, _ onAir: HelpFrame) {
         let gid = groupID
         spawn {
             _ = await self.sendOffAir(full, in: gid)
@@ -942,6 +962,14 @@ public final class HelpEngine: ObservableObject {
                     if let ok = self.okFrame(r) { _ = await self.send(ok, on: route, kind: .optional, in: gid) }
                 }
             }
+        }
+        for i in activity.closeRepeats.indices.reversed() where t >= Resend.due(activity.closeRepeats[i].resends + 1, after: activity.closeRepeats[i].at) {
+            var c = activity.closeRepeats[i]
+            // After a long sleep, missed slots are skipped rather than sent back to back.
+            repeat { c.resends += 1 } while t >= Resend.due(c.resends + 1, after: c.at)
+            activity.closeRepeats[i] = c
+            if c.resends >= Resend.gaps.count { activity.closeRepeats.remove(at: i) }
+            sendClose(c.full, c.onAir)
         }
     }
 
@@ -1458,5 +1486,6 @@ extension Activity {
         log = try c.value(.log, or: GroupLog())
         lastSettingsChange = try c.decodeIfPresent(GroupLog.Entry.self, forKey: .lastSettingsChange)
         changeRequests = try c.value(.changeRequests, or: [])
+        closeRepeats = try c.value(.closeRepeats, or: [])
     }
 }

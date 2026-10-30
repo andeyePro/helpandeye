@@ -36,7 +36,6 @@
 - [ ] **Codex re-review: what is left** (CodexReview.md, 2026-10-29 observations, O5.5 responses). Agreed, not yet built:
   - Home Wi-Fi during the seven-day changeover: a phone that has not scanned its update cannot prove itself to updated ones. Show "scan your update" rather than accept proofs under the old key.
   - A caller's phone told of a removal it has no new keys for still seals for the old responders' key: hold personal sends, or warn, until it is updated.
-  - Repeat a close with each resend of the call it closes, as I'm OK is, so a lost close does not leave another phone alerting.
   - The locked listener: hand the acknowledgements and closes it hears to the app, and cancel the app's pending alerts for them; share one ingest with the app (time checks, dedup by generation); serve every group, not only the first. **Blocked:** signing.
   - Wi-Fi link: resolve waiting sends when a connection drops, back off redials, clear the permission text once it works, count members rather than connections, and show "Listening" only once the listener is known to run.
   - Check on devices: a watch app installed after the phone's session started gets its handover.
