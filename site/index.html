@@ -20,8 +20,9 @@
 <script src="/andeye-eye.js"></script>
 <style>
   :root {
+    color-scheme: dark;
     --bg: #0c0f16; --bg-deep: #090b11; --panel: #131826; --panel-2: #161c2c;
-    --line: #232b40; --line-soft: #1b2233; --text: #eef1f6; --muted: #98a0b3; --faint: #8a93a5;
+    --line: #232b40; --line-soft: #1b2233; --text: #eef1f6; --muted: #a0a8ba; --faint: #8a93a5;
     --radius: 14px; --measure: 720px;
     --accent: #009A44; --accent-soft: rgba(0, 154, 68, 0.14);
     --red: #c8102e; --amber: #e8a200;
@@ -41,15 +42,16 @@
   .eyebrow-row { display: flex; align-items: center; gap: 10px; margin: 0 0 0.9rem; }
   svg.eye { aspect-ratio: 365 / 235; display: block; }
   .row-eye { flex: none; width: 40px; height: auto; }
-  h1 { font-size: clamp(2.5rem, 6.2vw, 4.4rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1.04; margin: 0 auto 1.1rem; max-width: 18ch; }
+  h1 { font-size: clamp(min(2.5rem, 15vw), 6.2vw, 4.4rem); font-weight: 800; letter-spacing: -0.025em; line-height: 1.04; margin: 0 auto 1.1rem; max-width: 18ch; }
   h2 { font-size: clamp(1.8rem, 3.6vw, 2.7rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; margin: 0 0 1rem; }
   h3 { font-size: 1.15rem; font-weight: 700; margin: 0 0 0.4rem; }
+  h1, h2, h3 { -webkit-hyphens: auto; hyphens: auto; }
   p { margin: 0 0 1rem; }
   .lede { font-size: clamp(1.05rem, 1.8vw, 1.25rem); color: var(--muted); }
   .after { margin-top: 2rem; }
   .star { color: var(--accent); text-decoration: none; font-weight: 800; padding-left: 0.1em; }
 
-  .hero { position: relative; padding: clamp(56px, 9vh, 96px) 0 clamp(24px, 4vh, 48px); text-align: center; }
+  .hero { position: relative; overflow-x: clip; padding: clamp(56px, 9vh, 96px) 0 clamp(24px, 4vh, 48px); text-align: center; }
   .hero::before { content: ""; position: absolute; top: -140px; left: 50%; transform: translateX(-50%);
     width: min(820px, 120vw); height: 620px; pointer-events: none;
     background: radial-gradient(closest-side, rgba(238, 241, 246, 0.07), rgba(238, 241, 246, 0) 72%); }
@@ -86,8 +88,8 @@
   .more summary::-webkit-details-marker { display: none; }
   .more:hover { border-color: var(--accent); }
   .open-hint { display: inline-block; margin-top: 0.8rem; font-size: 0.85rem; font-weight: 700; color: var(--accent); }
-  .open-hint::after { content: " +"; }
-  .more[open] .open-hint::after { content: " \2212"; }
+  .open-hint::after { content: " +"; content: " +" / ""; }
+  .more[open] .open-hint::after { content: " \2212"; content: " \2212" / ""; }
   .more[open] .open-hint { font-size: 0; margin: 0; }
   .more[open] .open-hint::after { font-size: 0.85rem; }
   .detail { margin-top: 0.9rem; padding-top: 0.9rem; border-top: 1px solid var(--line-soft); }
@@ -120,6 +122,7 @@
 </head>
 <body>
 
+<main>
 <header class="hero" id="top">
   <div class="wrap">
     <svg class="eye hero-eye" data-bg="#0c0f16" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 365 235" fill="none" role="img" aria-label="The Help&amp;I mark: the andeye eye with a first-aid cross in a green iris"><defs><clipPath id="ape8"><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94Z"/></clipPath></defs><g clip-path="url(#ape8)"><circle cx="234.59" cy="149.83" r="49.15" fill="#009A44"/><path d="M224.43,119.36 L244.75,119.36 L244.75,139.68 L265.07,139.68 L265.07,159.99 L244.75,159.99 L244.75,180.31 L224.43,180.31 L224.43,159.99 L204.12,159.99 L204.12,139.68 L224.43,139.68Z" fill="#0c0f16"/></g><g stroke="#009A44" stroke-width="17" stroke-linecap="round" fill="none"><path d="M163.09,174.94C-76.91,-9.06 195.09,15.94 77.09,93.94"/><path d="M77.09,93.94C-19.86,158.02 72.09,253.94 140.09,154.94"/><path d="M140.09,154.94C223.95,32.85 329.09,154.94 329.09,154.94"/><path d="M329.09,154.94C329.09,154.94 250.09,238.94 163.09,174.94"/></g></svg>
@@ -304,6 +307,7 @@
     </div>
   </div>
 </section>
+</main>
 
 <footer>
   <div class="wrap">
@@ -336,6 +340,15 @@
     cross.setAttribute('fill', bg);
     svg.querySelector('g[clip-path]').appendChild(cross);
   });
+})();
+// The Discussions bot links each question as #faq-<name>: open it, so the reader lands on the answer.
+(function () {
+  function openFromHash() {
+    var d = location.hash && document.getElementById(location.hash.slice(1));
+    if (d && d.tagName === 'DETAILS') d.open = true;
+  }
+  openFromHash();
+  window.addEventListener('hashchange', openFromHash);
 })();
 </script>
 </body>
