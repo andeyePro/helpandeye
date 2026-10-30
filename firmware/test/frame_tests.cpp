@@ -119,6 +119,26 @@ TEST(otherHelpFramesArePassedOnUnread) {
     CHECK(decode(position, sizeof position).kind == FrameKind::other);
     const uint8_t sealed[] = {0x10, 0x00};
     CHECK(decode(sealed, sizeof sealed).kind == FrameKind::other);
+    // .memberAdded(member: 3, role: .responder, unit: 70001, signingKey: 32 x 1, sealKey: 32 x 2, version: 9)
+    uint8_t added[76] = {0x1B, 0x03, 0x00, 0x02, 0x71, 0x11, 0x01, 0x00};
+    std::memset(added + 8, 1, 32);
+    std::memset(added + 40, 2, 32);
+    added[72] = 9;
+    CHECK(decode(added, sizeof added).kind == FrameKind::other);
+    // .memberRole(member: 3, role: .coordinator, block: 2000, version: 9)
+    const uint8_t role[] = {0x1E, 0x03, 0x00, 0x04, 0xD0, 0x07, 0x09, 0x00, 0x00, 0x00};
+    CHECK(decode(role, sizeof role).kind == FrameKind::other);
+    // The second page of headers: .groupSettings (0x21), .changeRequest (0x23) and
+    // .changeoverEnds(generation: 3, at: 1_793_000_000) (0x24) are all the phone's to read.
+    const uint8_t settings[] = {0x21, 0x01, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00};
+    CHECK(decode(settings, sizeof settings).kind == FrameKind::other);
+    const uint8_t request[] = {0x23, 0x03, 0x00, 0x00, 0x40, 0x02, 0xDF, 0x6A, 0x00};
+    CHECK(decode(request, sizeof request).kind == FrameKind::other);
+    const uint8_t changeover[] = {0x24, 0x03, 0x00, 0x00, 0x00, 0x40, 0x02, 0xDF, 0x6A};
+    CHECK(decode(changeover, sizeof changeover).kind == FrameKind::other);
+    // Not a Help&I header at all.
+    const uint8_t unknown[] = {0x25, 0x03, 0x00};
+    CHECK(decode(unknown, sizeof unknown).kind == FrameKind::none);
 }
 
 TEST(ackEncodesAsSwiftDoes) {

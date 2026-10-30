@@ -16,6 +16,7 @@ constexpr uint8_t kSignedHeader = kFormatVersion << 4 | 10;
 constexpr uint8_t kSettingsHeader = 0x21;
 constexpr uint8_t kCallStateHeader = 0x22;
 constexpr uint8_t kChangeRequestHeader = 0x23;
+constexpr uint8_t kChangeoverHeader = 0x24;
 
 // Given the whole frame's size first, so a buffer too small for it is left untouched.
 class Writer {
@@ -209,7 +210,7 @@ Frame decode(const uint8_t* data, size_t length) {
         f.kind = FrameKind::callState;
         return f;
     }
-    if (head == kSettingsHeader || head == kChangeRequestHeader) {
+    if (head == kSettingsHeader || head == kChangeRequestHeader || head == kChangeoverHeader) {
         f.kind = FrameKind::other;
         return f;
     }
