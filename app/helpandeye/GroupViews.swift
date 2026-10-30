@@ -415,15 +415,21 @@ struct RelaySection: View {
             let usesOurs = model.group?.relayURL == RelayProtocol.defaultRelay
             Text(usesOurs ? "Calls also go over the internet, through Help&I's relay. It passes on only what is sealed with the group's key, so it cannot read calls."
                  : model.relay.isConfigured ? "Calls also go over the internet, through your own relay." : "Not set up: calls go over the local radio only.")
+            // What the relay last said when it turned this phone away, so a coordinator sees why
+            // the route is not working without waiting for a call to show it.
+            if let problem = model.relay.lastProblem { Text(problem).foregroundStyle(Color.warning) }
             if usesOurs, let group = model.group {
                 Text("Help&I's relay is a paid service. A group uses it with a pass from Help&I.")
                 Text(passWords(group.passState(at: Date())))
                 Text("Group ID, to get a pass: \(RelayProtocol.id(of: group.secrets.groupID))").textSelection(.enabled)
                 LabeledField(label: "Paste the pass here", text: $pass, keyboard: .URL)
                 Button("Save pass") {
-                    passMessage = model.setRelayPass(pass) ? "Saved. Members get the pass at once, over the internet or the local radio, or when they next join."
-                                                           : "That is not a pass for this group. Check it was copied in full."
-                    if passMessage?.hasPrefix("Saved") == true { pass = "" }
+                    if model.setRelayPass(pass) {
+                        passMessage = "Saved. Members get the pass at once, over the internet or the local radio, or when they next join."
+                        pass = ""
+                    } else {
+                        passMessage = model.engine.settingsProblem ?? "That is not a pass for this group. Check it was copied in full."
+                    }
                 }
                 if let passMessage { Text(passMessage) }
             }
@@ -439,8 +445,9 @@ struct RelaySection: View {
     private func passWords(_ state: RelayPass.State) -> String {
         switch state {
         case .none: return "This group has no pass yet."
-        case let .valid(until): return "This group's pass is good until \(until.formatted(date: .long, time: .omitted))."
-        case let .expired(on): return "This group's pass ran out on \(on.formatted(date: .long, time: .omitted))."
+        // With the time: a pass runs out at the hour it was issued, not at midnight.
+        case let .valid(until): return "This group's pass is good until \(until.formatted(date: .long, time: .shortened))."
+        case let .expired(on): return "This group's pass ran out on \(on.formatted(date: .long, time: .shortened))."
         }
     }
 }

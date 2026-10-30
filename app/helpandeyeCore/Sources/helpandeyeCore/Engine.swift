@@ -201,6 +201,8 @@ public final class HelpEngine: ObservableObject {
     private var publishedList: RelayProtocol.MemberList?
     private var publishedAt: Date?
     private var refusedList: RelayProtocol.MemberList?
+    /// The pass the refused list was sent with: a new pass is reason to send the list again.
+    private var refusedPass: String?
     private var lastPublishTry: Date?
     private var publishBackoff: TimeInterval = 60
     /// An answer is a broadcast every box hears, so one a minute covers a newcomer hearing many.
@@ -940,7 +942,7 @@ public final class HelpEngine: ObservableObject {
         let list = RelayProtocol.memberList(g)
         let t = now()
         let changed = list != publishedList
-        if list == refusedList { return }
+        if list == refusedList, g.relayPass == refusedPass { return }
         let due = changed ? t.timeIntervalSince(lastPublishTry ?? .distantPast) >= publishBackoff || lastTriedList != list
             : t.timeIntervalSince(publishedAt ?? .distantPast) > 86_400
         guard due else { return }
@@ -957,7 +959,7 @@ public final class HelpEngine: ObservableObject {
                 self.publishedList = list; self.publishedAt = self.now(); self.publishBackoff = 60
                 self.publishMembersIfDue()
             case .refused:
-                self.refusedList = list
+                self.refusedList = list; self.refusedPass = g.relayPass
             case .unreachable, .notYet:
                 self.publishBackoff = min(self.publishBackoff * 2, 1800)
             }
@@ -1441,12 +1443,14 @@ public final class HelpEngine: ObservableObject {
         updateGroup { $0.relayURL = trimmed.isEmpty ? nil : trimmed }
     }
 
-    /// Takes a pasted relay pass, if it reads as one for this group. Returns whether it did.
+    /// Takes a pasted relay pass, if it reads as one for this group. Returns whether it was kept:
+    /// not when it does not read as one, nor when it takes the settings past what can be sent to
+    /// everyone (`settingsProblem` says so).
     @discardableResult
     public func setRelayPass(_ token: String) -> Bool {
         guard let group, let pass = RelayPass(token), pass.isFor(group.secrets) else { return false }
         updateGroup { $0.relayPass = pass.token }
-        return true
+        return self.group?.relayPass == pass.token
     }
 
     // MARK: Profiles

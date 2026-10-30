@@ -155,10 +155,15 @@ final class RelayModel {
 
     func configure(group: GroupState?, identity: DeviceIdentity) { configured += 1; self.group = group; self.identity = identity }
 
+    /// Like a relay with REQUIRE_PASS set: nothing is taken from a group without a pass.
+    var requiresPass = false
+    static let needsPass = "The relay needs a pass for this group. A coordinator can add one under Group, Internet route."
+
     var publishes = 0
     func publishMembers() async -> PublishResult {
         guard isConfigured, let air, let group, let key else { return .unreachable }
         publishes += 1
+        if requiresPass, group.pass == nil { lastProblem = Self.needsPass; return .refused }
         let list = RelayProtocol.memberList(group)
         let status = air.relay.setMembers(signer: key, generation: list.generation, members: list.members.map { .init(key: $0.key, role: $0.role) },
                                           removed: list.removed, primary: list.primary, groupID: group.secrets.groupID)
@@ -168,6 +173,7 @@ final class RelayModel {
 
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String? {
         guard isConfigured, let air, let me = phone, let key else { return "No internet" }
+        if requiresPass, group?.pass == nil { return Self.needsPass }
         guard air.relay.isMember(key) else { return "Relay refused it (403)" }
         sent.append((frame, wake))
         sentVia.append(group?.relayURL)
@@ -1006,6 +1012,47 @@ final class RelayModel {
         let before = coordinator.relay.publishes
         for _ in 0..<60 { await advance(60) }
         XCTAssertLessThanOrEqual(coordinator.relay.publishes - before, 2, "a refusal is not retried every minute")
+    }
+
+    /// A list refused for want of a pass is tried again once the group has one, with nobody
+    /// joining or leaving: a new group under REQUIRE_PASS would otherwise never register.
+    func testAGroupRefusedForWantOfAPassRegistersOnceItHasOne() async {
+        for p in air.phones { p.relay.isConfigured = true; p.relay.requiresPass = true }
+        await relaySetUp()
+        let key = coordinator.relay.key!
+        XCTAssertFalse(air.relay.isMember(key), "turned away without a pass")
+        let before = coordinator.relay.publishes
+        for _ in 0..<10 { await advance(60) }
+        XCTAssertLessThanOrEqual(coordinator.relay.publishes - before, 2, "a refusal is not retried over and over")
+        let token = "1.\(RelayProtocol.id(of: coordinator.engine.group!.secrets.groupID)).1800000000.\(String(repeating: "B", count: 86))"
+        XCTAssertTrue(coordinator.engine.setRelayPass(token))
+        for _ in 0..<2 { await advance(60) }
+        XCTAssertTrue(air.relay.isMember(key), "the list goes again with the pass")
+        XCTAssertTrue(air.relay.isMember(caller.relay.key!))
+    }
+
+    /// Settings that cannot go to everyone are not kept (testSettingsTooBigToSendAreNotKept), so
+    /// a pass that takes them over the limit is not saved, and the coordinator is told so.
+    func testAPassThatMakesTheSettingsTooBigToSendIsNotSaved() {
+        let token = "1.\(RelayProtocol.id(of: coordinator.engine.group!.secrets.groupID)).1800000000.\(String(repeating: "B", count: 86))"
+        // As many profiles as still fit, in small steps, so the pass alone tips them over.
+        var g = coordinator.engine.group!
+        for i in 1...200 {
+            var bigger = g
+            var p = Profile(id: UInt8(i), name: "p\(i)")
+            p.okWords = UUID().uuidString
+            bigger.policy.profiles.append(p)
+            guard bigger.settingsFrame(as: 1, identity: coordinator.identity) != nil else { break }
+            g = bigger
+        }
+        var withPass = g
+        withPass.relayPass = token
+        XCTAssertNil(withPass.settingsFrame(as: 1, identity: coordinator.identity), "the pass takes the settings over the limit")
+        coordinator.engine.updateGroup { $0.policy = g.policy }
+        XCTAssertNil(coordinator.engine.settingsProblem)
+        XCTAssertFalse(coordinator.engine.setRelayPass(token), "not saved")
+        XCTAssertNil(coordinator.engine.group?.relayPass)
+        XCTAssertNotNil(coordinator.engine.settingsProblem, "and the coordinator is told why")
     }
 
     func testAnInviteeIsConfirmedWhenTheFirstCoordinatorListsIt() async {

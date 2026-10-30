@@ -431,7 +431,7 @@ Needs a relay of your own deployed with `REQUIRE_PASS` set to `1` and `ISSUER_KE
 4. On phone B, open Group, Internet route.
 5. The next day, press Help on phone B again.
 
-Pass: in step 2 the internet route says the relay needs a pass for this group and that a coordinator can add one under Group, Internet route; the mesh route is unaffected. In step 3 the pass is saved ("Saved. Members get the pass at once..."), the call goes over the internet route and the acknowledgement comes back. In step 4 phone B shows the pass is good until tomorrow's date, having had it from phone A without scanning anything. In step 5 the internet route says the group's relay pass has run out, and Internet route on both phones says when. Nothing ever says help is coming.
+Pass: in step 2 the internet route says the relay needs a pass for this group and that a coordinator can add one under Group, Internet route, and Group, Internet route on phone A says the same; the mesh route is unaffected. In step 3 the pass is saved ("Saved. Members get the pass at once..."), the call goes over the internet route and the acknowledgement comes back. In step 4 phone B shows the pass is good until tomorrow's date and the time it was issued, having had it from phone A without scanning anything. In step 5 the internet route says the group's relay pass has run out, and Internet route on both phones says when. Nothing ever says help is coming.
 
 
 ## Help&I firmware on the box
