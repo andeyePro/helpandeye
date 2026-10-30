@@ -537,9 +537,11 @@ Pass: phone A is told of the call (push 0xA3) and carries it on its own routes o
 1. With box A unprovisioned, press red.
 2. Send the group (0x71) and members (0x72) over the companion link, then query 0x70.
 3. Press red. Remove the responder from the group on the coordinator's phone, and wait for the repeat of the signed removal.
-4. Send forget (0x75) and press red.
+4. Send the responder's first name (0x76, one name, member number and "Pat"), power-cycle the box, press red and acknowledge on phone B.
+5. Send 0x76 with a total of 0, press red and acknowledge again.
+6. Send forget (0x75) and press red.
 
-Pass: step 1 shows "Not set up yet. Add this box to a group in the Help&I app." with the not-sent sound. Step 2 answers each command with OK and the info reply shows the unit, member and next request number; the box survives a power cycle still provisioned. In step 3 the call goes, and after the removal the responder's acknowledgement no longer counts (the box goes back to waiting). Step 4 is back to step 1.
+Pass: step 1 shows "Not set up yet. Add this box to a group in the Help&I app." with the not-sent sound. Step 2 answers each command with OK and the info reply shows the unit, member and next request number; the box survives a power cycle still provisioned. In step 3 the call goes, and after the removal the responder's acknowledgement no longer counts (the box goes back to waiting). In step 4 the info reply counts one name and the box says "Pat has seen your call." in letters the screen can show, with nothing but the unit number heard on air (check with a third board); in step 5 it is back to "A responder has seen your call.". Step 6 is back to step 1, with the info reply counting no names.
 
 ## 58. Sleeping and waking on battery
 

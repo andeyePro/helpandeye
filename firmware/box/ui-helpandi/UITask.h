@@ -55,6 +55,7 @@ private:
   void provisionIfReady();
   void listenOn(const uint8_t secret[16]);
   bool saveFile(const char* path, const uint8_t* data, size_t length);
+  void saveNames();
   void reply(uint8_t code);
   void applyRadio();
   void draw();
@@ -69,6 +70,8 @@ private:
   helpandi::GroupSettings _group{};
   helpandi::MemberList _members;
   helpandi::MemberList _building;
+  helpandi::NameList _names;
+  helpandi::NameList _buildingNames;
   bool _haveGroup = false, _haveMembers = false;
   // The monotonic clock carries on across deep sleep and a reset (section 10).
   uint64_t _monoOffset = 0;

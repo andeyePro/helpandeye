@@ -132,3 +132,80 @@ TEST(antennaGainsAreTheOnesThePowerCapUses) {
     CHECK(antennaGainDBi(Antenna::external3dBi) == 3.0);
     CHECK(antennaGainDBi(Antenna::external5dBi) == 5.0);
 }
+
+namespace {
+
+NameList sampleNames(size_t n) {
+    NameList l;
+    l.version = 7;
+    for (size_t i = 0; i < n; i++) {
+        l.names[i].member = uint16_t(i + 1);
+        int len = std::snprintf(reinterpret_cast<char*>(l.names[i].text), sizeof l.names[i].text, "Pat%zu", i + 1);
+        l.names[i].length = uint8_t(len);
+    }
+    l.count = n;
+    return l;
+}
+
+}  // namespace
+
+TEST(namesArriveInChunksOfEightAndReplaceTheListWhenWhole) {
+    NameList l = sampleNames(11), built = sampleNames(2);
+    uint8_t chunk[7 + kNamesPerChunk * (3 + kMaxNameBytes)];
+    bool complete = false;
+    size_t n = writeNamesChunk(l, 0, chunk, sizeof chunk);
+    CHECK(n == 7 + 8 * 7);  // Pat1 to Pat9 are four bytes, Pat10 and Pat11 five
+    CHECK(chunk[0] == 0x76 && chunk[1] == 7 && chunk[5] == 0 && chunk[6] == 11);
+    CHECK(chunk[7] == 1 && chunk[8] == 0 && chunk[9] == 4 && std::memcmp(chunk + 10, "Pat1", 4) == 0);
+    CHECK(parseNamesChunk(chunk, n, built, complete) && !complete);
+    CHECK(built.count == 8 && built.version == 7);
+    n = writeNamesChunk(l, 8, chunk, sizeof chunk);
+    CHECK(n == 7 + 7 + 8 + 8 && chunk[5] == 8);
+    CHECK(parseNamesChunk(chunk, n, built, complete) && complete);
+    CHECK(built.count == 11);
+    CHECK(std::strcmp(built.find(1), "Pat1") == 0 && std::strcmp(built.find(11), "Pat11") == 0);
+    CHECK(built.find(12) == nullptr);
+    CHECK(writeNamesChunk(l, 12, chunk, sizeof chunk) == 0);
+    CHECK(writeNamesChunk(l, 0, chunk, 60) == 0);
+}
+
+TEST(aTotalOfZeroClearsTheNames) {
+    NameList built = sampleNames(3);
+    const uint8_t clear[] = {0x76, 8, 0, 0, 0, 0, 0};
+    bool complete = false;
+    CHECK(parseNamesChunk(clear, sizeof clear, built, complete) && complete);
+    CHECK(built.count == 0 && built.find(1) == nullptr);
+}
+
+TEST(aNamesChunkOutOfOrderTooLongEmptyOrNotUTF8IsRefused) {
+    NameList l = sampleNames(9), built;
+    uint8_t chunk[7 + kNamesPerChunk * (3 + kMaxNameBytes)];
+    bool complete;
+    size_t n = writeNamesChunk(l, 8, chunk, sizeof chunk);
+    CHECK(!parseNamesChunk(chunk, n, built, complete));
+    n = writeNamesChunk(l, 0, chunk, sizeof chunk);
+    CHECK(parseNamesChunk(chunk, n, built, complete) && !complete);
+    n = writeNamesChunk(l, 8, chunk, sizeof chunk);
+    chunk[1] = 8;
+    CHECK(!parseNamesChunk(chunk, n, built, complete));
+    const uint8_t empty[] = {0x76, 7, 0, 0, 0, 0, 1, 1, 0, 0};
+    CHECK(!parseNamesChunk(empty, sizeof empty, built, complete));
+    const uint8_t cut[] = {0x76, 7, 0, 0, 0, 0, 1, 1, 0, 4, 'P', 'a', 't'};
+    CHECK(!parseNamesChunk(cut, sizeof cut, built, complete));
+    const uint8_t bad[] = {0x76, 7, 0, 0, 0, 0, 1, 1, 0, 2, 0xC3, 0x28};
+    CHECK(!parseNamesChunk(bad, sizeof bad, built, complete));
+    const uint8_t tooMany[] = {0x76, 7, 0, 0, 0, 0, 1, 1, 0, 1, 'P', 2, 0, 1, 'Q'};
+    CHECK(!parseNamesChunk(tooMany, sizeof tooMany, built, complete));
+    uint8_t longName[7 + 3 + 17] = {0x76, 7, 0, 0, 0, 0, 1, 1, 0, 17};
+    std::memset(longName + 10, 'a', 17);
+    CHECK(!parseNamesChunk(longName, sizeof longName, built, complete));
+}
+
+TEST(theScreenNamesTheResponderOnlyWhenItsFontCanShowTheName) {
+    char line[48];
+    CHECK(seenByWords("Pat", line, sizeof line) == 23 && std::strcmp(line, "Pat has seen your call.") == 0);
+    CHECK(seenByWords(nullptr, line, sizeof line) == 31 && std::strcmp(line, "A responder has seen your call.") == 0);
+    CHECK(seenByWords("Zo\xC3\xAB", line, sizeof line) == 31 && std::strcmp(line, "A responder has seen your call.") == 0);
+    CHECK(seenByWords("", line, sizeof line) == 31);
+    CHECK(seenByWords("Pat", line, 10) == 0);
+}

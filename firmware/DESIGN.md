@@ -205,10 +205,18 @@ What the phone gives the box, kept in its flash:
 What the box never gets: the internet group key (it has no internet route), any responder's or
 the responders' private key, and anything personal.
 
-**Names (pending Martin).** The box says "a responder has seen your call", never who. Designed
-for, not built: first names stored on the box, updated by the phone whenever it connects, behind
-flash encryption, so the box can say "Pat has seen your call". Until Martin decides, the wording
-stays "a responder" and no name goes to the box.
+**Names (Martin, 2026-10-30).** The box may hold responders' first names, so the screen can say
+"Pat has seen your call." instead of "A responder has seen your call.". They come from the phone
+as their own command, 0x76, not inside the member list (0x72): a name is optional where a key is
+not, so a phone that sends no names, or Martin deciding against them, leaves 0x72 and the box's
+wording exactly as today; names can be sent again without the keys; and 0x72's fixed 35-byte
+entries and four-a-chunk layout stay as the app side will build them. A name is 1 to 16 bytes of
+UTF-8, a first name only, never sent on air (`NameList` in `core/provision.hpp`). The box keeps
+them in NVS, not in the SPIFFS files the group and members use, because NVS can be encrypted
+under flash encryption and SPIFFS cannot (section 16). The screen names the first responder to
+acknowledge the call, when the box holds a name its font can show (printable ASCII; an accented
+name falls back to "A responder" rather than showing wrong letters); otherwise today's wording.
+Forget (0x75) clears the names with the rest.
 
 **The commands.** Help&I's companion commands sit where MeshCore's protocol has nothing: app to
 box at 0x70 to 0x75, box to app at 0xA0 to 0xA3 (`core/provision.hpp`). Integers are
@@ -217,16 +225,17 @@ little-endian; keys are raw bytes; the reply to a command is MeshCore's own `OK`
 
 | Byte 0 | Name | Body |
 |---|---|---|
-| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off), battery mV u16, hours left u16, antenna u8, power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`) |
+| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off; plus 4 when estimated from the battery, section 10), battery mV u16, hours left u16, antenna u8, power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`), names u8 (how many first names the box holds, section 6) |
 | 0x71 | set group | 94 bytes after the command byte: group ID (16), member u16, unit u32, flags u8 (bit 0 I'm OK closes the call, bit 1 the caller may close, bit 2 report power cuts), antenna u8 (0 the V4's whip, 1 a stub, 2 an external 3 dBi, 3 an external 5 dBi), responders' public key (32, all zero when the group has none), channel secret (16), old channel secret (16, all zero outside a changeover), old secret ends at u32, first coordinator u16 |
 | 0x72 | set members | version u32, index u8, total u8, then up to four of: member u16, role u8 (1 caller, 2 responder, 3 both, 4 coordinator), Ed25519 signing key (32). Index 0 starts a new list; the list replaces the old one when every position up to `total` has arrived. At most 32 members |
 | 0x73 | get calls | nothing. Replies 0xA1 per call: request u16, colour u8, pressed at u32, status u8 (0 sending, 1 waiting for a responder, 2 seen, 3 not sent, 4 closed), acknowledgements u8; then 0xA2 |
 | 0x74 | route result | request u16, sent u8 (1 the phone's routes took it, 0 none did) |
-| 0x75 | forget | nothing: the box leaves the group and clears its flash |
+| 0x75 | forget | nothing: the box leaves the group and clears its flash, names included |
+| 0x76 | set names | version u32, index u8, total u8, then up to eight of: member u16, length u8 (1 to 16), the first name in UTF-8. Chunked like 0x72: index 0 starts a new list, which replaces the old one when every position up to `total` has arrived; a total of 0 clears the names. At most 32 |
 | 0xA3 | frame (push) | a frame the box made (its call, its signed I'm OK or close, a sealed report), for the phone to carry on its own routes and to show. The phone answers a call with 0x74 |
 
 The box keeps the set-group and set-members bytes in flash as they came (`/hi_group`,
-`/hi_members` on SPIFFS) and its next request number in NVS, written before each use. It puts
+`/hi_members` on SPIFFS), the names as 0x76 chunks in NVS, and its next request number in NVS, written before each use. It puts
 the group's channel (and the old one during a changeover) into MeshCore's own channel table
 itself, at provisioning and at every start, since MeshCore decrypts group datagrams only for
 channels it knows: the phone need not set the channel for the box to hear acknowledgements. A phone
@@ -540,7 +549,7 @@ section 6.
 | `core/buttons.hpp` | Debouncing, press, long press, the countdown and stopping it | HelpCountdown.swift, the watch |
 | `core/seal.hpp` | SHA-256, HKDF, ChaCha20-Poly1305, the responders' key and nonce, the sealed frame | ForResponders.swift |
 | `core/power.hpp` | The ten-second mains rule, mains from the battery's trend without the wire, hours left, the six marks and the acknowledgement that silences them | decisions 3 and 4 |
-| `core/provision.hpp` | The Help&I companion commands and the flash layout (section 6) | |
+| `core/provision.hpp` | The Help&I companion commands, the names and what the screen says with one, and the flash layout (section 6) | |
 | `core/box.hpp` | The box: presses to calls, resends, acknowledgement checking, I'm OK and closes, removals, the changeover, the cold start and what survives a reset, when the box may sleep, the draw on battery, the power cap, reports, the screen and sounds | Engine.swift |
 
 Run the host tests from `firmware/`:
@@ -576,7 +585,7 @@ Ed25519 library (no signature vectors here: none could be made from a phone).
 
 ## 13. Test plan
 
-**Host tests (built, run, passing).** 119 tests in `firmware/test`: the frames byte for byte
+**Host tests (built, run, passing).** 123 tests in `firmware/test`: the frames byte for byte
 against the Swift layout, malformed and stray input, what may go on the group channel, the
 signature inputs, too small a buffer; the resend times, acknowledgement rules, removal, settling,
 I'm OK settling only earlier calls, which share each resend uses, and close repeats; airtime
@@ -591,7 +600,8 @@ the mains rule, mains from the battery's trend alone (charging, a full cell rest
 day, a cut from full and from half, the charger lifting the cell and holding one too full to
 charge, a box started on battery, a sleeping box's ten-minute readings, a copied monitor, and
 the wire overriding it all), the hours and the marks; the
-provisioning bytes; and the whole box against a
+provisioning bytes, the names in chunks, a cleared list, a malformed name and the screen's words
+with and without a name; and the whole box against a
 fake board with real keys (TweetNaCl, test only): a press, the resends, which acknowledgements
 count, a removal, I'm OK under both profiles, the cross and the phone's routes, the bands and the
 cold start, the power cap, a power-cut report opened as a responder's phone opens it, a
@@ -617,8 +627,9 @@ an earlier version of this file are there now.
    up with the flash-encryption release step (section 6).
 3. The box is its own group member with its own unit number.
 4. Reuse MeshCore's board identity key for Help&I signatures.
-5. **Names on the box: still open.** Designed for first names stored on the box, updated by the
-   phone when it connects, behind flash encryption; the wording stays "a responder" until then.
+5. **Names on the box: yes, behind a flag.** First names come from the phone as command 0x76,
+   kept in NVS, and the screen says "Pat has seen your call."; a phone that sends none leaves
+   today's wording (section 6). Martin may still say no: then the app simply never sends 0x76.
 6. A second red press while a call is open starts a new call, as the app does.
 7. The development layout with only PRG: a press starts a 60-second countdown, a second press
    stops it, as on the watch.

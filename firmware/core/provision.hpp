@@ -17,6 +17,7 @@ constexpr uint8_t kCmdSetMembers = 0x72;
 constexpr uint8_t kCmdGetCalls = 0x73;
 constexpr uint8_t kCmdRouteResult = 0x74;
 constexpr uint8_t kCmdForget = 0x75;
+constexpr uint8_t kCmdSetNames = 0x76;
 // Box to app.
 constexpr uint8_t kRespInfo = 0xA0;
 constexpr uint8_t kRespCall = 0xA1;
@@ -97,6 +98,39 @@ bool parseMembersChunk(const uint8_t* data, size_t length, MemberList& building,
 // Writes chunk `index` of the list (the members from index onwards, up to four), for the phone
 // side and for the tests.
 size_t writeMembersChunk(const MemberList& list, size_t index, uint8_t* out, size_t cap);
+
+// Responders' first names, so the screen can say who has seen a call (section 6; Martin,
+// 2026-10-30). Kept on the box only, never sent on air. A phone that sends none leaves the box
+// saying "a responder".
+constexpr size_t kMaxNameBytes = 16;
+constexpr size_t kNamesPerChunk = 8;
+
+struct Name {
+    uint16_t member;
+    uint8_t length;
+    uint8_t text[kMaxNameBytes + 1];
+};
+
+struct NameList {
+    Name names[kMaxMembers];
+    size_t count = 0;
+    uint32_t version = 0;
+
+    // The member's name, NUL-terminated, or null when none is held.
+    const char* find(uint16_t member) const;
+};
+
+// kCmdSetNames comes in chunks like the members: version u32, index u8 (the first name's
+// position), total u8, then up to eight of member u16, length u8 (1 to 16) and the UTF-8 name.
+// Index 0 starts a new list, which replaces the old one once every position up to `total` has
+// arrived; a total of 0 clears the names. Returns false for a malformed chunk.
+bool parseNamesChunk(const uint8_t* data, size_t length, NameList& building, bool& complete);
+size_t writeNamesChunk(const NameList& list, size_t index, uint8_t* out, size_t cap);
+
+// What the screen says once a responder has seen the call: "<name> has seen your call." when the
+// box holds a name the screen's font can show (printable ASCII), else "A responder has seen
+// your call.". Never that help is on its way (decision 7).
+size_t seenByWords(const char* name, char* out, size_t cap);
 
 struct RouteResult {
     uint16_t request;

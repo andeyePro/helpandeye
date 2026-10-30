@@ -19,6 +19,10 @@ namespace {
 constexpr const char* kGroupFile = "/hi_group";
 constexpr const char* kMembersFile = "/hi_members";
 constexpr const char* kNextRequestKey = "next";
+// The names as chunks, each after its length byte. In NVS, not SPIFFS: NVS can be encrypted
+// under flash encryption and SPIFFS cannot (DESIGN.md, section 16).
+constexpr const char* kNamesKey = "names";
+constexpr size_t kNamesBlobBytes = kMaxMembers / kNamesPerChunk * 8 + kMaxMembers * (3 + kMaxNameBytes);
 constexpr uint8_t kFlood = 0xFF;
 constexpr uint64_t kScreenOnMs = 120000;
 constexpr const char* kChannelName = "Help&I";
@@ -181,7 +185,30 @@ bool UITask::saveFile(const char* path, const uint8_t* data, size_t length) {
   return ok;
 }
 
+void UITask::saveNames() {
+  if (!_names.count) {
+    _nvs.remove(kNamesKey);
+    return;
+  }
+  uint8_t blob[kNamesBlobBytes];
+  size_t n = 0;
+  for (size_t i = 0; i < _names.count; i += kNamesPerChunk) {
+    size_t len = writeNamesChunk(_names, i, blob + n + 1, sizeof blob - n - 1);
+    blob[n] = uint8_t(len);
+    n += 1 + len;
+  }
+  _nvs.putBytes(kNamesKey, blob, n);
+}
+
 void UITask::loadProvisioning() {
+  uint8_t names[kNamesBlobBytes];
+  size_t total = _nvs.getBytes(kNamesKey, names, sizeof names);
+  NameList list;
+  bool whole = false;
+  for (size_t at = 0; at < total && at + 1 + names[at] <= total; at += 1 + names[at])
+    if (!parseNamesChunk(names + at + 1, names[at], list, whole)) break;
+  if (whole) _names = list;
+
   uint8_t buf[kSetGroupBytes];
   File g = SPIFFS.open(kGroupFile, "r");
   if (g) {
@@ -281,6 +308,7 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     memset(out + i, 0, kKeyBytes);
     if (the_mesh.self_id.writeTo(prv, sizeof prv) == PRV_KEY_SIZE) Curve25519::eval(out + i, prv, nullptr);
     i += kKeyBytes;
+    out[i++] = uint8_t(_names.count);
     _interfaceManager->writeFrame(out, i);
     return true;
   }
@@ -315,6 +343,19 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     reply(kRespOK);
     return true;
   }
+  case kCmdSetNames: {
+    bool complete = false;
+    if (!parseNamesChunk(frame, len, _buildingNames, complete)) {
+      reply(kErrorBadArgument);
+      return true;
+    }
+    if (complete) {
+      _names = _buildingNames;
+      saveNames();
+    }
+    reply(kRespOK);
+    return true;
+  }
   case kCmdGetCalls: {
     for (size_t i = 0; i < _engine.callCount(); i++) {
       const OutgoingCall& c = _engine.call(i);
@@ -344,6 +385,8 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
   case kCmdForget:
     SPIFFS.remove(kGroupFile);
     SPIFFS.remove(kMembersFile);
+    _nvs.remove(kNamesKey);
+    _names.count = 0;
     _haveGroup = _haveMembers = false;
     _engine.forget();
     reply(kRespOK);
@@ -539,8 +582,15 @@ void UITask::draw() {
     _display->printWordWrap(kNotSetUpWords, w);
   } else if (s.hasCall) {
     int textWidth = s.status == CallerStatus::notSent ? w - 30 : w;
+    const char* words = statusWords(s.status);
+    if (s.status == CallerStatus::seen) {
+      // The first responder to see it, by name when the box holds one (section 6).
+      const OutgoingCall& c = _engine.call(_engine.callCount() - 1);
+      seenByWords(_names.find(c.acknowledgedBy[0]), line, sizeof line);
+      words = line;
+    }
     _display->setCursor(0, 14);
-    _display->printWordWrap(statusWords(s.status), textWidth);
+    _display->printWordWrap(words, textWidth);
     if (s.status == CallerStatus::notSent) drawCross(w - 26, 18, 24);
   } else {
     _display->setCursor(0, 14);

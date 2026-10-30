@@ -1,6 +1,9 @@
 #include "provision.hpp"
 
+#include <cstdio>
 #include <cstring>
+
+#include "frame.hpp"
 
 namespace helpandi {
 
@@ -132,6 +135,71 @@ size_t writeMembersChunk(const MemberList& list, size_t index, uint8_t* out, siz
         std::memcpy(p + 3, m.signingKey, kKeyBytes);
     }
     return need;
+}
+
+const char* NameList::find(uint16_t member) const {
+    for (size_t i = 0; i < count; i++)
+        if (names[i].member == member) return reinterpret_cast<const char*>(names[i].text);
+    return nullptr;
+}
+
+bool parseNamesChunk(const uint8_t* d, size_t length, NameList& building, bool& complete) {
+    complete = false;
+    if (length < 7 || d[0] != kCmdSetNames) return false;
+    uint32_t version = readU32(d + 1);
+    size_t index = d[5], total = d[6];
+    if (total > kMaxMembers || index > total) return false;
+    if (index == 0) {
+        building.count = 0;
+        building.version = version;
+    } else if (index != building.count || version != building.version) {
+        return false;
+    }
+    size_t at = 7, n = 0;
+    while (at < length) {
+        if (n == kNamesPerChunk || index + n == total || at + 3 > length) return false;
+        size_t len = d[at + 2];
+        if (len < 1 || len > kMaxNameBytes || at + 3 + len > length || !isValidUTF8(d + at + 3, len)) return false;
+        Name& out = building.names[building.count + n];
+        out.member = readU16(d + at);
+        out.length = uint8_t(len);
+        std::memcpy(out.text, d + at + 3, len);
+        out.text[len] = 0;
+        at += 3 + len;
+        n++;
+    }
+    building.count += n;
+    complete = building.count == total;
+    return true;
+}
+
+size_t writeNamesChunk(const NameList& list, size_t index, uint8_t* out, size_t cap) {
+    if (index > list.count || cap < 7) return 0;
+    size_t n = list.count - index < kNamesPerChunk ? list.count - index : kNamesPerChunk;
+    size_t need = 7;
+    for (size_t i = 0; i < n; i++) need += 3 + list.names[index + i].length;
+    if (cap < need) return 0;
+    out[0] = kCmdSetNames;
+    writeU32(out + 1, list.version);
+    out[5] = uint8_t(index);
+    out[6] = uint8_t(list.count);
+    uint8_t* p = out + 7;
+    for (size_t i = 0; i < n; i++) {
+        const Name& name = list.names[index + i];
+        writeU16(p, name.member);
+        p[2] = name.length;
+        std::memcpy(p + 3, name.text, name.length);
+        p += 3 + name.length;
+    }
+    return need;
+}
+
+size_t seenByWords(const char* name, char* out, size_t cap) {
+    bool printable = name && *name;
+    for (const char* c = name; printable && *c; c++)
+        if (*c < 0x20 || *c > 0x7E) printable = false;
+    int n = std::snprintf(out, cap, "%s has seen your call.", printable ? name : "A responder");
+    return n < 0 || size_t(n) >= cap ? 0 : size_t(n);
 }
 
 bool parseRouteResult(const uint8_t* d, size_t length, RouteResult& out) {
