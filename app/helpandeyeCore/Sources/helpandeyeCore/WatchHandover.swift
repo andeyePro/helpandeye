@@ -48,15 +48,18 @@ public struct WatchHandover: Codable, Equatable, Sendable {
 
     init(group: GroupState, me: UInt16, keys: Data) { self.group = group; self.me = me; self.keys = keys }
 
+    /// A phone updated before its watch may hand over a choice or a setting the watch does not
+    /// know. What cannot be read is left out, never the whole handover, so the watch keeps
+    /// following its phone until it is updated too.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         group = try c.decode(GroupState.self, forKey: .group)
         me = try c.decode(UInt16.self, forKey: .me)
         keys = try c.decode(Data.self, forKey: .keys)
-        others = try c.decodeIfPresent([Part].self, forKey: .others) ?? []
-        own = try c.decodeIfPresent(Profile.self, forKey: .own)
-        ownChosen = try c.decodeIfPresent(Set<Profile.Setting>.self, forKey: .ownChosen) ?? []
-        watchCallsAfter = try c.decodeIfPresent(UInt16.self, forKey: .watchCallsAfter) ?? 0
+        others = c.values(.others)
+        own = (try? c.decodeIfPresent(Profile.self, forKey: .own)) ?? nil
+        ownChosen = Set(((try? c.decodeIfPresent([String].self, forKey: .ownChosen)) ?? nil)?.compactMap(Profile.Setting.init) ?? [])
+        watchCallsAfter = try c.value(.watchCallsAfter, or: 0)
     }
 
     public var identity: DeviceIdentity? { try? DeviceIdentity(rawRepresentation: keys) }

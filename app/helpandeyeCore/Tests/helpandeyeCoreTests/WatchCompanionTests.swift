@@ -150,6 +150,91 @@ import XCTest
         XCTAssertEqual(old.each.count, 1)
     }
 
+    /// Watch review: the group goes to the watch whole, so what it needs to act for the phone goes
+    /// with it: the relay pass (sent with every request, so a relay that requires one takes the
+    /// watch's call) and the settings' version and signer.
+    func testAHandoverCarriesThePassAndTheSettingsSigner() async throws {
+        let token = "1.\(RelayProtocol.id(of: coordinator.engine.group!.secrets.groupID)).1800000000.\(String(repeating: "B", count: 86))"
+        XCTAssertTrue(coordinator.engine.setRelayPass(token))
+        await air.run()
+        let s = caller.engine.saved!
+        XCTAssertEqual(s.group.relayPass, token, "the phone heard the pass")
+        let back = try JSONDecoder().decode(WatchHandover.self, from: JSONEncoder().encode(WatchHandover(saved: s, identity: caller.identity)))
+        XCTAssertEqual(back.group.pass?.token, token)
+        XCTAssertEqual(back.group.settingsVersion, s.group.settingsVersion)
+        XCTAssertEqual(back.group.settingsSigner, coordinator.engine.saved!.me)
+        for p in air.phones { p.relay.requiresPass = true }
+        XCTAssertTrue(watch.engine.take(back))
+        watch.engine.press(.red)
+        await air.run()
+        XCTAssertEqual(watch.request?.routes[.internet], .sent, "the watch sends the group's pass")
+    }
+
+    /// Watch review: told through the handover when its keys stop, a watch out of reach shows the
+    /// cross from that day, as the phone does, and works again once the phone has the new keys.
+    func testTheWatchIsToldWhenItsKeysStopAndShowsTheCrossAfter() async {
+        coordinator.engine.updateGroup { $0.remove(self.responder.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        XCTAssertNotNil(caller.engine.keysEndAt)
+        XCTAssertTrue(watch.engine.take(WatchHandover(saved: caller.engine.saved!, identity: caller.identity)))
+        XCTAssertEqual(watch.engine.keysEndAt, caller.engine.keysEndAt)
+        XCTAssertFalse(watch.engine.keysExpired)
+        await advance(GroupState.changeoverPeriod + 60)
+        XCTAssertTrue(watch.engine.keysExpired)
+        watch.engine.press(.red)
+        await air.run()
+        XCTAssertEqual(watch.request?.status, .notSent)
+        XCTAssertEqual(watch.request?.routes[.internet], .failed(HelpEngine.keysExpiredReason))
+        let g = coordinator.engine.group!
+        let update = try! Joining.update(g, for: g.member(caller.engine.saved!.me)!, coordinator: coordinator.identity)
+        caller.engine.applyKeyUpdate(try! Joining.openUpdate(update, current: caller.engine.group!, me: caller.identity))
+        XCTAssertTrue(watch.engine.take(WatchHandover(saved: caller.engine.saved!, identity: caller.identity)))
+        XCTAssertNil(watch.engine.keysEndAt)
+        XCTAssertTrue(watch.engine.availableRoutes.contains(.internet))
+    }
+
+    /// Watch review: a phone updated before its watch may hand over a choice, a setting or a group
+    /// the watch cannot read. That part is left out; the rest still comes, so the watch keeps
+    /// following its phone.
+    func testAHandoverFromANewerPhoneStillOpens() throws {
+        let h = WatchHandover(saved: responder.engine.saved!, identity: responder.identity, others: [coordinator.engine.saved!])
+        var plain = try JSONSerialization.jsonObject(with: JSONEncoder().encode(h)) as! [String: Any]
+        plain["ownChosen"] = ["sounds", "aSettingToCome"]
+        plain["own"] = ["id": 0, "name": "Mine", "face": "aFaceToCome"]
+        plain["others"] = (plain["others"] as! [[String: Any]]) + [["group": ["name": "unreadable"], "me": 1]]
+        let back = try JSONDecoder().decode(WatchHandover.self, from: JSONSerialization.data(withJSONObject: plain))
+        XCTAssertEqual(back.ownChosen, [.sounds])
+        XCTAssertEqual(back.own?.name, "Mine")
+        XCTAssertEqual(back.own?.face, .wordsAndSymbol, "an unknown face falls back")
+        XCTAssertEqual(back.others.map(\.group.name), [coordinator.engine.group!.name])
+    }
+
+    /// Watch review: a responder's phone that acknowledged, or heard an acknowledgement, over the
+    /// radio alone gives its watch the signed acknowledgement it holds (in the application
+    /// context), so the watch stops alerting at once instead of buzzing for a call already in hand.
+    func testAnAcknowledgementThePhoneHoldsSettlesTheWatchToo() async {
+        let rw = Phone(air: air, clock: clock, watchOf: responder)
+        rw.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity))
+        rw.mesh.isReady = false; rw.relay.isConfigured = true
+        caller.engine.press(.red)
+        await air.run()
+        let key = IncomingRequest.Key(unit: caller.request!.unit, request: caller.request!.number)
+        XCTAssertNotNil(rw.alerts.scheduled[key])
+        responder.relay.isConfigured = false
+        responder.engine.acknowledge(key)
+        await air.run()
+        XCTAssertNotNil(rw.alerts.scheduled[key], "over the radio alone, the watch cannot hear it")
+        let ack = responder.engine.activity.inbox.requests[key]!.acks[responder.engine.saved!.me]!
+        let forged = HelpFrame.signedAck(unit: key.unit, request: key.request, responder: responder.engine.saved!.me, at: clock.now,
+                                         identity: DeviceIdentity(), group: caller.engine.group!.secrets.groupID)
+        rw.engine.receive(forged, via: .internet)
+        XCTAssertEqual(rw.engine.activity.inbox.requests[key]?.isOpen, true, "only a signature the watch can check counts")
+        rw.engine.receive(ack, via: .internet)
+        XCTAssertEqual(rw.engine.activity.inbox.requests[key]?.isOpen, false)
+        XCTAssertNil(rw.alerts.scheduled[key])
+        XCTAssertTrue(rw.alerts.cancelled.contains(key))
+    }
+
     func testAWatchAcknowledgementGoesOnlyToAGroupItCanBeSureOf() {
         XCTAssertEqual(AckRouting.group(named: "gB", holding: ["gA", "gB"]), "gB")
         XCTAssertEqual(AckRouting.group(named: nil, holding: ["gA"]), "gA", "an older watch's ack, one group holds that call")
