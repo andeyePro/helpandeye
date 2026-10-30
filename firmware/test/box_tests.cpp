@@ -527,6 +527,29 @@ TEST(aCoordinatorsSignedCloseClosesTheCall) {
     CHECK(w.port.sent.size() == 1);
 }
 
+TEST(aCoordinatorCannotSpeakForTheCaller) {
+    // Engine.swift takes callerOK and closedByCaller only from the member whose unit it is, and a
+    // coordinator's close only with consent or a reason.
+    World w;
+    w.box.press(Colour::red, 0, 1000, false);
+    uint8_t inner[16];
+    CallStateFrame byCaller{70004, 1, CallState::closedByCaller, 1100, 0, {}};
+    size_t n = encode(byCaller, inner, sizeof inner);
+    auto fake = w.signedBy(w.coordinator, 1, inner, n);
+    w.box.heard(fake.data(), fake.size());
+    CHECK(w.box.screen().status == CallerStatus::waitingForResponder && !w.box.call(0).settled);
+    CallStateFrame ok{70004, 1, CallState::callerOK, 1100, 0, {}};
+    n = encode(ok, inner, sizeof inner);
+    auto fakeOK = w.signedBy(w.coordinator, 1, inner, n);
+    w.box.heard(fakeOK.data(), fakeOK.size());
+    CHECK(!w.box.call(0).settled);
+    CallStateFrame consent{70004, 1, CallState::closedWithConsent, 1100, 0, {}};
+    n = encode(consent, inner, sizeof inner);
+    auto real = w.signedBy(w.coordinator, 1, inner, n);
+    w.box.heard(real.data(), real.size());
+    CHECK(w.box.screen().status == CallerStatus::closed && w.box.call(0).settledBy == 1);
+}
+
 TEST(duringAChangeoverEveryFrameGoesOnBothChannels) {
     World w;
     for (int i = 0; i < 16; i++) w.group.oldChannelSecret[i] = uint8_t(0x60 + i);

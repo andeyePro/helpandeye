@@ -245,7 +245,10 @@ void BoxEngine::onSigned(const SignedFrame& s) {
             });
         return;
     }
-    if (inner.kind == FrameKind::callState && signer->role == Role::coordinator && inner.callState.unit == group_.unit) {
+    // A coordinator closes with the caller's consent or a reason (decision 6); the caller's own
+    // states come only from the caller's key, which is this box's.
+    if (inner.kind == FrameKind::callState && signer->role == Role::coordinator && inner.callState.unit == group_.unit &&
+        (inner.callState.state == CallState::closedWithConsent || inner.callState.state == CallState::closedWithReason)) {
         for (size_t i = 0; i < callCount_; i++) {
             OutgoingCall& c = slots_[i].call;
             if (c.number == inner.callState.request) c.settle(inner.callState.state, s.signer, inner.callState.at);
