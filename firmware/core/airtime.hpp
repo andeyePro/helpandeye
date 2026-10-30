@@ -67,6 +67,10 @@ public:
 
     explicit AirtimeBudget(double dutyCycle) : dutyCycle_(dutyCycle > 0 ? dutyCycle : 0) {}
 
+    // Another sub-band's limit for the same record. Time used in the other sub-band still counts,
+    // as Airtime.swift's moved(to:), so switching back and forth never gives a fresh allowance.
+    void setDutyCycle(double dutyCycle) { dutyCycle_ = dutyCycle > 0 ? dutyCycle : 0; }
+
     uint64_t usedMs(uint64_t nowMs) const;
 
     // Calls may use up to 90% of the legal allowance, leaving a margin for what MeshCore sends

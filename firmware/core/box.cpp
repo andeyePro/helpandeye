@@ -52,9 +52,8 @@ void BoxEngine::forget() {
 }
 
 void BoxEngine::setRadio(const RadioSettings& radio) {
-    const Band* was = radio_.band();
     radio_ = radio;
-    if (radio_.band() != was) budget_ = AirtimeBudget(radio_.band() ? radio_.band()->dutyCycle : 0);
+    budget_.setDutyCycle(radio_.band() ? radio_.band()->dutyCycle : 0);
 }
 
 void BoxEngine::coldStart(uint64_t nowMs) {

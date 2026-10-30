@@ -390,6 +390,26 @@ TEST(nothingIsSentOutsideTheUKBandsAndAColdStartKeepsRoomForCalls) {
     CHECK(w.port.sent.size() > 4);  // an hour on, the room is back
 }
 
+TEST(airtimeUsedInOneBandStillCountsInTheOther) {
+    // A frequency change from the app or the console must not hand the box a fresh hour: what
+    // went on air in the 10% band still counts against the 1% band's 36 s (32.4 s for calls).
+    World w;
+    w.port.airtime = 30000;
+    w.box.press(Colour::red, 0, 1000, false);
+    w.box.press(Colour::red, 1000, 1001, false);
+    CHECK(w.port.sent.size() == 2);
+    w.box.setRadio(RadioSettings(868.3, 62.5, 8, 5));
+    w.box.press(Colour::red, 2000, 1002, false);
+    CHECK(w.port.sent.size() == 2 && w.box.screen().status == CallerStatus::notSent);
+    w.box.setRadio(kUK);
+    w.box.setRadio(RadioSettings(868.3, 62.5, 8, 5));
+    w.box.press(Colour::red, 3000, 1003, false);
+    CHECK(w.port.sent.size() == 2);
+    w.box.setRadio(kUK);
+    w.box.tick(3700000, 4700);
+    CHECK(w.port.sent.size() == 6);  // an hour on, the four calls go out again
+}
+
 TEST(thePowerCapFollowsTheBandAndTheAntenna) {
     World w;
     int setting = 0;
