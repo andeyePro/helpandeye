@@ -442,6 +442,44 @@ test("with REQUIRE_PASS on, a group without a valid pass is turned away before a
   const read = await w.fetch(await owner.request("GET", `/g/${id}/messages?after=-5`, "", { headers: { "X-HelpA-Pass": pass } }));
   assert.equal(read.status, 200);
   assert.equal((await w.fetch(await owner.request("GET", `/g/${id}/messages?after=-5`, ""))).status, 402, "every request needs it");
+  assert.equal((await w.fetch(await owner.request("POST", `/g/${id}/messages`, JSON.stringify({ sealed: "x", wake: "call" })))).status, 402, "a call's post too");
+  assert.equal((await w.fetch(await owner.request("PUT", `/g/${id}/push`, JSON.stringify({ token: "a".repeat(64) })))).status, 402, "and a push token");
+  await w.settle();
+  assert.deepEqual(w.reached, { groups: 2, meter: 2 });
+});
+
+test("a forged pass is counted by address like a bad signature; a missing or expired one is not", async () => {
+  const { pair, ISSUER_KEY } = await passIssuer();
+  const ip = limiter(new Set(["203.0.113.9"]));
+  const w = worker({ REQUIRE_PASS: "1", ISSUER_KEY, IP_LIMIT: ip });
+  const owner = await phone();
+  const id = await groupId(owner);
+  const path = `/g/${id}/messages?after=-5`;
+  const get = async (pass, from) => {
+    const headers = { "CF-Connecting-IP": from, ...(pass === undefined ? {} : { "X-HelpA-Pass": pass }) };
+    const r = await w.fetch(await owner.request("GET", path, "", { headers }));
+    return [r.status, (await r.json()).error];
+  };
+  const forged = await issue(id, Math.floor(Date.now() / 1000) + 86400, (await passIssuer()).pair.privateKey);
+  assert.deepEqual(await get(forged, "203.0.113.9"), [429, "too many requests"], "a forged pass from a busy address");
+  assert.deepEqual(await get(forged, "203.0.113.10"), [402, "bad pass"]);
+  assert.deepEqual(await get(undefined, "203.0.113.9"), [402, "pass required"], "costs no signature check, so is not counted");
+  assert.deepEqual(await get(await issue(id, 1, pair.privateKey), "203.0.113.9"), [402, "pass expired"]);
+  assert.deepEqual(ip.asked, ["203.0.113.9", "203.0.113.10"]);
+  assert.equal(w.reached.groups, 0);
+});
+
+test("with REQUIRE_PASS on and an issuer key that is not one, nothing is let in and nobody is told to get a pass", async () => {
+  const w = worker({ REQUIRE_PASS: "1", ISSUER_KEY: "not-a-key" });
+  const owner = await phone();
+  const id = await groupId(owner);
+  const r = await w.fetch(await owner.request("GET", `/g/${id}/messages?after=-5`, ""));
+  assert.deepEqual([r.status, (await r.json()).error], [500, "bad issuer key"]);
+  const { pair } = await passIssuer();
+  const withPass = await w.fetch(await owner.request("GET", `/g/${id}/messages?after=-5`, "", { headers: { "X-HelpA-Pass": await issue(id, Math.floor(Date.now() / 1000) + 60, pair.privateKey) } }));
+  assert.equal(withPass.status, 500);
+  await w.settle();
+  assert.deepEqual(w.reached, { groups: 0, meter: 0 });
 });
 
 test("with REQUIRE_PASS off, or not set, no pass is needed and one sent is ignored", async () => {

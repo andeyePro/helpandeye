@@ -35,16 +35,18 @@ export function requiresPass(env) {
 /// Refuses, with 402, a request for `groupId` that does not carry a pass for it, signed by the
 /// issuer whose public key is `issuerKeyB64`, and not yet expired at `now`.
 export async function checkPass(pass, groupId, issuerKeyB64, now = Date.now()) {
-  if (!pass) throw new RelayError(402, "pass required");
-  const p = parse(pass);
-  if (!p) throw new RelayError(402, "bad pass");
-  if (p.groupId !== groupId) throw new RelayError(402, "pass is for another group");
-  if (p.expiry <= now) throw new RelayError(402, "pass expired");
   // Under a new issuer key, passes checked under the old one count for nothing.
   if (issuer.b64 !== issuerKeyB64) {
     checked.clear();
     issuer = { b64: issuerKeyB64, key: await importIssuer(issuerKeyB64) };
   }
+  // A relay whose issuer key is not one is broken, not unpaid: nobody is told to get a pass.
+  if (issuer.key === null) throw new RelayError(500, "bad issuer key");
+  if (!pass) throw new RelayError(402, "pass required");
+  const p = parse(pass);
+  if (!p) throw new RelayError(402, "bad pass");
+  if (p.groupId !== groupId) throw new RelayError(402, "pass is for another group");
+  if (p.expiry <= now) throw new RelayError(402, "pass expired");
   if (!checked.has(pass)) {
     if (!(await verify(p))) throw new RelayError(402, "bad pass");
     if (checked.size >= CHECKED_MAX) checked.clear();
@@ -62,7 +64,7 @@ async function importIssuer(b64) {
 
 async function verify(p) {
   try {
-    return issuer.key !== null && await crypto.subtle.verify({ name: "Ed25519" }, issuer.key, fromB64url(p.signature), signingInput(p.groupId, p.expiry / 1000));
+    return await crypto.subtle.verify({ name: "Ed25519" }, issuer.key, fromB64url(p.signature), signingInput(p.groupId, p.expiry / 1000));
   } catch {
     return false;
   }

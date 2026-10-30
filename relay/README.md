@@ -29,7 +29,8 @@ in seconds since 1970, and an Ed25519 signature in URL-safe base64 over
 `HELPA-PASS-1\n<group ID>\n<expiry>` by Help&I's issuer key, whose public key the Worker reads
 from the `ISSUER_KEY` var. The relay keeps nothing about passes: it checks the signature once per
 pass it sees (cached in memory, still checked against the clock and the group each time), so a
-group's phones polling cost it nothing more. How a group came by its pass (bought, or given) is no
+group's phones polling cost it nothing more. A forged pass is counted against its address like a
+bad signature; a missing or expired one is not, so a group without a pass always hears why. How a group came by its pass (bought, or given) is no
 concern of the relay: the app holds it as a group setting, shared with every member like the
 relay address, and sends it with each request.
 
@@ -42,8 +43,9 @@ node pass.mjs issue <group ID> <days> prints a pass for the group, good for that
 node pass.mjs show <pass>             prints the group and expiry a pass names
 ```
 
-The key pair is saved to `~/.helpandeye/relay-issuer.json` (or the file `HELPA_ISSUER_KEY`
+The key pair is saved to `~/.helpandeye/relay-issuer.json` (or the file `HELPA_ISSUER_KEY_FILE`
 names), readable by its owner only and never in a repository; whoever holds it can issue passes.
+The key itself is never read from the environment or the command line.
 A coordinator finds the group's ID in the app under Group, Internet route, and pastes the pass
 there; the app shows until when it is good.
 
@@ -162,7 +164,8 @@ Push notifications stay off until these secrets are set (`npx wrangler secret pu
 `APNS_TEAM_ID` and `APNS_TOPIC` (`com.andeye.help`).
 
 To require passes, set `REQUIRE_PASS` to `"1"` and `ISSUER_KEY` to the issuer's public key in
-`wrangler.jsonc` (`vars`) and deploy again. With `REQUIRE_PASS` set and no `ISSUER_KEY`, every
-request is refused with 500 rather than let in.
+`wrangler.jsonc` (`vars`) and deploy again. With `REQUIRE_PASS` set and no `ISSUER_KEY`, or one
+that is not an Ed25519 public key, every request is refused with 500 rather than let in, and
+nobody is told to get a pass for a relay that is broken.
 
 Then, in the app, open Group, Internet route, and enter the Worker's `https://` address.

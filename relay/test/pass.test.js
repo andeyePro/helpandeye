@@ -60,7 +60,7 @@ test("the issuer tool makes a key pair once and its passes check with the public
   const pub = await keygen(file);
   assert.equal(await publicKey(file), pub);
   assert.equal((await stat(file)).mode & 0o777, 0o600);
-  await assert.rejects(keygen(file), "the key pair is made once");
+  await assert.rejects(keygen(file), /made once/, "the key pair is made once, and the refusal says so plainly");
   assert.equal(await publicKey(file), pub, "a second keygen changed nothing");
   assert.equal(JSON.parse(await readFile(file, "utf8")).public, pub);
   const now = Date.UTC(2026, 10, 1);

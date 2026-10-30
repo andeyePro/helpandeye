@@ -33,6 +33,7 @@ export default {
       if (Number(request.headers.get("Content-Length")) > limit) throw new RelayError(413, "too large");
       const body = await readBody(request, limit);
       const key = request.headers.get("X-HelpA-Key") ?? "";
+      const address = request.headers.get("CF-Connecting-IP") ?? "";
       try {
         await authenticate({
           method: request.method,
@@ -45,14 +46,22 @@ export default {
       } catch (e) {
         // Only failures are counted by address, so phones sharing one (a care home's Wi-Fi, a
         // carrier's shared IPv4) never hold each other back.
-        if (!(await allowed(env.IP_LIMIT, request.headers.get("CF-Connecting-IP") ?? ""))) throw new RelayError(429, "too many requests");
+        if (!(await allowed(env.IP_LIMIT, address))) throw new RelayError(429, "too many requests");
         throw e;
       }
       // With REQUIRE_PASS set, the group must hold Help&I's pass for this relay (pass.js). Checked
       // here, with nothing stored, so a group without one costs no Durable Object request.
       if (requiresPass(env)) {
         if (!env.ISSUER_KEY) throw new RelayError(500, "issuer key not set");
-        await checkPass(request.headers.get(PASS_HEADER), m[1], env.ISSUER_KEY);
+        try {
+          await checkPass(request.headers.get(PASS_HEADER), m[1], env.ISSUER_KEY);
+        } catch (e) {
+          // A forged pass costs a signature check, so it is counted by address like a bad
+          // signature. A missing or expired one costs nothing and is not, so a group without a
+          // pass always hears why.
+          if (e.message === "bad pass" && !(await allowed(env.IP_LIMIT, address))) throw new RelayError(429, "too many requests");
+          throw e;
+        }
       }
       // A post that wakes others for a call is held back only by its group's limits for each phone.
       let call = false;

@@ -7,9 +7,10 @@
 //   node pass.mjs show <pass>          prints the group and expiry a pass names
 //
 // The key pair lives in one file outside any repository, ~/.helpandeye/relay-issuer.json unless
-// HELPA_ISSUER_KEY names another, readable by its owner only. Whoever holds it can issue passes,
-// so keep it as you would a password. The group ID is shown in the app under Group, Internet
-// route.
+// HELPA_ISSUER_KEY_FILE names another, readable by its owner only. Whoever holds it can issue
+// passes, so keep it as you would a password: the key itself is never taken from the environment
+// or the command line, where a shell's history would keep it. The group ID is shown in the app
+// under Group, Internet route.
 
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -28,7 +29,12 @@ export async function keygen(file) {
     private: toB64url(await crypto.subtle.exportKey("pkcs8", pair.privateKey)),
   };
   await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-  await writeFile(file, JSON.stringify(record, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+  try {
+    await writeFile(file, JSON.stringify(record, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+  } catch (e) {
+    if (e.code === "EEXIST") throw new Error(`${file} exists already: the issuer key is made once. Move it away to make another.`);
+    throw e;
+  }
   await chmod(file, 0o600);
   return record.public;
 }
@@ -52,7 +58,7 @@ async function load(file) {
 }
 
 async function main(argv) {
-  const file = process.env.HELPA_ISSUER_KEY || DEFAULT_KEY_FILE;
+  const file = process.env.HELPA_ISSUER_KEY_FILE || DEFAULT_KEY_FILE;
   const [command, ...args] = argv;
   switch (command) {
     case "keygen":
