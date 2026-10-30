@@ -7,7 +7,10 @@ namespace helpandi {
 namespace {
 
 constexpr uint8_t kCallHeader = kFormatVersion << 4 | 1;
+constexpr uint8_t kFollowUpHeader = kFormatVersion << 4 | 2;
 constexpr uint8_t kAckHeader = kFormatVersion << 4 | 3;
+constexpr uint8_t kNoteHeader = kFormatVersion << 4 | 6;
+constexpr uint8_t kMemberRemovedHeader = kFormatVersion << 4 | 12;
 constexpr uint8_t kSignedHeader = kFormatVersion << 4 | 10;
 // The first 16 kinds used the low nibble up, so later kinds have whole header bytes.
 constexpr uint8_t kSettingsHeader = 0x21;
@@ -76,6 +79,7 @@ private:
 };
 
 bool validColour(uint8_t c) { return c >= 1 && c <= 3; }
+bool validCategory(uint8_t c) { return c <= 6 || c == 99; }
 bool validState(uint8_t s) { return s >= 1 && s <= 4; }
 
 // Swift's String(data:encoding:) accepts a NUL inside text, so this does too.
@@ -117,6 +121,37 @@ size_t encode(const CallFrame& f, uint8_t* out, size_t cap) {
     w.u16(f.request);
     w.u8(uint8_t(f.colour));
     w.u32(f.sentAt);
+    return w.length();
+}
+
+size_t encode(const FollowUpFrame& f, uint8_t* out, size_t cap) {
+    if (!validCategory(uint8_t(f.category))) return 0;
+    Writer w(out, cap, kFollowUpBytes);
+    w.u8(kFollowUpHeader);
+    w.u32(f.unit);
+    w.u16(f.request);
+    w.u8(f.part);
+    w.u8(uint8_t(f.category));
+    return w.length();
+}
+
+size_t encode(const NoteFrame& f, uint8_t* out, size_t cap) {
+    if (f.length > kMaxNoteBytes || !isValidUTF8(f.text, f.length)) return 0;
+    Writer w(out, cap, 9 + size_t(f.length));
+    w.u8(kNoteHeader);
+    w.u32(f.unit);
+    w.u16(f.request);
+    w.u8(f.part);
+    w.u8(f.length);
+    w.bytes(f.text, f.length);
+    return w.length();
+}
+
+size_t encode(const MemberRemovedFrame& f, uint8_t* out, size_t cap) {
+    Writer w(out, cap, 7);
+    w.u8(kMemberRemovedHeader);
+    w.u16(f.member);
+    w.u32(f.version);
     return w.length();
 }
 
@@ -191,6 +226,30 @@ Frame decode(const uint8_t* data, size_t length) {
         f.kind = FrameKind::call;
         return f;
     }
+    case kFollowUpHeader: {
+        FollowUpFrame& u = f.followUp;
+        uint8_t category;
+        if (!r.u32(u.unit) || !r.u16(u.request) || !r.u8(u.part) || !r.u8(category) || !validCategory(category) ||
+            !r.atEnd())
+            return f;
+        u.category = Category(category);
+        f.kind = FrameKind::followUp;
+        return f;
+    }
+    case kNoteHeader: {
+        NoteFrame& n = f.note;
+        if (!r.u32(n.unit) || !r.u16(n.request) || !r.u8(n.part) || !r.u8(n.length) || n.length > kMaxNoteBytes ||
+            !r.take(n.text, n.length) || !isValidUTF8(n.text, n.length) || !r.atEnd())
+            return f;
+        f.kind = FrameKind::note;
+        return f;
+    }
+    case kMemberRemovedHeader: {
+        MemberRemovedFrame& m = f.memberRemoved;
+        if (!r.u16(m.member) || !r.u32(m.version) || !r.atEnd()) return f;
+        f.kind = FrameKind::memberRemoved;
+        return f;
+    }
     case kAckHeader: {
         AckFrame& a = f.ack;
         if (!r.u32(a.unit) || !r.u16(a.request) || !r.u16(a.responder) || !r.u32(a.ackedAt) ||
@@ -218,7 +277,12 @@ bool mayGoOnGroupChannel(const Frame& f) {
     switch (f.kind) {
     case FrameKind::call:
     case FrameKind::ack:
+    case FrameKind::memberRemoved:
         return true;
+    // A missed check-in is raised by another member's phone; every other category is the
+    // caller's own and goes sealed.
+    case FrameKind::followUp:
+        return f.followUp.category == Category::missedCheckIn;
     // A coordinator's reason is personal: the radio carries the close without it.
     case FrameKind::callState:
         return f.callState.reasonLength == 0;

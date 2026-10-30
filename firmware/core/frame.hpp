@@ -1,5 +1,5 @@
-// Help&I frames, as the box needs them: the call, the acknowledgement, the call state and the
-// signed wrapper. Byte for byte the same as app/helpandeyeCore/Sources/helpandeyeCore/HelpFrame.swift,
+// Help&I frames, as the box needs them: the call, the follow-up, the acknowledgement, the note,
+// a removal, the call state and the signed wrapper. Byte for byte the same as app/helpandeyeCore/Sources/helpandeyeCore/HelpFrame.swift,
 // which is the reference. Integers are little-endian.
 //
 // UNTESTED ON HARDWARE. Host tests only (firmware/test).
@@ -20,8 +20,23 @@ constexpr size_t kMaxSignedInner = 80;
 constexpr size_t kMaxReasonBytes = 56;
 constexpr size_t kCallBytes = 12;
 constexpr size_t kAckBytes = 77;
+constexpr size_t kFollowUpBytes = 9;
+constexpr size_t kMaxNoteBytes = 120;
 
 enum class Colour : uint8_t { red = 1, amber = 2, green = 3 };
+
+// What a caller adds after the call. Every category but a missed check-in is personal and goes
+// sealed for responders; the box sends powerCut (decision 3).
+enum class Category : uint8_t {
+    withdrawn = 0,
+    fallen = 1,
+    unwell = 2,
+    lockedOut = 3,
+    powerCut = 4,
+    needCompany = 5,
+    missedCheckIn = 6,
+    other = 99,
+};
 
 enum class CallState : uint8_t { callerOK = 1, closedByCaller = 2, closedWithConsent = 3, closedWithReason = 4 };
 
@@ -41,6 +56,26 @@ struct AckFrame {
     uint16_t responder;
     uint32_t ackedAt;
     uint8_t signature[kSignatureBytes];
+};
+
+struct FollowUpFrame {
+    uint32_t unit;
+    uint16_t request;
+    uint8_t part;
+    Category category;
+};
+
+struct NoteFrame {
+    uint32_t unit;
+    uint16_t request;
+    uint8_t part;
+    uint8_t length;
+    uint8_t text[kMaxNoteBytes];
+};
+
+struct MemberRemovedFrame {
+    uint16_t member;
+    uint32_t version;
 };
 
 struct CallStateFrame {
@@ -63,7 +98,10 @@ enum class FrameKind : uint8_t {
     // Not a Help&I frame, or a malformed one: ignored, never shown.
     none,
     call,
+    followUp,
     ack,
+    note,
+    memberRemoved,
     callState,
     signedFrame,
     // A well-formed Help&I header for a kind this core does not read (a follow-up, a sealed note,
@@ -75,7 +113,10 @@ struct Frame {
     FrameKind kind;
     union {
         CallFrame call;
+        FollowUpFrame followUp;
         AckFrame ack;
+        NoteFrame note;
+        MemberRemovedFrame memberRemoved;
         CallStateFrame callState;
         SignedFrame signedFrame;
     };
@@ -86,7 +127,10 @@ struct Frame {
 // bytes) or `cap` is too small. The Swift encoder cuts long text instead; the box never sends a
 // reason, so here a cut that might differ from Swift's is refused rather than guessed.
 size_t encode(const CallFrame& f, uint8_t* out, size_t cap);
+size_t encode(const FollowUpFrame& f, uint8_t* out, size_t cap);
 size_t encode(const AckFrame& f, uint8_t* out, size_t cap);
+size_t encode(const NoteFrame& f, uint8_t* out, size_t cap);
+size_t encode(const MemberRemovedFrame& f, uint8_t* out, size_t cap);
 size_t encode(const CallStateFrame& f, uint8_t* out, size_t cap);
 size_t encode(const SignedFrame& f, uint8_t* out, size_t cap);
 

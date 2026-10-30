@@ -115,8 +115,8 @@ TEST(strayTrafficIsIgnored) {
 }
 
 TEST(otherHelpFramesArePassedOnUnread) {
-    const uint8_t followUp[] = {0x12, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x01, 0x05};
-    CHECK(decode(followUp, sizeof followUp).kind == FrameKind::other);
+    const uint8_t position[] = {0x17, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    CHECK(decode(position, sizeof position).kind == FrameKind::other);
     const uint8_t sealed[] = {0x10, 0x00};
     CHECK(decode(sealed, sizeof sealed).kind == FrameKind::other);
 }
@@ -262,4 +262,58 @@ TEST(utf8IsCheckedStrictly) {
     CHECK(!isValidUTF8(tooHigh, sizeof tooHigh));
     const uint8_t cut[] = {0xE2, 0x82};
     CHECK(!isValidUTF8(cut, sizeof cut));
+}
+
+// .followUp(unit: 70001, request: 12, part: 1, category: .powerCut)
+const uint8_t kPowerCutFollowUp[] = {0x12, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x01, 0x04};
+
+// .note(unit: 70001, request: 12, part: 2, text: "Power is back.")
+const uint8_t kPowerBackNote[] = {0x16, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x02, 0x0E,
+                                  'P',  'o',  'w',  'e',  'r',  ' ',  'i',  's',  ' ',  'b', 'a', 'c', 'k', '.'};
+
+// .memberRemoved(member: 3, version: 9)
+const uint8_t kRemoved[] = {0x1C, 0x03, 0x00, 0x09, 0x00, 0x00, 0x00};
+
+TEST(followUpEncodesAsSwiftDoes) {
+    uint8_t out[16];
+    CHECK_BYTES(out, encode(FollowUpFrame{70001, 12, 1, Category::powerCut}, out, sizeof out), kPowerCutFollowUp);
+    Frame f = decode(kPowerCutFollowUp, sizeof kPowerCutFollowUp);
+    CHECK(f.kind == FrameKind::followUp);
+    CHECK(f.followUp.unit == 70001 && f.followUp.request == 12 && f.followUp.part == 1);
+    CHECK(f.followUp.category == Category::powerCut);
+    CHECK(encode(FollowUpFrame{70001, 12, 1, Category(7)}, out, sizeof out) == 0);
+    uint8_t bad[] = {0x12, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x01, 0x07};
+    CHECK(decode(bad, sizeof bad).kind == FrameKind::none);
+}
+
+TEST(noteEncodesAsSwiftDoes) {
+    NoteFrame n{70001, 12, 2, 14, {}};
+    std::memcpy(n.text, "Power is back.", 14);
+    uint8_t out[140];
+    CHECK_BYTES(out, encode(n, out, sizeof out), kPowerBackNote);
+    Frame f = decode(kPowerBackNote, sizeof kPowerBackNote);
+    CHECK(f.kind == FrameKind::note);
+    CHECK(f.note.part == 2 && f.note.length == 14 && std::memcmp(f.note.text, "Power is back.", 14) == 0);
+    n.length = 121;
+    CHECK(encode(n, out, sizeof out) == 0);
+    n.length = 1;
+    n.text[0] = 0xFF;
+    CHECK(encode(n, out, sizeof out) == 0);
+}
+
+TEST(memberRemovedDecodesAsSwiftWritesIt) {
+    uint8_t out[8];
+    CHECK_BYTES(out, encode(MemberRemovedFrame{3, 9}, out, sizeof out), kRemoved);
+    Frame f = decode(kRemoved, sizeof kRemoved);
+    CHECK(f.kind == FrameKind::memberRemoved);
+    CHECK(f.memberRemoved.member == 3 && f.memberRemoved.version == 9);
+    CHECK(decode(kRemoved, sizeof kRemoved - 1).kind == FrameKind::none);
+}
+
+TEST(onlyAMissedCheckInFollowUpGoesOnTheGroupChannel) {
+    CHECK(!mayGoOnGroupChannel(decode(kPowerCutFollowUp, sizeof kPowerCutFollowUp)));
+    uint8_t missed[] = {0x12, 0x71, 0x11, 0x01, 0x00, 0x0C, 0x00, 0x01, 0x06};
+    CHECK(mayGoOnGroupChannel(decode(missed, sizeof missed)));
+    CHECK(!mayGoOnGroupChannel(decode(kPowerBackNote, sizeof kPowerBackNote)));
+    CHECK(mayGoOnGroupChannel(decode(kRemoved, sizeof kRemoved)));
 }

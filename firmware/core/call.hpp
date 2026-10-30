@@ -59,6 +59,8 @@ struct OutgoingCall {
 
     OutgoingCall(uint32_t unit, uint16_t number, Colour colour, uint32_t pressedAt, uint64_t pressedMono)
         : unit(unit), number(number), colour(colour), pressedAt(pressedAt), pressedMono(pressedMono) {}
+    // An empty slot: unit 0 is never a real unit.
+    OutgoingCall() : OutgoingCall(0, 0, Colour::red, 0, 0) {}
 
     CallFrame callFrame() const { return CallFrame{unit, number, colour, pressedAt}; }
 
@@ -116,6 +118,7 @@ struct CloseRepeat {
     uint32_t resends = 0;
 
     explicit CloseRepeat(uint64_t atMono) : atMono(atMono) {}
+    CloseRepeat() : CloseRepeat(0) {}
 
     // True when the close should go out now. Sets `finished` when this is the last time.
     bool tick(uint64_t nowMono, bool& finished);
