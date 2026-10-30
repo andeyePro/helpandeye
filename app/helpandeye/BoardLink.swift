@@ -364,15 +364,22 @@ extension BoardLink: @preconcurrency CBCentralManagerDelegate {
 
 extension BoardLink: @preconcurrency CBPeripheralDelegate {
     func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let s = p.services?.first(where: { $0.uuid == CBUUID(string: MeshCore.serviceUUID) }) else { return }
+        guard error == nil, let s = p.services?.first(where: { $0.uuid == CBUUID(string: MeshCore.serviceUUID) }) else { return notTalking(p) }
         p.discoverCharacteristics([CBUUID(string: MeshCore.rxUUID), CBUUID(string: MeshCore.txUUID)], for: s)
     }
 
     func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor s: CBService, error: Error?) {
-        for ch in s.characteristics ?? [] {
-            if ch.uuid == CBUUID(string: MeshCore.rxUUID) { rx = ch }
-            if ch.uuid == CBUUID(string: MeshCore.txUUID) { p.setNotifyValue(true, for: ch) }
-        }
+        let tx = s.characteristics?.first { $0.uuid == CBUUID(string: MeshCore.txUUID) }
+        rx = s.characteristics?.first { $0.uuid == CBUUID(string: MeshCore.rxUUID) }
+        guard error == nil, let tx, rx != nil else { return notTalking(p) }
+        p.setNotifyValue(true, for: tx)
+    }
+
+    /// Connected but not a box that answers (Bluetooth lost part of the set-up, or other firmware):
+    /// drop the link, so the reconnect path tries again rather than wait connected for ever.
+    private func notTalking(_ p: CBPeripheral) {
+        state = .failed("Connected to the box, but it did not answer. Trying again.")
+        central.cancelPeripheralConnection(p)
     }
 
     func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor ch: CBCharacteristic, error: Error?) {

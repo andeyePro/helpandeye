@@ -54,7 +54,13 @@ import Network
     private static let usedKey = "homeWiFiUsed"
     var isEnabled: Bool { UserDefaults.standard.bool(forKey: Self.usedKey) }
     var hasPeers: Bool { peers.values.contains(where: \.proven) }
-    var unavailableReason: String { problem ?? (group == nil ? "Not in a group" : "No other phones of the group on this Wi-Fi") }
+    var unavailableReason: String {
+        if group?.needsKeyUpdate == true { return Self.needsUpdate }
+        return problem ?? (group == nil ? "Not in a group" : "No other phones of the group on this Wi-Fi")
+    }
+    /// The other phones have new keys, so cannot check this one until its update code is scanned.
+    static let needsUpdate = "Scan the update code your coordinator shows you. Until then the group's other phones on this Wi-Fi cannot check this one."
+
 
     /// Starts afresh when the keys, this phone's number or who is in the group changes, so a
     /// connection proven by someone since removed does not stay open.

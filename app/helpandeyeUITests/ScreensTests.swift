@@ -97,6 +97,46 @@ final class ScreensTests: XCTestCase {
         }
     }
 
+    /// Notifications turned off for Help&I: every screen says so, with a way to Settings.
+    func testNotificationsOff() throws {
+        launch()
+        startGroupIfNew()
+        app.terminate()
+        launch("-HelpANotificationsOff")
+        let banner = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Notifications are off for Help&I")).firstMatch
+        XCTAssert(banner.waitForExistence(timeout: 5), "notifications-off: no banner")
+        XCTAssert(app.buttons["Open Settings"].exists, "notifications-off: no way to Settings")
+        look("notifications-off")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// Told of a removal but not yet given the new keys: the call screen says why nothing personal
+    /// goes, and Group, Home Wi-Fi asks for the update code.
+    func testKeysNeeded() throws {
+        launch()
+        startGroupIfNew()
+        app.terminate()
+        launch("-HelpAPositionSending", "-HelpAKeysNeeded")
+        let message = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "A phone was removed from your group")).firstMatch
+        if !message.waitForExistence(timeout: 3) {
+            reveal(app.buttons["Need a hand"]).tap()
+            allowSystemAlerts()
+        }
+        reveal(message)
+        XCTAssert(message.isHittable, "keys-needed: the call screen does not say why")
+        look("keys-needed-call")
+        tab("Group")
+        let wifi = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Scan the update code")).firstMatch
+        reveal(wifi)
+        XCTAssert(wifi.isHittable, "keys-needed: Home Wi-Fi does not ask for the update code")
+        look("keys-needed-group")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
     /// The three messages about where the caller is: still going, sent, and not sent. Shown by
     /// launch argument, because a simulator has no route to send by and no location fix.
     func testPositionMessages() throws {
@@ -171,6 +211,8 @@ final class ScreensTests: XCTestCase {
         // Found by the label read out to VoiceOver, which is also shown above the box.
         let f = reveal(app.textFields[field])
         f.tap()
+        // At the largest text the keyboard can push the field away under the first tap.
+        if f.value(forKey: "hasKeyboardFocus") as? Bool != true { reveal(f).tap() }
         f.typeText(text)
     }
 
@@ -198,6 +240,7 @@ final class ScreensTests: XCTestCase {
         let statusBar = CGRect(x: 0, y: 0, width: app.windows.firstMatch.frame.width, height: 54)
         let bars = (app.navigationBars.allElementsBoundByIndex.map(\.frame) + app.tabBars.allElementsBoundByIndex.map(\.frame) + [statusBar])
             .map { $0.insetBy(dx: 0, dy: -60) }
+        var contrast: [(XCUIElement, String)] = []
         do { try app.performAccessibilityAudit { issue in
             let frame = issue.element?.frame ?? .zero
             let detail = "\(name): \(issue.compactDescription) – \(issue.element?.label ?? "") \(frame)"
@@ -209,6 +252,8 @@ final class ScreensTests: XCTestCase {
             } else if issue.auditType == .textClipped || issue.compactDescription.contains("partially unsupported")
                         || (frame.isEmpty && issue.element?.label.isEmpty != false) {
                 print("ADVICE " + detail)
+            } else if issue.auditType == .contrast, let e = issue.element {
+                contrast.append((e, detail))
             } else {
                 self.problems.append(detail)
                 print("AUDIT " + detail)
@@ -217,6 +262,56 @@ final class ScreensTests: XCTestCase {
         } } catch {
             problems.append("\(name): the audit could not run: \(error)")
         }
+        recheck(contrast)
+    }
+
+    /// The audit can read a list at another scroll position than it reports, so it flags text
+    /// that sat in a fade for a moment. Each contrast finding is measured again on a screenshot
+    /// once the screen is still: only text below 4.5 to 1 there counts.
+    private func recheck(_ found: [(XCUIElement, String)]) {
+        guard !found.isEmpty else { return }
+        Thread.sleep(forTimeInterval: 1)
+        let shot = XCUIScreen.main.screenshot()
+        let screen = app.windows.firstMatch.frame
+        for (e, detail) in found {
+            let frame = e.exists ? e.frame : .zero
+            if screen.contains(frame), !frame.isEmpty, let ratio = Self.contrast(in: frame, of: shot, screen: screen), ratio >= 4.5 {
+                print("ADVICE read while moving; \(String(format: "%.1f", ratio)) to 1 when still: " + detail)
+            } else {
+                problems.append(detail)
+                print("AUDIT " + detail)
+            }
+        }
+    }
+
+    /// The contrast between the commonest colour in a frame (the background) and the text's, by
+    /// WCAG relative luminance. Portrait only: the screen tests do not turn the simulator.
+    private static func contrast(in frame: CGRect, of shot: XCUIScreenshot, screen: CGRect) -> Double? {
+        guard let image = shot.image.cgImage else { return nil }
+        let scale = CGFloat(image.width) / screen.width
+        let rect = CGRect(x: frame.minX * scale, y: frame.minY * scale, width: frame.width * scale, height: frame.height * scale).integral
+        guard let crop = image.cropping(to: rect) else { return nil }
+        let w = crop.width, h = crop.height
+        var pixels = [UInt8](repeating: 0, count: w * h * 4)
+        guard let context = CGContext(data: &pixels, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        context.draw(crop, in: CGRect(x: 0, y: 0, width: w, height: h))
+        func linear(_ c: UInt8) -> Double {
+            let v = Double(c) / 255
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        let lum = stride(from: 0, to: pixels.count, by: 4).map {
+            0.2126 * linear(pixels[$0]) + 0.7152 * linear(pixels[$0 + 1]) + 0.0722 * linear(pixels[$0 + 2])
+        }
+        guard !lum.isEmpty else { return nil }
+        var bins = [Int](repeating: 0, count: 64)
+        for l in lum { bins[min(Int(l * 64), 63)] += 1 }
+        let common = bins.indices.max { bins[$0] < bins[$1] }!
+        let background = lum.filter { min(Int($0 * 64), 63) == common }.reduce(0, +) / Double(bins[common])
+        // The text's colour is where the furthest 2% of pixels start, so one stray pixel of an
+        // icon or a separator does not pass faint text.
+        let text = lum.sorted { abs($0 - background) < abs($1 - background) }[lum.count * 98 / 100]
+        return (max(text, background) + 0.05) / (min(text, background) + 0.05)
     }
 
     /// Notification and location prompts belong to the system, not the app under test.

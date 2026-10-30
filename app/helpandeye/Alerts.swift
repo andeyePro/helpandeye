@@ -13,7 +13,36 @@ import UserNotifications
 
     init(prefix: String = "", ownsCheckIns: Bool = true) { self.prefix = prefix; self.ownsCheckIns = ownsCheckIns }
 
-    private func ids(_ key: IncomingRequest.Key) -> [String] { (0..<64).map { "req-\(prefix)\(key.unit)-\(key.request)-\($0)" } }
+    /// The first 64 are for alerts to come, the rest for those due at once.
+    private func ids(_ key: IncomingRequest.Key) -> [String] { (0..<128).map { "req-\(prefix)\(key.unit)-\(key.request)-\($0)" } }
+
+    /// iOS keeps only 64 pending notifications for the whole app, and drops the rest without a
+    /// word, so every group's calls share them: an equal part each, after the check-in reminders
+    /// and a few kept for news to the caller. Each call's earliest alerts are the ones kept.
+    private struct Plan {
+        let ids: [String]
+        let content: UNNotificationContent
+        let times: [Date]
+    }
+    private static var plans: [String: Plan] = [:]
+    private static var checkIns = 0
+    private static let forCaller = 4
+
+    /// Also run whenever the app wakes, so a call whose share has all gone off gets its next ones.
+    static func replan() {
+        let now = Date()
+        plans = plans.filter { $0.value.times.contains { $0 > now } }
+        guard !plans.isEmpty else { return }
+        let each = max(64 - checkIns - forCaller, plans.count) / plans.count
+        let center = UNUserNotificationCenter.current()
+        for plan in plans.values {
+            center.removePendingNotificationRequests(withIdentifiers: Array(plan.ids.prefix(64)))
+            for (id, at) in zip(plan.ids, plan.times.filter { $0 > now }.prefix(each)) {
+                center.add(UNNotificationRequest(identifier: id, content: plan.content,
+                                                 trigger: UNTimeIntervalNotificationTrigger(timeInterval: max(at.timeIntervalSinceNow, 1), repeats: false)))
+            }
+        }
+    }
 
     /// Whether an alert is this group's: another group's tag starts with a letter, this one's
     /// numbers straight away when it has none.
@@ -30,21 +59,27 @@ import UserNotifications
         content.body = alert.body
         content.sound = alert.calm ? .default : .defaultCritical
         content.interruptionLevel = alert.calm ? .active : .timeSensitive
-        for (n, at) in alert.times.prefix(64).enumerated() {
-            let due = at.timeIntervalSinceNow
-            let trigger = due < 1 ? nil : UNTimeIntervalNotificationTrigger(timeInterval: due, repeats: false)
-            center.add(UNNotificationRequest(identifier: ids(alert.key)[n], content: content, trigger: trigger))
+        let ids = ids(alert.key)
+        let now = Date()
+        for (id, at) in zip(ids.dropFirst(64), alert.times) where at.timeIntervalSince(now) < 1 {
+            center.add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
         }
+        Self.plans[ids[0]] = Plan(ids: ids, content: content, times: alert.times.filter { $0.timeIntervalSince(now) >= 1 })
+        Self.replan()
     }
 
     func cancel(_ key: IncomingRequest.Key) {
+        Self.plans[ids(key)[0]] = nil
         center.removePendingNotificationRequests(withIdentifiers: ids(key))
         center.removeDeliveredNotifications(withIdentifiers: ids(key))
+        Self.replan()
     }
 
     /// Removes this group's pending alerts. It finds them first, so an alert scheduled in the
     /// moment between could go too; it is only used on leaving the group.
     func cancelAll() {
+        Self.plans = Self.plans.filter { !isMine($0.key) }
+        Self.replan()
         center.getPendingNotificationRequests { [isMine = self.isMine] pending in
             let mine = pending.map(\.identifier).filter(isMine)
             UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: mine)
@@ -64,6 +99,8 @@ import UserNotifications
         // A group this person only responds in has no check-ins of theirs.
         guard ownsCheckIns else { return }
         center.removePendingNotificationRequests(withIdentifiers: (0..<1440).map { "checkin-\($0)" })
+        Self.checkIns = minutes.count
+        Self.replan()
         for t in minutes {
             let content = UNMutableNotificationContent()
             content.title = "Time to check in"

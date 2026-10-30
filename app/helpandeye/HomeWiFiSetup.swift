@@ -59,6 +59,7 @@ struct HomeWiFiSection: View {
         Section(header: Header("Home Wi-Fi")) {
             let n = model.home.peerCount
             if let problem = model.home.problem { Text(problem).foregroundStyle(Color.warning) }
+            if model.keyProblem != nil { Text(HomeWiFi.needsUpdate).foregroundStyle(Color.warning) }
             Text(n == 0 ? "No other phones of the group on this Wi-Fi now."
                  : "\(n) other phone\(n == 1 ? "" : "s") of the group on this Wi-Fi: calls reach them directly, with no internet.")
             if !setup.canListenLocked {

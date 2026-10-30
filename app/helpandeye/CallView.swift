@@ -193,7 +193,7 @@ struct FollowUps: View {
     static let shownPosition: Bool?? = nil
     #endif
     private var shownPosition: Bool?? { Self.shownPosition }
-    private var canSendPersonal: Bool { model.canSendPersonal || shownPosition != nil }
+    private var canSendPersonal: Bool { (model.canSendPersonal || shownPosition != nil) && model.keyProblem == nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -246,7 +246,7 @@ struct FollowUps: View {
                 if location.state == .denied { Text("Help&I is not allowed to use your location. You can allow it in Settings.") }
                 ForEach(request.notes, id: \.self) { Text("You said: \($0)") }
             } else {
-                Text("Typed messages and where you are can only go over the internet or your box, and neither is working now.")
+                Text(model.keyProblem ?? "Typed messages and where you are can only go over the internet or your box, and neither is working now.")
             }
             if let problem { Text(problem) }
         }

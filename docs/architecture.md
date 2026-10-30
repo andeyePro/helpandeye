@@ -106,4 +106,9 @@ nobody has been told.
   signing key, which the relay checks.
 - Joining is three QR codes, or the same codes sent as messages with a six-digit safety number read
   aloud. Removing a phone makes new group secrets, handed to every remaining member as an update
-  code; the old channel stays readable for seven days while boards change over.
+  code; the old channel stays readable for seven days while boards change over. A phone that hears
+  of a removal of someone who could respond before it has its update code sends nothing personal
+  (choices, typed messages, position) until it is scanned, as the removed phone still holds the
+  responders' key it would seal with; the call itself still goes.
+- A new group uses Help&I's relay unless its coordinator sets their own or none (Group, Internet
+  route).

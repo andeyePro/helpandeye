@@ -133,7 +133,7 @@ Pass: the reminder arrives at the set time. About 30 minutes later (within a min
 
 ## 14. Typed messages and location
 
-Needs the relay set up (Group, Internet route) on both phones, with internet on.
+Needs the internet route on both phones (Group, Internet route: Help&I's relay, as a new group starts with), with internet on.
 
 1. On phone A, press Help, type "Back door is open" and tap Send, then tap Share where I am and allow location.
 2. Turn phone A's internet off and try to send another message.
@@ -158,7 +158,7 @@ Known limit: over the internet route alone, with Help&I closed on phone B, alert
 
 ## 17. A responder notices a missed check-in when the caller's phone is off
 
-Needs the relay set up and internet on.
+Needs the internet route (Help&I's relay, as a new group starts with) and internet on.
 
 1. On phone A, turn on a check-in two minutes from now and tap Save. Wait a minute, then switch phone A off.
 2. Wait 40 minutes.
@@ -400,3 +400,24 @@ Needs a signed build (shared keychain group and the Network Extensions capabilit
 6. With phone B listening locked, press Help on phone A, then I'm OK; then press Help again and acknowledge it on phone C.
 
 Pass: in step 1 Group says "Listening on" the Wi-Fi only while phone B is on it, and "Set to listen" otherwise. In step 2 phone B alerts within a few seconds, naming the caller, even with the app closed and the phone locked. In step 3 phone A shows the acknowledgement. In step 4 phone B does not alert over Wi-Fi, and phone A shows the cross for Home Wi-Fi (other routes as set up). In step 5 phone A shows the cross for Home Wi-Fi: its own listener never counts as another phone. In step 6 phone B alerts once for the call, never again for its resends; after I'm OK its alert becomes a calm "says they're OK now", and after phone C's acknowledgement phone B's alert goes.
+
+## 43. A phone restarted and not yet unlocked
+
+Needs a signed build with push (TODO.md), and phones A (a caller) and B (a responder) in one group.
+
+1. Restart phone B and do not unlock it. Press Help on phone A.
+2. Unlock phone B and open Help&I.
+
+Pass: in step 2 phone B shows its group as before, never the welcome screen, and the call from step 1 arrives within a minute of unlocking. Its saved calls and settings are all still there.
+
+## 44. Many calls at once, and Help&I's warnings
+
+Needs phones A and B as callers and phone C a responder in two groups (one as its first group, one as another).
+
+1. Press Help on phone A and Need a hand on phone B, close Help&I on phone C and lock it, and acknowledge nothing for 15 minutes.
+2. On phone C, in Settings, Notifications, Help&I, turn notifications off, open Help&I; turn them on again and turn Time Sensitive off, and open Help&I again.
+3. Turn the box near phone C off at the wall while it is connected, and back on.
+4. Delete the app's Bluetooth pairing on the box side (reset the box), then watch Group, Box on phone C.
+
+Pass: in step 1 phone C keeps alerting for both calls through the 15 minutes, neither falling silent. In step 2 a banner says notifications are off, then that Time Sensitive is off, each with Open Settings, and goes once put right. In step 3 phone C reconnects without help. In step 4 it says the box did not answer, or was reset, and keeps trying rather than show Connecting for ever.
+

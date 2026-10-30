@@ -336,6 +336,50 @@ final class RelayModel {
         XCTAssertEqual(caller.request?.status, .waitingForResponder, "a removed responder's ack does not count")
     }
 
+    /// Codex re-review: told of a removal but not yet given the new keys, a caller seals nothing
+    /// the removed responder could still open; the call itself still goes.
+    func testRemovingACallerHoldsNothingBack() {
+        var g = responder.engine.group!
+        g.apply(membership: .memberRemoved(member: caller.engine.saved!.me, version: g.membershipVersion + 1))
+        XCTAssertFalse(g.needsKeyUpdate, "a caller never held the responders' key")
+        g.apply(membership: .memberRemoved(member: coordinator.engine.saved!.me, version: g.membershipVersion + 1))
+        XCTAssertTrue(g.needsKeyUpdate)
+    }
+
+    func testNothingPersonalIsSealedUnderKeysARemovedPhoneHolds() async {
+        let removed = responder.engine.saved!.me
+        coordinator.engine.updateGroup { $0.remove(removed, at: clock.now) }
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.needsKeyUpdate, true)
+        XCTAssertNotNil(caller.engine.keyProblem)
+        caller.engine.press(.red)
+        await air.run()
+        XCTAssertEqual(caller.request?.status, .waitingForResponder, "the call goes")
+        let before = air.groupSends.count
+        XCTAssertEqual(caller.engine.add(.fallen), caller.engine.keyProblem)
+        XCTAssertEqual(caller.engine.addNote("Kitchen floor"), caller.engine.keyProblem)
+        XCTAssertFalse(caller.engine.canSendPersonal)
+        await air.run()
+        XCTAssertFalse(air.groupSends.dropFirst(before).contains { if case .forResponders = $0 { return true }; return false })
+        let g = coordinator.engine.group!
+        let update = try! Joining.update(g, for: g.member(caller.engine.saved!.me)!, coordinator: coordinator.identity)
+        caller.engine.applyKeyUpdate(try! Joining.openUpdate(update, current: caller.engine.group!, me: caller.identity))
+        XCTAssertEqual(caller.engine.group?.needsKeyUpdate, false)
+        XCTAssertNil(caller.engine.keyProblem)
+        coordinator.engine.receive(.signing(.memberRemoved(member: removed, version: g.membershipVersion), as: coordinator.engine.saved!.me,
+                                            identity: coordinator.identity, group: g.secrets.groupID), via: .mesh)
+        caller.engine.receive(.signing(.memberRemoved(member: removed, version: g.membershipVersion), as: coordinator.engine.saved!.me,
+                                       identity: coordinator.identity, group: caller.engine.group!.secrets.groupID), via: .mesh)
+        XCTAssertEqual(caller.engine.group?.needsKeyUpdate, false, "the daily repeat of a removal already covered asks for nothing")
+    }
+
+    func testANewGroupStartsWithTheRelayItIsGiven() {
+        let p = Phone(air: air, clock: clock)
+        p.engine.createGroup(name: "Hill Road", myName: "Sam", call: true, relay: RelayProtocol.defaultRelay)
+        XCTAssertEqual(p.engine.group?.relayURL, RelayProtocol.defaultRelay)
+        XCTAssertTrue(p.engine.group!.settingsFrame(as: 1, identity: p.identity) != nil, "the address fits in the settings sent to members")
+    }
+
     func testTheInternetRouteAloneWorksAndAsksForAPush() async {
         for p in air.phones { p.mesh.isReady = false; p.relay.isConfigured = true }
         await relaySetUp()

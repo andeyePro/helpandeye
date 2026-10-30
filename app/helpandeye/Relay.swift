@@ -102,14 +102,26 @@ final class Relay: ObservableObject, RelayLink {
         registration = Task { await publishPushToken() }
     }
 
+    /// Whether this copy's push tokens are Apple's test ones. The signing profile says, not the
+    /// build type: a TestFlight or ad hoc copy can be a debug build with live tokens, or the other
+    /// way round. An App Store copy has no profile inside it, and its tokens are live.
+    private static let sandbox: Bool = {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let text = try? String(contentsOf: url, encoding: .isoLatin1),
+              let start = text.range(of: "<plist"), let end = text.range(of: "</plist>"),
+              let profile = try? PropertyListSerialization.propertyList(from: Data(text[start.lowerBound..<end.upperBound].utf8), format: nil) as? [String: Any],
+              let entitlements = profile["Entitlements"] as? [String: Any] else { return false }
+        return entitlements["aps-environment"] as? String == "development"
+        #endif
+    }()
+
     private func publishPushToken() async {
         var pause: TimeInterval = 60
         while !Task.isCancelled, let group, let pushToken, let wanted, wanted != registered {
-            #if DEBUG
-            let sandbox = true
-            #else
-            let sandbox = false
-            #endif
+            let sandbox = Self.sandbox
             let hex = pushToken.map { String(format: "%02x", $0) }.joined()
             guard let body = try? JSONSerialization.data(withJSONObject: ["token": hex, "sandbox": sandbox, "device": device] as [String: Any]) else { return }
             if case .some((200, _)) = await request("PUT", RelayProtocol.path(for: group.secrets, "push"), body: body) {

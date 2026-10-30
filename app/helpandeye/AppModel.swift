@@ -45,6 +45,14 @@ final class AppModel: ObservableObject {
     private static let screensOtherGroupOnly = false
     #endif
 
+    /// Shows the screens of a phone told of a removal it has no new keys for, by a screen test's
+    /// launch argument; nothing is saved.
+    #if DEBUG && targetEnvironment(simulator)
+    private static let screensKeysNeeded = ProcessInfo.processInfo.arguments.contains("-HelpAKeysNeeded")
+    #else
+    private static let screensKeysNeeded = false
+    #endif
+
     private init() {
         let airtime = AirtimeLedger(budget: Store.loadAirtime() ?? Store.loadActivity().airtime)
         airtime.onChange = { Store.save(airtime: $0) }
@@ -87,9 +95,37 @@ final class AppModel: ObservableObject {
                 }
             }
         }
+        AppStore.saved = { [weak self] what, ok in
+            guard let self else { return }
+            if ok { self.failedSaves.remove(what) } else { self.failedSaves.insert(what) }
+            if self.saveFailed == self.failedSaves.isEmpty { self.saveFailed = !self.failedSaves.isEmpty }
+        }
         UNUserNotificationCenter.current().delegate = ShowAlertsWhileOpen.shared
-        Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) }
+        Task {
+            _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge])
+            await checkNotifications()
+        }
     }
+
+    /// The latest save of the group or its calls did not work, so they could be lost if Help&I closes.
+    @Published private(set) var saveFailed = false
+    private var failedSaves: Set<String> = []
+
+    /// Why this phone's notifications cannot alert its person as they should, if they cannot.
+    @Published private(set) var notificationProblem: String?
+
+    func checkNotifications() async {
+        #if DEBUG && targetEnvironment(simulator)
+        if ProcessInfo.processInfo.arguments.contains("-HelpANotificationsOff") { notificationProblem = Self.notificationsOff; return }
+        #endif
+        let s = await UNUserNotificationCenter.current().notificationSettings()
+        let responds = engines.contains { $0.me?.canRespond == true }
+        notificationProblem = s.authorizationStatus == .denied ? Self.notificationsOff
+            : responds && s.timeSensitiveSetting == .disabled ? "Time Sensitive is off for Help&I, so a Focus can hold back calls for help. Turn it on in Settings, Notifications, Help&I."
+            : nil
+    }
+
+    private static let notificationsOff = "Notifications are off for Help&I, so it cannot alert you when someone calls for help or answers your call. Turn them on in Settings, Notifications, Help&I."
 
     /// Says out loud what happened to this phone's own calls. The watch says it for the calls it
     /// made itself (numbered 32768 and up), so they are not heard twice.
@@ -125,11 +161,15 @@ final class AppModel: ObservableObject {
     var gaps: [DateInterval] { engine.gaps }
     var checkIn: CheckInSchedule? { engine.checkIn }
     var canSendPersonal: Bool { engine.canSendPersonal }
+    var keyProblem: String? { Self.screensKeysNeeded ? HelpEngine.keysNeeded : engine.keyProblem }
 
     func name(ofUnit unit: UInt32) -> String { engine.name(ofUnit: unit) }
     func name(ofMember n: UInt16) -> String { engine.name(ofMember: n) }
 
-    func createGroup(name: String, myName: String, call: Bool, phone: String?) { engine.createGroup(name: name, myName: myName, call: call, phone: phone) }
+    /// A new group uses Help&I's relay, except in the screen tests, which must not reach it.
+    func createGroup(name: String, myName: String, call: Bool, phone: String?) {
+        engine.createGroup(name: name, myName: myName, call: call, phone: phone, relay: CallerVoice.quiet ? nil : RelayProtocol.defaultRelay)
+    }
     func setMyPhone(_ phone: String) { engine.setMyPhone(phone) }
     func joined(_ group: GroupState, as number: UInt16, invitedBy: UInt16?) {
         // A group already joined as a further one is never joined twice.
@@ -232,9 +272,11 @@ final class AppModel: ObservableObject {
     }
 
     /// Back in the foreground: listen on the home Wi-Fi again, which iOS stops in the background.
-    func resumeHomeWiFi() {
+    func resume() {
         home.resume()
         others.forEach { $0.home.resume() }
+        NotificationAlerts.replan()
+        Task { await checkNotifications() }
     }
 
     /// A push from a relay: fetch what is waiting in every group.
@@ -242,5 +284,6 @@ final class AppModel: ObservableObject {
         await relay.poll()
         for o in others { await o.relay.poll() }
         tick()
+        NotificationAlerts.replan()
     }
 }

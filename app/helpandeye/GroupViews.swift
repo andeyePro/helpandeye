@@ -368,6 +368,10 @@ struct ReceiveUpdateSection: View {
 
     var body: some View {
         Section(header: Header("Key update")) {
+            if model.keyProblem != nil {
+                Text("A phone was removed, so your coordinator has new keys for you. Until you scan your update code, your choices, messages and where you are are not sent.")
+                    .foregroundStyle(Color.warning)
+            }
             CodeReader(prompt: "If your coordinator shows you an update code, scan it here") { code in
                 guard let g = model.group, let w = try? Joining.decode(Joining.Welcome.self, from: code),
                       let updated = try? Joining.openUpdate(w, current: g, me: model.identity) else {
@@ -405,9 +409,13 @@ struct RelaySection: View {
 
     var body: some View {
         Section(header: Header("Internet route")) {
-            LabeledField(label: "Relay address, starting https://", text: $url, keyboard: .URL)
+            let usesOurs = model.group?.relayURL == RelayProtocol.defaultRelay
+            Text(usesOurs ? "Calls also go over the internet, through Help&I's relay. It passes on only what is sealed with the group's key, so it cannot read calls."
+                 : model.relay.isConfigured ? "Calls also go over the internet, through your own relay." : "Not set up: calls go over the local radio only.")
+            if !usesOurs { Button("Use Help&I's relay") { url = RelayProtocol.defaultRelay; model.setRelay(url) } }
+            LabeledField(label: "Or your own relay's address, starting https://", text: $url, keyboard: .URL)
             Button("Save") { model.setRelay(url) }
-            Text(model.relay.isConfigured ? "Calls also go over the internet." : "Not set up: calls go over the local radio only.")
+            if model.group?.relayURL != nil { Button("No internet route") { url = ""; model.setRelay("") } }
             Text("Members get the new address at once, over the old address or the local radio, or when they next join.")
         }
         .onAppear { url = model.group?.relayURL ?? "" }

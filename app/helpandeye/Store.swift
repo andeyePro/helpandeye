@@ -9,8 +9,11 @@ import Security
 @MainActor final class AppStore: EngineStore {
     private let group: String
     init(group: String = "") { self.group = group }
-    func save(_ state: SavedState?) { Store.save(state, group: group) }
-    func save(_ activity: Activity) { Store.save(activity, group: group) }
+    func save(_ state: SavedState?) { Self.saved?("state" + group, Store.save(state, group: group)) }
+    func save(_ activity: Activity) { Self.saved?("activity" + group, Store.save(activity, group: group)) }
+    /// Hears whether each save worked, by what was saved, so a phone that cannot save says so
+    /// until that same thing saves again.
+    static var saved: ((String, Bool) -> Void)?
 }
 
 enum Store {
@@ -73,8 +76,9 @@ enum Store {
         (try? Data(contentsOf: file("activity\(group).json"))).flatMap { try? JSONDecoder().decode(Activity.self, from: $0) } ?? Activity()
     }
 
-    static func save(_ activity: Activity, group: String = "") {
-        try? JSONEncoder().encode(activity).write(to: file("activity\(group).json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    @discardableResult
+    static func save(_ activity: Activity, group: String = "") -> Bool {
+        (try? JSONEncoder().encode(activity).write(to: file("activity\(group).json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])) != nil
     }
 
     static func forget(group: String) {

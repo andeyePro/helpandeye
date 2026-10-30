@@ -236,8 +236,9 @@ public final class HelpEngine: ObservableObject {
 
     // MARK: Group
 
-    public func createGroup(name: String, myName: String, call: Bool, phone: String? = nil) {
+    public func createGroup(name: String, myName: String, call: Bool, phone: String? = nil, relay: String? = nil) {
         var g = GroupState(name: name, secrets: .forOwner(signingKey: identity.signingPublicKey), members: [])
+        g.relayURL = relay
         g.members.append(Member(number: 1, name: myName, role: .coordinator, publicKey: identity.publicKey,
                                 unit: call ? g.nextUnit : nil, phone: phone, signingKey: identity.signingPublicKey))
         g.highestMember = 1
@@ -533,6 +534,7 @@ public final class HelpEngine: ObservableObject {
     @discardableResult
     public func add(_ category: CallCategory) -> String? {
         guard current?.partsLeft ?? 0 > 0 else { return "This call cannot take any more messages. If you need help now, call 999." }
+        if category != .missedCheckIn, let keyProblem { return keyProblem }
         guard var r = activity.outgoing.popLast() else { return nil }
         let frame = r.add(category)
         activity.outgoing.append(r)
@@ -678,9 +680,15 @@ public final class HelpEngine: ObservableObject {
     /// Typed text and position go only to responders (decision 12), sealed once for all of them;
     /// in a group made before responders had their own key, over the internet sealed with the
     /// group key, or else as direct messages to each responder's box.
-    public var canSendPersonal: Bool { relay.isConfigured || mesh.isReady || homeWiFi.hasPeers }
+    public var canSendPersonal: Bool { keyProblem == nil && (relay.isConfigured || mesh.isReady || homeWiFi.hasPeers) }
+
+    /// After a removal this phone has no new keys for, the removed phone could still open what it
+    /// seals for responders, so choices, messages and where the caller is wait for the update code.
+    public var keyProblem: String? { group?.needsKeyUpdate == true && me != nil ? Self.keysNeeded : nil }
+    public static let keysNeeded = "A phone was removed from your group. Until you scan the update code your coordinator shows you, your choices, messages and where you are are not sent, so that phone cannot read them. Help calls still go."
 
     public func addNote(_ text: String) -> String? {
+        if let keyProblem { return keyProblem }
         guard canSendPersonal else { return "Typed messages need the internet, home Wi-Fi or your box." }
         guard var r = activity.outgoing.popLast() else { return nil }
         // Sealed and signed for responders, long text goes as several notes that each fit the radio.
@@ -709,7 +717,7 @@ public final class HelpEngine: ObservableObject {
     /// message to each responder's box. Only into the group it was typed in: never one this phone
     /// joined while an earlier piece was still going. True if any route took it.
     @discardableResult private func sendPersonal(_ frame: HelpFrame, in gid: Data) async -> Bool {
-        guard let g = group, g.secrets.groupID == gid else { return false }
+        guard let g = group, g.secrets.groupID == gid, !g.needsKeyUpdate else { return false }
         if let me = saved?.me, g.secrets.responderPublicKey != nil {
             var took = false
             for sealed in ForResponders.seal(frame, from: identity, as: me, in: g, at: now()) {
@@ -1310,6 +1318,7 @@ public final class HelpEngine: ObservableObject {
             merged.members.append(m)
         }
         merged.removedMembers.formUnion(current.removedMembers)
+        merged.removalsWithoutKeys = current.removalsWithoutKeys.subtracting(update.removedMembers)
         merged.members.removeAll { merged.removedMembers.contains($0.number) }
         merged.membershipVersion = max(update.membershipVersion, current.membershipVersion)
         merged.highestMember = max(update.highestMember, current.highestMember)

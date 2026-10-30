@@ -6,32 +6,68 @@ struct HelpAApp: App {
     @UIApplicationDelegateAdaptor private var delegate: AppDelegate
 
     var body: some Scene {
-        WindowGroup { SizedRoot().environmentObject(AppModel.shared) }
+        WindowGroup { LaunchGate() }
     }
 }
 
 /// Creates the model and the watch link at launch, before any screen, so that a launch in the
 /// background (a watch button, or Bluetooth restoring the box connection) finds them ready.
+/// Before the phone's first unlock after a restart, the group and saved calls cannot be read: the
+/// model waits for them, rather than start empty and later save the empty state over them.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     private let watch = PhoneWatchLink()
+    private var started = false
+    private var token: Data?
 
     func application(_ app: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
-        MainActor.assumeIsolated { watch.attach(AppModel.shared) }
+        if app.isProtectedDataAvailable { start() } else { Launch.shared.waited = true }
+        NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.start() }
+        }
         app.registerForRemoteNotifications()
         return true
     }
 
+    @MainActor private func start() {
+        guard !started else { return }
+        started = true
+        watch.attach(AppModel.shared)
+        if let token { AppModel.shared.setPushToken(token) }
+        // A push that came before the first unlock was not fetched then.
+        if Launch.shared.waited { Task { await AppModel.shared.wake() } }
+        Launch.shared.ready = true
+    }
+
     func application(_ app: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken token: Data) {
-        MainActor.assumeIsolated { AppModel.shared.setPushToken(token) }
+        MainActor.assumeIsolated {
+            self.token = token
+            if started { AppModel.shared.setPushToken(token) }
+        }
     }
 
     /// A push from the relay: fetch what is waiting, which schedules this phone's own alerts.
     func application(_ app: UIApplication, didReceiveRemoteNotification info: [AnyHashable: Any],
                      fetchCompletionHandler done: @escaping (UIBackgroundFetchResult) -> Void) {
+        guard MainActor.assumeIsolated({ started }) else { done(.noData); return }
         Task { @MainActor in
             await AppModel.shared.wake()
             done(.newData)
         }
+    }
+}
+
+/// Whether the model has started, which waits for the phone's first unlock after a restart.
+@MainActor final class Launch: ObservableObject {
+    static let shared = Launch()
+    @Published var ready = false
+    var waited = false
+}
+
+/// The screens, once the model has started; nothing that could create it empty before then.
+struct LaunchGate: View {
+    @ObservedObject private var launch = Launch.shared
+    var body: some View {
+        if launch.ready { SizedRoot().environmentObject(AppModel.shared) } else { Text("Unlock this phone to use Help&I.").padding() }
     }
 }
 
@@ -44,7 +80,7 @@ struct SizedRoot: View {
         Group {
             if size == .asPhone { RootView().tint(.link) } else { RootView().dynamicTypeSize(size.sizes).tint(.link) }
         }
-        .onChange(of: phase) { _, now in if now == .active { AppModel.shared.resumeHomeWiFi() } }
+        .onChange(of: phase) { _, now in if now == .active { AppModel.shared.resume() } }
     }
 }
 
@@ -54,6 +90,11 @@ struct RootView: View {
     var body: some View {
         if let me = model.me {
             VStack(spacing: 0) {
+                NotificationsBanner()
+                if model.saveFailed {
+                    Text("Help&I could not save its latest changes on this phone, so they could be lost if it closes. Calls still go. Freeing some space on the phone may help.")
+                        .font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.2))
+                }
                 NoticeBanner()
                 // A profile can leave a caller only the three buttons (app spec, Profiles).
                 if me.role == .caller && model.profile.hidesSettings { CallView() } else { tabs(me) }
@@ -134,6 +175,31 @@ struct NoticeBanner: View {
         case .unconfirmed: "The group's first coordinator has not confirmed you yet, so the others may not know you are in the group. Ask a coordinator to check."
         case .inviterLeft: "The coordinator who invited you has left the group, and the others may not know you are in it. Ask another coordinator to check, and to invite you again if needed."
         }
+    }
+}
+
+/// Notifications turned off for Help&I, or Time Sensitive for a responder, until put right.
+struct NotificationsBanner: View {
+    @EnvironmentObject var model: AppModel
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        if let problem = model.notificationProblem {
+            ViewThatFits(in: .horizontal) {
+                HStack { message(problem); settings }
+                VStack(alignment: .leading) { message(problem); settings }
+            }
+            .padding()
+            .background(Color.orange.opacity(0.2))
+        }
+    }
+
+    private func message(_ text: String) -> some View {
+        Text(text).font(.callout).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var settings: some View {
+        Button("Open Settings") { URL(string: UIApplication.openNotificationSettingsURLString).map { openURL($0) } }.buttonStyle(.action)
     }
 }
 

@@ -4,6 +4,9 @@ import Foundation
 /// The client side of the relay protocol (relay/src/relay.js). Frames are sealed with the group
 /// key before they leave the phone; the relay stores ciphertext and public keys only.
 public enum RelayProtocol {
+    /// The relay Help&I runs, which a new group uses unless its coordinator sets another or none.
+    public static let defaultRelay = "https://helprelayandeye.andeye.workers.dev"
+
     public static func signingInput(method: String, pathAndQuery: String, timestamp: String, body: Data) -> Data {
         let hash = Data(SHA256.hash(data: body)).base64EncodedString()
         return Data("HELPA-RELAY-1\n\(method)\n\(pathAndQuery)\n\(timestamp)\n\(hash)".utf8)
