@@ -96,7 +96,7 @@ Needs phone C from section 6.
 2. On phone B, under New keys to hand out, show phone A its update code, and scan it on phone A under Key update.
 3. On phone A, press Help.
 
-Pass: phone B alerts, phone C does not. Phone A's person still has the same unit number.
+Pass: phone B alerts, phone C does not. Phone A's person still has the same unit number. Between steps 1 and 2, phone A's watch (if it has one, section 7) says on its second page to scan the new code on the phone by the date the phone shows; after step 2 the line goes.
 
 ## 9. Availability and gaps
 
@@ -376,7 +376,7 @@ Needs a real Apple Watch with Help&I set up (section 7), and a responder's phone
 3. Tap it again, and press I'm OK after a few seconds.
 4. Tap it again, and press Help after a few seconds.
 
-Pass: in step 1 the complication shows a raised hand and Help wherever it fits. In step 2 the watch opens Help&I with the red button counting down from 60, taps the wrist every 10 seconds, at 30 seconds left says "Calling for help in 30 seconds. Press I'm OK to stop, or Help to ask for help now." (in the profile's own words), and at 0 sends Help, which the responder receives; it keeps counting with the wrist lowered. In step 3 the countdown stops and nothing is sent. In step 4 Help goes at once.
+Pass: in step 1 the complication shows a raised hand and Help wherever it fits. In step 2 the watch opens Help&I with the red button counting down from 60, taps the wrist every 10 seconds, at 30 seconds left says "Calling for help in 30 seconds. Press I'm OK to stop, or Help to ask for help now." (in the profile's own words), and at 0 sends Help, which the responder receives; it keeps counting with the wrist lowered. In step 3 the countdown stops, the watch shows and says "Stopped. Nothing has been sent." and nothing is sent; with VoiceOver on, it reads I'm OK during the countdown as "I'm OK. Press to stop the countdown: nothing is sent." In step 4 Help goes at once.
 
 ## 41. Home Wi-Fi with nothing else
 

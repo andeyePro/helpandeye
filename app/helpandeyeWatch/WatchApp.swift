@@ -135,6 +135,14 @@ struct WatchCallView: View {
                     Text(model.engine?.me == nil ? "Your phone is out of reach. Open Help&I on your phone once, with this watch nearby, so it can call without the phone."
                                                  : "Your phone is out of reach: calls go over this watch's own internet.")
                 }
+                // After a removal, until the phone scans its update code: by when, and once too
+                // late, that calls from here cannot reach the group.
+                if let end = model.keysEndAt {
+                    Text(model.keysExpired
+                         ? "This watch cannot reach your group until the new code from your coordinator is scanned on your phone, under Group. If you need help now, call 999."
+                         : "Scan the new code from your coordinator on your phone, under Group, by \(end.formatted(date: .long, time: .omitted)). After that this watch cannot reach your group.")
+                        .foregroundStyle(Colour.amber.color)
+                }
                 if model.alertsOff {
                     Text("Alerts for Help&I are off on this watch, so it cannot tell you when someone calls. To turn them on, open the Watch app on your iPhone, then Notifications, then Help&I.")
                         .foregroundStyle(Colour.amber.color)
@@ -165,7 +173,9 @@ struct WatchCallView: View {
             .background(colour.color, in: shape)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(counting ? "\(model.words(.red)) in \(model.secondsLeft) seconds. Press to call now." : model.words(colour))
+        .accessibilityLabel(counting ? "\(model.words(.red)) in \(model.secondsLeft) seconds. Press to call now."
+                            : colour == .green && model.countdown != nil ? "\(model.words(.green)). Press to stop the countdown: nothing is sent."
+                            : model.words(colour))
     }
 
     /// Words, a symbol, or both, as on the phone; the symbol is left out when both will not fit.

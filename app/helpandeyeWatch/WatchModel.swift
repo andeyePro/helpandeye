@@ -140,12 +140,19 @@ final class WatchModel: NSObject, ObservableObject {
     fileprivate func take(_ data: Data) {
         guard let handover = try? JSONDecoder().decode(WatchHandover.self, from: data), let identity = handover.identity else { return }
         if engine?.take(handover) != true {
+            // Other keys are another phone (or a phone set up afresh): what the old one's watch
+            // heard and sent is not this one's.
+            if engine != nil { alerts.cancelAll(); Store.save(Activity()) }
             Store.keep(handedOver: identity)
             Store.save(handover.state(keeping: Store.loadState()))
             start(identity)
             engine?.take(handover)
         }
         takeOthers(Array(handover.each.dropFirst()), identity: identity)
+        // Told through the handover that the owner no longer responds in a group (removed, or
+        // made a caller only): nothing should keep alerting for calls they cannot answer.
+        if engine?.me?.canRespond != true { alerts.cancelAll() }
+        for o in others.values where o.engine.me?.canRespond != true { o.alerts.cancelAll() }
     }
 
     /// The other groups' handovers: new ones started, gone ones forgotten.
@@ -204,9 +211,11 @@ final class WatchModel: NSObject, ObservableObject {
     /// The owner left the group on their phone: the watch stops acting for them at once.
     fileprivate func forget() {
         alerts.cancelAll()
-        for (tag, o) in others { o.alerts.cancelAll(); Store.forget(group: tag) }
+        for (tag, o) in others { o.alerts.cancelAll(); o.engine.leave(); Store.forget(group: tag) }
         others = [:]
         Store.otherGroups = []
+        // Leaving stops its relay polling for the group too.
+        engine?.leave()
         engine = nil
         bag = []
         Store.forgetHandedOver()
@@ -315,6 +324,11 @@ final class WatchModel: NSObject, ObservableObject {
     /// The owner's settings, from their phone.
     var profile: Profile { engine?.profile ?? .standard }
 
+    /// When this watch's keys stop reaching the group, after a removal whose new code the phone
+    /// has not scanned; and whether they already have.
+    var keysEndAt: Date? { Self.screensKeysNeeded ? Date().addingTimeInterval(5 * 86_400) : engine?.keysEndAt }
+    var keysExpired: Bool { Self.screensKeysNeeded ? false : engine?.keysExpired == true }
+
     func words(_ colour: Colour) -> String { ButtonWords.words(colour, in: profile) }
 
     /// Another's call, in the words they see on their own buttons.
@@ -338,6 +352,7 @@ final class WatchModel: NSObject, ObservableObject {
         if let warning { return (warning, false) }
         if let ack = lastAck, let s = engine(forGroup: ack.group)?.ackSendStatus(ack.key) {
             switch s {
+            case .notSent where keysExpired: return ("Not acknowledged: the new code must be scanned on your phone first.", true)
             case .notSent: return ("Not acknowledged: this watch cannot reach the internet. Use your phone.", true)
             case .sending: return ("Sending your acknowledgement…", false)
             default: return ("Acknowledged.", false)
@@ -384,7 +399,14 @@ final class WatchModel: NSObject, ObservableObject {
         // A press during the countdown stops it; I'm OK then sends nothing, the others go now.
         if countdown != nil {
             stopCountdown()
-            if colour == .green { CallerVoice.shared.pressed(); return }
+            if colour == .green {
+                CallerVoice.shared.pressed()
+                // Said as well as shown: with poor sight, or VoiceOver, the button changing back is not enough to know it stopped.
+                let why = "Stopped. Nothing has been sent."
+                warning = why
+                CallerVoice.shared.tell(.init(sound: nil, spoken: why), profile: profile)
+                return
+            }
         }
         CallerVoice.shared.pressed()
         pressed = colour
@@ -400,6 +422,11 @@ final class WatchModel: NSObject, ObservableObject {
             return
         }
         sentByWatch = false
+        // A coordinator or responder who does not call in this group: the phone would say the same.
+        if engine?.me != nil {
+            failed("Not sent: you are not a caller in this group. Use your phone, or call 999.")
+            return
+        }
         guard phoneInReach, WCSession.default.activationState == .activated else {
             failed("Not sent: your phone is out of reach. Use your phone, or call 999.")
             return
@@ -467,6 +494,10 @@ final class WatchModel: NSObject, ObservableObject {
     /// ways: a debug build, on a simulator, and only with the test's own launch argument. A real
     /// watch can never show it.
     private static var isScreensTest: Bool { ProcessInfo.processInfo.arguments.contains("-HelpAScreensTest") }
+    /// The screens of a watch whose keys stop in five days, by the test's launch argument.
+    private static let screensKeysNeeded = isScreensTest && ProcessInfo.processInfo.arguments.contains("-HelpAKeysNeeded")
+    #else
+    private static let screensKeysNeeded = false
     #endif
 
     /// Acknowledges from the watch itself (signed as its owner) and through the phone when it is in

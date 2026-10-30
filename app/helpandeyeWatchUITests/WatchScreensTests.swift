@@ -40,6 +40,18 @@ final class WatchScreensTests: XCTestCase {
         settle(app.buttons["I'm OK"])
         look("countdown")
         app.buttons["I'm OK"].tap()
+        // Stopping it is said and shown, on the page that opens for it.
+        XCTAssert(app.staticTexts["Stopped. Nothing has been sent."].waitForExistence(timeout: 10))
+        look("countdown-stopped")
+        // A watch whose keys stop in five days, after a removal the phone has no new code for yet.
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "-HelpACountdown" }
+        app.launchArguments += ["-HelpAKeysNeeded"]
+        app.launch()
+        settle(app.buttons["Help"])
+        app.swipeUp()
+        XCTAssert(app.staticTexts.element(matching: NSPredicate(format: "label BEGINSWITH 'Scan the new code'")).waitForExistence(timeout: 10))
+        look("keys")
 
         if !problems.isEmpty {
             XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))

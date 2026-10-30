@@ -165,7 +165,12 @@ Agreed with Martin, 2026-10-28 ([decision 6](design-decisions.md#d6)).
   with it large, added in one tap from the phone.
 - Tapping the complication starts a 60-second countdown shown in the red button, vibrating every
   10 seconds. At 30 seconds with no touch it says "Calling for help in 30 seconds. Press I'm OK to
-  stop, or Help to ask for help now." At 0 it sends Help.
+  stop, or Help to ask for help now." At 0 it sends Help. I'm OK stops it, shown and said as
+  "Stopped. Nothing has been sent."; Help or Need a hand stops it and goes at once.
+- Out of its phone's reach the watch acts as the same member with what the phone last handed it,
+  over its own internet, numbering its calls apart from the phone's. Back in reach the two
+  reconcile: the phone takes the watch's calls and acknowledgements, and the watch takes the
+  calls settled on the phone. The watch shows when outdated keys stop, as the phone does.
 
 ## Keys and setting up a group
 
