@@ -400,8 +400,30 @@ public struct ResponderInbox: Sendable, Codable {
 // update never throws away a request that is still open.
 
 extension KeyedDecodingContainer {
+    /// A field missing, or written by a newer or damaged copy, takes its default rather than lose
+    /// everything saved beside it.
     func value<T: Decodable>(_ key: Key, or fallback: @autoclosure () -> T) throws -> T {
-        try decodeIfPresent(T.self, forKey: key) ?? fallback()
+        ((try? decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback()
+    }
+
+    /// What can be read of a list: one entry that cannot be read is dropped, not the rest.
+    func values<T: Decodable>(_ key: Key) -> [T] {
+        ((try? decodeIfPresent([Readable<T>].self, forKey: key)) ?? nil)?.compactMap(\.value) ?? []
+    }
+}
+
+struct Readable<T: Decodable>: Decodable {
+    let value: T?
+    init(from decoder: Decoder) throws { value = try? T(from: decoder) }
+}
+
+extension ResponderInbox {
+    /// Saved as a list of keys and requests in turn; each request carries its own key, so the
+    /// readable ones are kept whatever else is in the list.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let readable: [IncomingRequest] = c.values(.requests)
+        requests = Dictionary(readable.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
     }
 }
 

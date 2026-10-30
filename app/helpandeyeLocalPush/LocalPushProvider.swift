@@ -41,12 +41,14 @@ final class LocalPushProvider: NEAppPushProvider {
         }
     }
 
-    /// Each call is alerted once, named as the app would name it, for a responder only, and its
-    /// alert goes when someone acknowledges or closes it. A caller who says they are OK after it gets
-    /// one calm alert instead; the app, once opened, follows the coordinator's reminders. Never says
-    /// help is coming: it asks them to open Help&I.
-    private var alerted: Set<IncomingRequest.Key> = []
+    /// A call alerts again with each resend heard, at most once a minute, named as the app would
+    /// name it, for a responder only, until someone acknowledges or closes it: one missed alert is
+    /// not the end of it. A caller who says they are OK after it gets one calm alert instead; the
+    /// app, once opened, follows the coordinator's reminders. Never says help is coming: it asks
+    /// them to open Help&I.
+    private var alerted: [IncomingRequest.Key: Date] = [:]
     private var calmed: Set<IncomingRequest.Key> = []
+    private var done: Set<IncomingRequest.Key> = []
 
     @MainActor private func alert(for frame: HelpFrame, saved: SavedState) {
         guard let me = saved.group.member(saved.me), me.canRespond else { return }
@@ -54,11 +56,14 @@ final class LocalPushProvider: NEAppPushProvider {
         switch frame {
         case let .call(unit, request, colour, _) where colour != .green && unit != me.unit:
             let key = IncomingRequest.Key(unit: unit, request: request)
-            guard alerted.insert(key).inserted else { return }
+            guard !done.contains(key), !calmed.contains(key), Date().timeIntervalSince(alerted[key] ?? .distantPast) >= 60 else { return }
+            alerted[key] = Date()
             let who = saved.group.member(unit: unit)?.name ?? "Unit \(unit)"
             post("\(who): \(ButtonWords.words(colour, in: saved.group.profile(ofUnit: unit)))", "Open Help&I to acknowledge.", key: key, urgent: true)
         case let .ack(unit, request, _, _, _) where saved.group.acceptsAck(frame):
-            center.removeDeliveredNotifications(withIdentifiers: [Self.id(IncomingRequest.Key(unit: unit, request: request))])
+            let key = IncomingRequest.Key(unit: unit, request: request)
+            done.insert(key)
+            center.removeDeliveredNotifications(withIdentifiers: [Self.id(key)])
         case let .signed(signer, _, _):
             guard let sender = saved.group.member(signer),
                   case let .callState(unit, request, state, _, _)? = frame.verifiedInner(signedBy: sender.signingKey, group: saved.group.secrets.groupID),
@@ -67,8 +72,9 @@ final class LocalPushProvider: NEAppPushProvider {
                   : sender.role == .coordinator else { return }
             let key = IncomingRequest.Key(unit: unit, request: request)
             if state.closes {
+                done.insert(key)
                 center.removeDeliveredNotifications(withIdentifiers: [Self.id(key)])
-            } else if alerted.contains(key), calmed.insert(key).inserted {
+            } else if alerted[key] != nil, !done.contains(key), calmed.insert(key).inserted {
                 let who = saved.group.member(unit: unit)?.name ?? "Unit \(unit)"
                 post("\(who) says they're OK now", "Please check on them, then acknowledge in Help&I.", key: key, urgent: false)
             }

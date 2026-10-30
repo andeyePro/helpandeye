@@ -107,6 +107,9 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// scanned, what it seals for responders the removed phone could still open.
     public var removalsWithoutKeys: Set<UInt16> = []
     public var needsKeyUpdate: Bool { !removalsWithoutKeys.isEmpty }
+    /// When this phone first heard of a removal it has no new keys for, whoever was removed. Seven
+    /// days on, the others stop listening on the old keys, so this phone can no longer reach them.
+    public var keysOutdatedSince: Date?
     public var highestMember: UInt16 = 0
     /// The membership version of each member's last role change, so an old one replayed is ignored.
     public var roleVersions: [UInt16: UInt32] = [:]
@@ -114,6 +117,9 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var phoneVersions: [UInt16: UInt32] = [:]
     /// Goes up each time a coordinator changes the group's settings (GroupSettings).
     public var settingsVersion: UInt32 = 0
+    /// The coordinator whose settings these are. Two coordinators out of touch can make the same
+    /// version: the lower member number wins on every phone, so the group never stays split.
+    public var settingsSigner: UInt16 = 0
     /// The highest number block ever given to a coordinator.
     public var highestBlock: UInt16 {
         get { max(members.compactMap(\.block).max() ?? 0, roleBlocksSeen) }
@@ -171,8 +177,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, removalsWithoutKeys, highestMember, roleVersions
-        case policy, relayURL, membershipVersion, roleBlocksSeen, phoneVersions, settingsVersion
+        case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, removalsWithoutKeys, keysOutdatedSince, highestMember, roleVersions
+        case policy, relayURL, membershipVersion, roleBlocksSeen, phoneVersions, settingsVersion, settingsSigner
     }
 
     /// Fields added after the first release are optional when reading, so a group saved by an
@@ -188,10 +194,12 @@ public struct GroupState: Codable, Equatable, Sendable {
         removedMembers = try c.decodeIfPresent(Set<UInt16>.self, forKey: .removedMembers) ?? []
         removedKeys = try c.decodeIfPresent(Set<Data>.self, forKey: .removedKeys) ?? []
         removalsWithoutKeys = try c.decodeIfPresent(Set<UInt16>.self, forKey: .removalsWithoutKeys) ?? []
+        keysOutdatedSince = try c.decodeIfPresent(Date.self, forKey: .keysOutdatedSince)
         highestMember = try c.decodeIfPresent(UInt16.self, forKey: .highestMember) ?? 0
         roleVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .roleVersions) ?? [:]
         phoneVersions = try c.decodeIfPresent([UInt16: UInt32].self, forKey: .phoneVersions) ?? [:]
         settingsVersion = try c.decodeIfPresent(UInt32.self, forKey: .settingsVersion) ?? 0
+        settingsSigner = try c.decodeIfPresent(UInt16.self, forKey: .settingsSigner) ?? 0
         policy = try c.decodeIfPresent(StoredPolicy.self, forKey: .policy) ?? .init()
         relayURL = try c.decodeIfPresent(String.self, forKey: .relayURL)
         membershipVersion = try c.decodeIfPresent(UInt32.self, forKey: .membershipVersion) ?? 1
@@ -305,7 +313,10 @@ public struct GroupState: Codable, Equatable, Sendable {
         case let .memberRemoved(number, version):
             // Only a phone that held the responders' key could open what callers seal.
             let couldRespond = member(number)?.canRespond ?? true
-            if removedMembers.insert(number).inserted, couldRespond, secrets.responderPublicKey != nil { removalsWithoutKeys.insert(number) }
+            if removedMembers.insert(number).inserted {
+                if keysOutdatedSince == nil { keysOutdatedSince = now }
+                if couldRespond, secrets.responderPublicKey != nil { removalsWithoutKeys.insert(number) }
+            }
             membershipVersion = max(membershipVersion, version)
             guard let m = member(number) else { return }
             members.removeAll { $0.number == number }

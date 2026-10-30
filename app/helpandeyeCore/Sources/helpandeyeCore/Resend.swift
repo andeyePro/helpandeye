@@ -32,6 +32,7 @@ extension OutgoingRequest {
     public var nextResend: Date? {
         if case .seen = status { return nil }
         if case .closed = status { return nil }
+        if colour == .green && resends >= Resend.gaps.count { return nil }
         return Resend.due(resends + 1, after: createdAt)
     }
 }

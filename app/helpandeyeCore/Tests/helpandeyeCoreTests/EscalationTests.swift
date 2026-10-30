@@ -111,6 +111,23 @@ final class AirtimeTests: XCTestCase {
         XCTAssertGreaterThan(ukNarrow.airtime(bytes: 40), ukNarrow.airtime(bytes: 20))
     }
 
+    /// Counted as MeshCore sends it, never less: a 32-symbol preamble at SF8 and below, and the
+    /// data type and length byte before the payload.
+    func testAirtimeCountsWhatMeshCoreReallySends() {
+        XCTAssertEqual(RadioSettings(frequencyMHz: 869.5, bandwidthKHz: 62.5, spreadingFactor: 8, codingRate: 8).preambleSymbols, 32)
+        XCTAssertEqual(RadioSettings(frequencyMHz: 869.5, bandwidthKHz: 125, spreadingFactor: 11, codingRate: 5).preambleSymbols, 16)
+        XCTAssertEqual(meshPacketBytes(payload: 13), 2 + 1 + 2 + 16)
+        XCTAssertEqual(meshPacketBytes(payload: 14), 2 + 1 + 2 + 32, "3 + 14 bytes need a second block")
+    }
+
+    func testChangingBandKeepsTheHoursRecord() {
+        let t0 = Date(timeIntervalSince1970: 0)
+        var b = AirtimeBudget(dutyCycle: 0.01)
+        b.record(30, at: t0)
+        let back = b.moved(to: 0.1).moved(to: 0.01)
+        XCTAssertFalse(back.allows(10, kind: .call, at: t0), "back on the 1% band within the hour: no fresh allowance")
+    }
+
     func testOptionalTrafficKeepsHalfTheAllowanceFree() {
         let t0 = Date(timeIntervalSince1970: 0)
         var b = AirtimeBudget(dutyCycle: 0.01) // 36 s an hour; optional traffic may use 18 s

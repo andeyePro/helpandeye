@@ -73,7 +73,12 @@ enum Store {
     }
 
     static func loadActivity(_ group: String = "") -> Activity {
-        (try? Data(contentsOf: file("activity\(group).json"))).flatMap { try? JSONDecoder().decode(Activity.self, from: $0) } ?? Activity()
+        let url = file("activity\(group).json")
+        guard let data = try? Data(contentsOf: url) else { return Activity() }
+        if let activity = try? JSONDecoder().decode(Activity.self, from: data) { return activity }
+        // Set aside rather than saved over, so it can still be looked at.
+        try? FileManager.default.moveItem(at: url, to: file("activity\(group).unreadable-\(Int(Date().timeIntervalSince1970)).json"))
+        return Activity()
     }
 
     @discardableResult

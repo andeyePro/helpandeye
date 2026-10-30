@@ -75,6 +75,20 @@ import XCTest
         XCTAssertEqual(watch.engine.saved!.lastRequest, before)
     }
 
+    /// Full review: a replaced or erased watch carries on above the numbers the phone has had,
+    /// and a different press under an old number is still sent by the phone.
+    func testANewWatchNeverReusesACallNumber() async {
+        watch.engine.press(.red)
+        XCTAssertTrue(caller.engine.adopt(watch.request!.callFrame))
+        let used = watch.request!.number
+        let fresh = WatchHandover(saved: caller.engine.saved!, identity: caller.identity).state(keeping: nil)
+        XCTAssertEqual(fresh.lastRequest, used, "a new watch numbers its next call above it")
+        await advance(3600)
+        let reused = HelpFrame.call(unit: watch.request!.unit, request: used, colour: .amber, sentAt: UInt32(clock.now.timeIntervalSince1970))
+        XCTAssertTrue(caller.engine.adopt(reused))
+        XCTAssertEqual(caller.engine.activity.outgoing.filter { $0.number == used }.map(\.colour), [.amber], "sent as the new call it is")
+    }
+
     func testAWatchCallSentByBothWatchAndPhoneIsOneCall() async {
         watch.engine.press(.red)
         XCTAssertTrue(caller.engine.adopt(watch.request!.callFrame), "the phone takes its watch's call")

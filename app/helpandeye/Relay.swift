@@ -147,8 +147,21 @@ final class Relay: ObservableObject, RelayLink {
         for _ in 0..<5 {
             let stored = RelayPoll.Position.saved(UserDefaults.standard.object(forKey: positionKey))
             let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(RelayPoll.after(stored))", body: Data())
-            if case .some((403, _)) = response { lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return }
-            guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(RelayPoll.Page.self, from: data) else { return }
+            switch response {
+            case .some((403, _)): lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return
+            case .some((401, _)):
+                // Usually the phone's clock: the relay takes only requests made in the last five minutes.
+                lastProblem = clockOff.map { abs($0) > 240 } == true
+                    ? "This phone's clock is wrong by about \(Int(abs(clockOff!) / 60)) minutes, so the relay turns it away. Set the date and time automatically in Settings, General, Date & Time."
+                    : "The relay turned this phone away (401)."
+                return
+            case let .some((status, _)) where status != 200: lastProblem = "Could not read the relay (\(status))."; return
+            default: break
+            }
+            guard case let .some((200, data)) = response, let page = try? JSONDecoder().decode(RelayPoll.Page.self, from: data) else {
+                lastProblem = "Could not read the relay's answer."
+                return
+            }
             // The group or relay changed while waiting: this page belongs to the old one.
             guard self.group?.secrets.groupID == group.secrets.groupID, self.positionKey == positionKey else { return }
             // Answered, so this phone is listed now: a registration still waiting can go.
@@ -159,6 +172,16 @@ final class Relay: ObservableObject, RelayLink {
             if !outcome.more { return }
         }
     }
+
+    /// How far this phone's clock is ahead of the relay's, from its last answer.
+    private var clockOff: TimeInterval?
+    private static let httpDate: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "GMT")
+        f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return f
+    }()
 
     private func request(_ method: String, _ path: String, body: Data) async -> (Int, Data)? {
         guard let base, let identity, let url = URL(string: path, relativeTo: base) else { return nil }
@@ -173,6 +196,7 @@ final class Relay: ObservableObject, RelayLink {
             guard let http = response as? HTTPURLResponse else { return nil }
             if http.value(forHTTPHeaderField: "X-HelpA-Allowance-Low") == "1" { onAllowanceLow?() }
             if http.statusCode != 403 { lastProblem = nil }
+            clockOff = (http.value(forHTTPHeaderField: "Date")).flatMap(Self.httpDate.date(from:)).map { Date().timeIntervalSince($0) }
             return (http.statusCode, data)
         } catch {
             lastProblem = "No internet"

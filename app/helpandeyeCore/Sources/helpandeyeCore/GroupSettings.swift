@@ -29,7 +29,8 @@ extension GroupState {
     /// Returns whether anything changed.
     @discardableResult
     public mutating func apply(settings frame: HelpFrame) -> Bool {
-        guard case let .groupSettings(signer, version, data, sig) = frame, version > settingsVersion,
+        guard case let .groupSettings(signer, version, data, sig) = frame,
+              version > settingsVersion || (version == settingsVersion && settingsSigner != 0 && signer < settingsSigner),
               let coordinator = member(signer), coordinator.role == .coordinator, let key = coordinator.signingKey,
               let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
               pub.isValidSignature(sig, for: Self.settingsInput(group: secrets.groupID, signer: signer, version: version, settings: data)),
@@ -43,6 +44,7 @@ extension GroupState {
         }
         relayURL = s.relayURL
         settingsVersion = version
+        settingsSigner = signer
         return true
     }
 

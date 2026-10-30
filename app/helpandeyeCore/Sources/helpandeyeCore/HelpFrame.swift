@@ -37,6 +37,10 @@ public enum Notice: UInt8, Sendable, Codable, CaseIterable {
     /// For this phone only: the coordinator who invited it was removed before the first
     /// coordinator was heard listing it.
     case inviterLeft = 4
+
+    /// Shared notices are put right for everyone by one coordinator's acknowledgement; this
+    /// phone's own are its person's alone, so no other phone's acknowledgement clears them.
+    public var isShared: Bool { self == .rotaGap || self == .allowanceLow }
 }
 
 /// One Help&I message on the MeshCore group channel, sent as a channel data datagram.

@@ -67,6 +67,7 @@ final class AppModel: ObservableObject {
         relay.onFrame = { [weak self] in self?.engine.receive($0, via: .internet) }
         relay.onAllowanceLow = { [weak self] in self?.engine.raise(.allowanceLow) }
         home.onFrame = { [weak self] in self?.engine.receive($0, via: .wifi) }
+        home.keeps = { [weak self] in self?.engine.takes($0) ?? false }
         board.$state.removeDuplicates().sink { [weak self] state in
             if state == .ready { Task { @MainActor in for e in self?.engines ?? [] { await e.boxReady() } } }
         }.store(in: &bag)
@@ -162,6 +163,7 @@ final class AppModel: ObservableObject {
     var checkIn: CheckInSchedule? { engine.checkIn }
     var canSendPersonal: Bool { engine.canSendPersonal }
     var keyProblem: String? { Self.screensKeysNeeded ? HelpEngine.keysNeeded : engine.keyProblem }
+    var keysEndAt: Date? { Self.screensKeysNeeded ? Date().addingTimeInterval(5 * 86_400) : engine.keysEndAt }
 
     func name(ofUnit unit: UInt32) -> String { engine.name(ofUnit: unit) }
     func name(ofMember n: UInt16) -> String { engine.name(ofMember: n) }
@@ -232,6 +234,7 @@ final class AppModel: ObservableObject {
         let e = HelpEngine(identity: engine.identity, mesh: link, relay: relay, alerts: NotificationAlerts(prefix: tag + "-", ownsCheckIns: false),
                            store: AppStore(group: tag), saved: Store.loadState(tag), activity: Store.loadActivity(tag), homeWiFi: home)
         home.onFrame = { [weak e] in e?.receive($0, via: .wifi) }
+        home.keeps = { [weak e] in e?.takes($0) ?? false }
         link.onFrame = { [weak e] in e?.receive($0, via: .mesh) }
         link.onText = { [weak e] in e?.receiveText(from: $0, $1) }
         relay.onFrame = { [weak e] in e?.receive($0, via: .internet) }

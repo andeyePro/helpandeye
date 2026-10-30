@@ -98,6 +98,9 @@ public struct SavedState: Codable, Equatable, Sendable {
     public var group: GroupState
     public var me: UInt16
     public var lastRequest: UInt16 = 0
+    /// On the phone: the highest number of a call its watch made, handed to the watch so a new or
+    /// erased one carries on above it rather than reuse a number.
+    public var lastWatchRequest: UInt16 = 0
     public var checkIn: CheckInSchedule?
     public var checkInSince: Date?
     /// The last missed check-in this phone raised for its own caller.
@@ -146,6 +149,9 @@ public struct Activity: Codable, Sendable {
     /// Closes this phone sent, repeated a few times like I'm OK, so a phone that missed one does
     /// not go on alerting.
     public var closeRepeats: [CloseRepeat] = []
+    /// When the first coordinator last repeated the member list, kept so a relaunch does not
+    /// repeat it again within the day and use up radio time.
+    public var lastMembershipRepeat: Date?
 
     public init() {}
 }
@@ -183,7 +189,10 @@ public final class HelpEngine: ObservableObject {
     private var lastReAck: [IncomingRequest.Key: Date] = [:]
     private var lastTopUp: [IncomingRequest.Key: Date] = [:]
     private var ackAttempt: [IncomingRequest.Key: UUID] = [:]
-    private var lastMembershipRepeat: Date?
+    private var lastMembershipRepeat: Date? {
+        get { activity.lastMembershipRepeat }
+        set { activity.lastMembershipRepeat = newValue }
+    }
     private var answeredBoxes: Set<UInt16> = []
     private var boxesToAnswer: Set<UInt16> = []
     /// Number blocks of coordinators just removed, to re-list the people they added.
@@ -258,14 +267,18 @@ public final class HelpEngine: ObservableObject {
 
     /// Changes the group. On a coordinator's phone, everyone is told who joined or left, signed,
     /// so their acknowledgements count (or stop counting) on every phone at once.
-    public func updateGroup(_ change: (inout GroupState) -> Void) {
+    public func updateGroup(_ change: (inout GroupState) -> Void) { changeGroup(edit: true, change) }
+
+    /// `edit` is false for settings taken in from elsewhere (a key update), which are not this
+    /// coordinator's own change, so are not sent out again as a newer version.
+    private func changeGroup(edit: Bool, _ change: (inout GroupState) -> Void) {
         guard var s = saved else { return }
         let old = s.group
         let before = Set(s.group.members.map(\.number))
         change(&s.group)
         // Changed settings go to every member at once, under a newer version.
-        let settingsChanged = actsAsCoordinator && s.group.settings != old.settings
-        if settingsChanged { s.group.settingsVersion = old.settingsVersion + 1 }
+        let settingsChanged = edit && actsAsCoordinator && s.group.settings != old.settings
+        if settingsChanged { s.group.settingsVersion = old.settingsVersion + 1; s.group.settingsSigner = s.me }
         if settingsChanged {
             // Settings that cannot go to every member are not kept, so no one is told they went.
             guard s.group.settingsFrame(as: s.me, identity: identity) != nil else {
@@ -418,7 +431,7 @@ public final class HelpEngine: ObservableObject {
     /// differs, so re-pairing or relaunching never gives a fresh allowance within the hour.
     public func bandChanged(_ band: Band?) {
         guard let band, budget?.dutyCycle != band.dutyCycle else { return }
-        budget = AirtimeBudget(dutyCycle: band.dutyCycle)
+        budget = budget?.moved(to: band.dutyCycle) ?? AirtimeBudget(dutyCycle: band.dutyCycle)
     }
 
     /// The box's use of the radio in the last hour (IR 2030): shared by every group when one box
@@ -444,8 +457,15 @@ public final class HelpEngine: ObservableObject {
         return s.lastRequest
     }
 
+    /// When this phone's keys stop reaching the group, if it has not scanned its update by then.
+    public var keysEndAt: Date? { group?.keysOutdatedSince?.addingTimeInterval(GroupState.changeoverPeriod) }
+    /// Past that, only a text the caller sends reaches anyone, so every other route shows the cross.
+    public var keysExpired: Bool { keysEndAt.map { now() >= $0 } ?? false }
+    public static let keysExpiredReason = "This phone's keys are out of date. Scan your update code"
+
     public var availableRoutes: Set<Route> {
         var s: Set<Route> = [.sms]
+        guard !keysExpired else { return s }
         if mesh.isReady { s.insert(.mesh) }
         if relay.isConfigured { s.insert(.internet) }
         if homeWiFi.hasPeers { s.insert(.wifi) }
@@ -474,8 +494,18 @@ public final class HelpEngine: ObservableObject {
     @discardableResult
     public func adopt(_ call: HelpFrame) -> Bool {
         guard !companion, case let .call(unit, number, colour, sentAt) = call, unit == me?.unit, number >= 0x8000 else { return false }
-        if activity.outgoing.contains(where: { $0.unit == unit && $0.number == number }) { return true }
         let pressed = Date(timeIntervalSince1970: TimeInterval(sentAt))
+        if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == number }) {
+            // The same call again. A different press under the same number is a new watch that
+            // started its numbering afresh: the old entry goes, so the new call is sent.
+            if abs(activity.outgoing[i].createdAt.timeIntervalSince(pressed)) <= OutgoingRequest.clockAllowance { return true }
+            activity.outgoing.remove(at: i)
+        }
+        if var s = saved, number > s.lastWatchRequest {
+            s.lastWatchRequest = number
+            saved = s
+            store.save(s)
+        }
         // The watch's I'm OK settles only what was open when it was pressed: never a call made on
         // the phone while it was on its way.
         if colour == .green { settleOnOK(pressedAt: pressed) }
@@ -487,9 +517,10 @@ public final class HelpEngine: ObservableObject {
         var r = request
         let colour = r.colour
         let routes = RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false)
-        if !routes.contains(.mesh) { r.update(.mesh, .failed(mesh.unavailableReason)) }
-        if !routes.contains(.internet) { r.update(.internet, .failed(relay.lastProblem ?? "Internet route not set up")) }
-        if homeWiFi.isEnabled, !routes.contains(.wifi) { r.update(.wifi, .failed(homeWiFi.unavailableReason)) }
+        let expired = keysExpired ? Self.keysExpiredReason : nil
+        if !routes.contains(.mesh) { r.update(.mesh, .failed(expired ?? mesh.unavailableReason)) }
+        if !routes.contains(.internet) { r.update(.internet, .failed(expired ?? relay.lastProblem ?? "Internet route not set up")) }
+        if homeWiFi.isEnabled, !routes.contains(.wifi) { r.update(.wifi, .failed(expired ?? homeWiFi.unavailableReason)) }
         for route in routes { r.update(route, .sending) }
         activity.outgoing.append(r)
         trimOutgoing()
@@ -680,6 +711,15 @@ public final class HelpEngine: ObservableObject {
     /// Typed text and position go only to responders (decision 12), sealed once for all of them;
     /// in a group made before responders had their own key, over the internet sealed with the
     /// group key, or else as direct messages to each responder's box.
+    /// Whether this phone acts on a frame, so may confirm it on home Wi-Fi: a call or a sealed
+    /// message for responders only if this member responds and it is not their own.
+    public func takes(_ frame: HelpFrame) -> Bool {
+        switch frame {
+        case let .call(unit, _, _, _), let .forResponders(unit, _, _, _): me?.canRespond == true && unit != me?.unit
+        default: me != nil
+        }
+    }
+
     public var canSendPersonal: Bool { keyProblem == nil && (relay.isConfigured || mesh.isReady || homeWiFi.hasPeers) }
 
     /// After a removal this phone has no new keys for, the removed phone could still open what it
@@ -965,7 +1005,7 @@ public final class HelpEngine: ObservableObject {
                 spawn {
                     // Resends count as optional airtime, so they never use up what a new press needs.
                     let failure = firstOnInternet ? await self.sendOnInternet(r.callFrame, wake: .call, in: gid)
-                        : await self.send(r.callFrame, on: route, kind: .optional, in: gid)
+                        : await self.send(r.callFrame, on: route, kind: r.colour == .green ? .optional : .resend, in: gid)
                     if failure == nil { self.updateOutgoing(r, route, .sent) }
                     if let ok = self.okFrame(r) { _ = await self.send(ok, on: route, kind: .optional, in: gid) }
                 }
@@ -1001,7 +1041,13 @@ public final class HelpEngine: ObservableObject {
         receive(frame, via: .mesh)
     }
 
-    public func receive(_ frame: HelpFrame, via route: Route) {
+    public func receive(_ frame: HelpFrame, via route: Route) { receive(frame, via: route, opened: false) }
+
+    /// `opened` is true for what came sealed for responders. Where responders have their own key,
+    /// callers seal and sign everything personal, so a plain note, position or choice is someone
+    /// else writing as the caller (any member holds the channel secret) and counts for nothing.
+    private func receive(_ frame: HelpFrame, via route: Route, opened: Bool) {
+        if frame.personalPart != nil, !opened, group?.secrets.responderPublicKey != nil { return }
         switch frame {
         case let .ack(unit, request, who, at, _):
             // Only a current responder's own signature counts (decision 6, AGENTS.md).
@@ -1026,7 +1072,7 @@ public final class HelpEngine: ObservableObject {
             switch inner {
             case let .noticeAck(notice, by, at):
                 // An old acknowledgement, replayed, must not clear a newer notice.
-                if sender.role == .coordinator, let raised = activity.notices[notice]?.raisedAt,
+                if notice.isShared, sender.role == .coordinator, let raised = activity.notices[notice]?.raisedAt,
                    TimeInterval(at) >= raised.timeIntervalSince1970 - OutgoingRequest.clockAllowance {
                     activity.notices[notice]?.acknowledge(by: by)
                 }
@@ -1075,6 +1121,8 @@ public final class HelpEngine: ObservableObject {
                     let before = s.group
                     s.group.apply(membership: inner, at: now())
                     if s.group != before { setState(s) }
+                    // Removed: this phone can no longer answer, so nothing should keep alerting it.
+                    if case let .memberRemoved(n, _) = inner, n == s.me { for k in activity.inbox.requests.keys { alerts.cancel(k) } }
                     // The coordinator who invited this phone has gone before it was confirmed.
                     if case let .memberRemoved(n, _) = inner, n == s.invitedBy, !s.confirmed { raise(.inviterLeft) }
                     // The first coordinator lists at once anyone it hears another coordinator add, so
@@ -1099,7 +1147,7 @@ public final class HelpEngine: ObservableObject {
         case .forResponders:
             // Only a responder can open it; what is inside is handled as if it came plainly.
             guard me?.canRespond == true, let g = group, let inner = ForResponders.open(frame, in: g, at: now()) else { return }
-            receive(inner, via: route)
+            receive(inner, via: route, opened: true)
             return
         case let .board(member, key, _):
             // A watch has no box: other members' boxes are the phone's business.
@@ -1157,7 +1205,7 @@ public final class HelpEngine: ObservableObject {
     @discardableResult
     public func acknowledge(_ key: IncomingRequest.Key) -> Bool {
         guard me?.canRespond == true, let me = saved?.me,
-              let frame = activity.inbox.acknowledge(key, by: me, at: now(), identity: identity, group: groupID) else { return false }
+              let frame = activity.inbox.acknowledge(key, by: me, at: ackTime(key), identity: identity, group: groupID) else { return false }
         activity.lastAnswered[me] = now()
         alerts.cancel(key)
         log("You acknowledged \(describe(key.unit, key.request, activity.inbox.requests[key]?.colour))")
@@ -1167,7 +1215,13 @@ public final class HelpEngine: ObservableObject {
 
     public func retryAck(_ key: IncomingRequest.Key) {
         guard let me = saved?.me else { return }
-        sendAck(.signedAck(unit: key.unit, request: key.request, responder: me, at: now(), identity: identity, group: groupID), for: key)
+        sendAck(.signedAck(unit: key.unit, request: key.request, responder: me, at: ackTime(key), identity: identity, group: groupID), for: key)
+    }
+
+    /// Never before the call was pressed, so a responder whose clock is slow is still counted by
+    /// the caller, who takes only acknowledgements made after the press.
+    private func ackTime(_ key: IncomingRequest.Key) -> Date {
+        max(now(), activity.inbox.requests[key]?.sentAt ?? .distantPast)
     }
 
     private func sendAck(_ frame: HelpFrame, for key: IncomingRequest.Key) {
@@ -1208,7 +1262,7 @@ public final class HelpEngine: ObservableObject {
     /// alerts its own person from their turn, counted from when the caller pressed, until someone
     /// acknowledges.
     private func scheduleAlerts(for key: IncomingRequest.Key) {
-        guard let r = activity.inbox.requests[key], r.isOpen, let e = escalation(for: r), let me = saved?.me else { return }
+        guard let r = activity.inbox.requests[key], r.isOpen, let e = escalation(for: r), let me = self.me?.number, self.me?.canRespond == true else { return }
         let calm = r.colour == .green || r.callerIsOK
         let turn = TimeInterval(e.order.firstIndex(of: me) ?? e.order.count) * e.interval
         let turnAt = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn)
@@ -1301,6 +1355,7 @@ public final class HelpEngine: ObservableObject {
     public func acknowledge(_ notice: Notice) {
         guard let me = saved?.me else { return }
         activity.notices[notice]?.acknowledge(by: me)
+        guard notice.isShared else { return }
         let frame = HelpFrame.signing(.noticeAck(notice: notice, by: me, at: UInt32(now().timeIntervalSince1970)), as: me,
                                       identity: identity, group: groupID)
         let gid = groupID
@@ -1319,6 +1374,7 @@ public final class HelpEngine: ObservableObject {
         }
         merged.removedMembers.formUnion(current.removedMembers)
         merged.removalsWithoutKeys = current.removalsWithoutKeys.subtracting(update.removedMembers)
+        merged.keysOutdatedSince = current.removedMembers.isSubset(of: update.removedMembers) ? nil : current.keysOutdatedSince
         merged.members.removeAll { merged.removedMembers.contains($0.number) }
         merged.membershipVersion = max(update.membershipVersion, current.membershipVersion)
         merged.highestMember = max(update.highestMember, current.highestMember)
@@ -1329,8 +1385,17 @@ public final class HelpEngine: ObservableObject {
                 merged.members[i].block = mine.block
             }
         }
+        // The newer settings stay, by version and then signer, as if heard in a settings frame.
+        let updateIsNewer = update.settingsVersion > current.settingsVersion
+            || (update.settingsVersion == current.settingsVersion && update.settingsSigner != 0 && update.settingsSigner < current.settingsSigner)
+        if !updateIsNewer {
+            merged.policy = current.policy
+            merged.relayURL = current.relayURL
+            merged.settingsVersion = current.settingsVersion
+            merged.settingsSigner = current.settingsSigner
+        }
         if merged.relayURL == nil { merged.relayURL = current.relayURL }
-        updateGroup { $0 = merged }
+        changeGroup(edit: false) { $0 = merged }
     }
 
     /// Only the first coordinator makes new coordinators.
@@ -1467,6 +1532,7 @@ extension SavedState {
         group = try c.decode(GroupState.self, forKey: .group)
         me = try c.decode(UInt16.self, forKey: .me)
         lastRequest = try c.value(.lastRequest, or: 0)
+        lastWatchRequest = try c.value(.lastWatchRequest, or: 0)
         checkIn = try c.decodeIfPresent(CheckInSchedule.self, forKey: .checkIn)
         checkInSince = try c.decodeIfPresent(Date.self, forKey: .checkInSince)
         checkInRaised = try c.decodeIfPresent(Date.self, forKey: .checkInRaised)
@@ -1482,7 +1548,7 @@ extension SavedState {
 extension Activity {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        outgoing = try c.value(.outgoing, or: [])
+        outgoing = c.values(.outgoing)
         inbox = try c.value(.inbox, or: ResponderInbox())
         rota = try c.value(.rota, or: Rota())
         lastAnswered = try c.value(.lastAnswered, or: [:])
@@ -1494,7 +1560,8 @@ extension Activity {
         alertedGreens = try c.value(.alertedGreens, or: [])
         log = try c.value(.log, or: GroupLog())
         lastSettingsChange = try c.decodeIfPresent(GroupLog.Entry.self, forKey: .lastSettingsChange)
-        changeRequests = try c.value(.changeRequests, or: [])
-        closeRepeats = try c.value(.closeRepeats, or: [])
+        changeRequests = c.values(.changeRequests)
+        closeRepeats = c.values(.closeRepeats)
+        lastMembershipRepeat = try? c.decodeIfPresent(Date.self, forKey: .lastMembershipRepeat)
     }
 }

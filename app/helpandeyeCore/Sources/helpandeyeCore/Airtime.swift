@@ -9,9 +9,12 @@ public struct RadioSettings: Equatable, Sendable {
     public var codingRate: Int
     public var preambleSymbols: Int
 
-    public init(frequencyMHz: Double, bandwidthKHz: Double, spreadingFactor: Int, codingRate: Int, preambleSymbols: Int = 16) {
+    /// MeshCore sends a 32-symbol preamble at spreading factor 8 and below, 16 above
+    /// (`RadioLibWrapper::preambleLengthForSF`); the box does not report it.
+    public init(frequencyMHz: Double, bandwidthKHz: Double, spreadingFactor: Int, codingRate: Int, preambleSymbols: Int? = nil) {
         self.frequencyMHz = frequencyMHz; self.bandwidthKHz = bandwidthKHz
-        self.spreadingFactor = spreadingFactor; self.codingRate = codingRate; self.preambleSymbols = preambleSymbols
+        self.spreadingFactor = spreadingFactor; self.codingRate = codingRate
+        self.preambleSymbols = preambleSymbols ?? (spreadingFactor <= 8 ? 32 : 16)
     }
 
     /// Time on air for one LoRa packet of `bytes` (Semtech AN1200.13), explicit header, CRC on.
@@ -51,7 +54,8 @@ public struct Band: Equatable, Sendable {
 /// the whole legal allowance; follow-ups, text and position only the part left after keeping
 /// half of it free for other people's calls (decision 12, "only when there is airtime to spare").
 public struct AirtimeBudget: Sendable, Codable {
-    public enum Kind: Sendable { case call, optional }
+    /// A new press; a resend of a Help or Need a hand nobody has answered; anything else.
+    public enum Kind: Sendable { case call, resend, optional }
     struct Entry: Codable, Sendable { let id: UUID; let at: Date; let seconds: TimeInterval }
     public var window: TimeInterval { 3600 }
     public let dutyCycle: Double
@@ -61,14 +65,25 @@ public struct AirtimeBudget: Sendable, Codable {
 
     public init(dutyCycle: Double) { self.dutyCycle = max(dutyCycle, 0) }
 
+    /// The same record under another sub-band's limit. Time used in the other sub-band still
+    /// counts, which is more than the rules ask, so switching back and forth never gives a fresh
+    /// allowance within the hour.
+    public func moved(to dutyCycle: Double) -> AirtimeBudget {
+        var b = AirtimeBudget(dutyCycle: dutyCycle)
+        b.log = log
+        return b
+    }
+
     public func used(at now: Date) -> TimeInterval {
         log.filter { now.timeIntervalSince($0.at) < window }.reduce(0) { $0 + $1.seconds }
     }
 
     /// Calls may use up to 90% of the legal allowance, leaving a margin for what the firmware sends
-    /// itself (adverts, direct-message acknowledgements), which is not counted here.
+    /// itself (adverts, direct-message acknowledgements), which is not counted here. Resends of
+    /// unanswered calls may use up to 70%, so routine traffic (up to 50%) never leaves them none.
     public func allows(_ seconds: TimeInterval, kind: Kind, at now: Date) -> Bool {
-        let limit = dutyCycle * window * (kind == .call ? 0.9 : 0.5)
+        let share = switch kind { case .call: 0.9; case .resend: 0.7; case .optional: 0.5 }
+        let limit = dutyCycle * window * share
         return used(at: now) + seconds <= limit
     }
 
@@ -89,6 +104,7 @@ public struct AirtimeBudget: Sendable, Codable {
 /// Rough size on air of a MeshCore group datagram carrying `payload` bytes: packet header, path
 /// length, channel hash and MAC, the data type, then AES blocks of 16 bytes.
 public func meshPacketBytes(payload: Int, pathBytes: Int = 0) -> Int {
-    let plaintext = 2 + payload
+    // MeshCore's group data puts its data type (2 bytes) and a length byte before the payload.
+    let plaintext = 3 + payload
     return 2 + pathBytes + 1 + 2 + Int(ceil(Double(plaintext) / 16)) * 16
 }

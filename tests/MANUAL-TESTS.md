@@ -399,7 +399,7 @@ Needs a signed build (shared keychain group and the Network Extensions capabilit
 5. On phone A, also set up Keep listening on this Wi-Fi, close every other phone's Help&I, and press Help on phone A.
 6. With phone B listening locked, press Help on phone A, then I'm OK; then press Help again and acknowledge it on phone C.
 
-Pass: in step 1 Group says "Listening on" the Wi-Fi only while phone B is on it, and "Set to listen" otherwise. In step 2 phone B alerts within a few seconds, naming the caller, even with the app closed and the phone locked. In step 3 phone A shows the acknowledgement. In step 4 phone B does not alert over Wi-Fi, and phone A shows the cross for Home Wi-Fi (other routes as set up). In step 5 phone A shows the cross for Home Wi-Fi: its own listener never counts as another phone. In step 6 phone B alerts once for the call, never again for its resends; after I'm OK its alert becomes a calm "says they're OK now", and after phone C's acknowledgement phone B's alert goes.
+Pass: in step 1 Group says "Listening on" the Wi-Fi only while phone B is on it, and "Set to listen" otherwise. In step 2 phone B alerts within a few seconds, naming the caller, even with the app closed and the phone locked. In step 3 phone A shows the acknowledgement. In step 4 phone B does not alert over Wi-Fi, and phone A shows the cross for Home Wi-Fi (other routes as set up). In step 5 phone A shows the cross for Home Wi-Fi: its own listener never counts as another phone. In step 6 phone B alerts for the call, and again with its resends (at most once a minute) until someone acknowledges; after I'm OK its alert becomes a calm "says they're OK now", and after phone C's acknowledgement phone B's alert goes.
 
 ## 43. A phone restarted and not yet unlocked
 

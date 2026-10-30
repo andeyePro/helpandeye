@@ -23,6 +23,8 @@ public struct WatchHandover: Codable, Equatable, Sendable {
     /// The owner's own choices for their profile, so the watch looks and sounds as the phone does.
     public var own: Profile?
     public var ownChosen: Set<Profile.Setting> = []
+    /// The highest call number the phone has had from a watch: this watch numbers above it.
+    public var watchCallsAfter: UInt16 = 0
 
     public struct Part: Codable, Equatable, Sendable {
         public let group: GroupState
@@ -31,6 +33,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
 
     public init(saved: SavedState, identity: DeviceIdentity, others: [SavedState] = []) {
         group = saved.group; me = saved.me; keys = identity.rawRepresentation; own = saved.own; ownChosen = saved.ownChosen
+        watchCallsAfter = saved.lastWatchRequest
         self.others = others.map { Part(group: $0.group, me: $0.me) }
     }
 
@@ -39,6 +42,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
         var first = WatchHandover(group: group, me: me, keys: keys)
         first.own = own
         first.ownChosen = ownChosen
+        first.watchCallsAfter = watchCallsAfter
         return [first] + others.map { WatchHandover(group: $0.group, me: $0.me, keys: keys) }
     }
 
@@ -52,6 +56,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
         others = try c.decodeIfPresent([Part].self, forKey: .others) ?? []
         own = try c.decodeIfPresent(Profile.self, forKey: .own)
         ownChosen = try c.decodeIfPresent(Set<Profile.Setting>.self, forKey: .ownChosen) ?? []
+        watchCallsAfter = try c.decodeIfPresent(UInt16.self, forKey: .watchCallsAfter) ?? 0
     }
 
     public var identity: DeviceIdentity? { try? DeviceIdentity(rawRepresentation: keys) }
@@ -65,6 +70,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
         if let current, current.me == me, current.group.secrets.groupID == group.secrets.groupID {
             s.lastRequest = current.lastRequest
         }
+        if watchCallsAfter >= 0x8000 { s.lastRequest = max(s.lastRequest, watchCallsAfter) }
         return s
     }
 }

@@ -28,6 +28,22 @@ import XCTest
         XCTAssertEqual(t.caller.request?.status, .seen(responder: t.responder.engine.saved!.me))
     }
 
+    /// Two callers at home with no responder there: the other caller's phone takes the call in but
+    /// cannot act on it, so it does not confirm it, and the caller sees the cross.
+    func testAnotherCallersPhoneNeverMakesACallCountAsSent() async {
+        let neighbour = Phone(air: t.air, clock: t.clock)
+        t.join(neighbour, call: true, respond: false)
+        neighbour.mesh.isReady = false
+        neighbour.wifi.network = "home"
+        t.responder.wifi.network = "elsewhere"
+        t.coordinator.wifi.network = "elsewhere"
+        for p in t.air.phones { p.engine.tick() }
+        t.caller.engine.press(.red)
+        await t.air.run()
+        XCTAssertNotEqual(t.caller.request?.routes[.wifi], .sent)
+        XCTAssertEqual(t.caller.request?.status, .notSent)
+    }
+
     func testWithWiFiAndTheRelayBothWorkingEachCallIsHeardOnce() async {
         for p in t.air.phones { p.relay.isConfigured = true }
         await t.relaySetUp()

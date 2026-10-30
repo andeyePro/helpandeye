@@ -91,6 +91,7 @@ struct RootView: View {
         if let me = model.me {
             VStack(spacing: 0) {
                 NotificationsBanner()
+                KeysBanner()
                 if model.saveFailed {
                     Text("Help&I could not save its latest changes on this phone, so they could be lost if it closes. Calls still go. Freeing some space on the phone may help.")
                         .font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.2))
@@ -174,6 +175,23 @@ struct NoticeBanner: View {
         case .allowanceLow: "The free internet relay is nearly used up for today. Calls will still go over the local radio."
         case .unconfirmed: "The group's first coordinator has not confirmed you yet, so the others may not know you are in the group. Ask a coordinator to check."
         case .inviterLeft: "The coordinator who invited you has left the group, and the others may not know you are in it. Ask another coordinator to check, and to invite you again if needed."
+        }
+    }
+}
+
+/// After a removal, until this phone scans its update code: by when, and once too late, that it
+/// can no longer reach the group.
+struct KeysBanner: View {
+    @EnvironmentObject var model: AppModel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 3600)) { _ in
+            if let end = model.keysEndAt {
+                Text(model.engine.keysExpired
+                     ? "This phone can no longer reach your group: its keys are out of date. Scan the update code your coordinator shows you, under Group. If you need help now, call 999."
+                     : "A phone was removed from your group. Scan the update code your coordinator shows you, under Group, by \(end.formatted(date: .long, time: .omitted)). After that this phone can no longer reach the group.")
+                    .font(.callout).frame(maxWidth: .infinity, alignment: .leading).padding().background(Color.orange.opacity(0.2))
+            }
         }
     }
 }

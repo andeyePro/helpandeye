@@ -15,8 +15,9 @@ import Network
     /// Why the route cannot work at all here, such as Local Network access being turned off.
     @Published private(set) var problem: String?
     var onFrame: ((HelpFrame) -> Void)?
-    /// Whether a frame heard is one this end takes in, so is confirmed. Everything, in the app.
-    var keeps: (HelpFrame) -> Bool = { _ in true }
+    /// Whether a frame heard is one this end takes in, so is confirmed: a caller's phone never
+    /// confirms a call or a sealed message for responders, which it cannot act on.
+    var keeps: (HelpFrame) -> Bool = { _ in false }
 
     private var group: GroupState?
     private var me: UInt16?

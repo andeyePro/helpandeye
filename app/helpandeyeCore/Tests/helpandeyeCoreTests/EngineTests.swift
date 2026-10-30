@@ -80,7 +80,10 @@ final class RelayModel {
 
     /// 200, or the status the relay would refuse with.
     func setMembers(signer: String, generation g: UInt32, members list: [Entry], removed named: [String], primary: String?, groupID: Data?) -> Int {
-        let isKey: (String) -> Bool = { $0.range(of: #"^[A-Za-z0-9+/]{43}=$"#, options: .regularExpression) != nil }
+        // As relay.js: 32 bytes of standard base64, written the one way they encode (no stray bits).
+        let isKey: (String) -> Bool = { k in
+            k.range(of: #"^[A-Za-z0-9+/]{43}=$"#, options: .regularExpression) != nil && Data(base64Encoded: k)?.base64EncodedString() == k
+        }
         if !named.allSatisfy(isKey) { return 400 }
         if !list.allSatisfy({ isKey($0.key) && ["coordinator", "member"].contains($0.role) }) { return 400 }
         if list.count > Self.maxMembers || named.count > 1024 { return 413 }
@@ -200,7 +203,7 @@ final class RelayModel {
         if let w = whileWaiting { whileWaiting = nil; await w() }
         var took = false
         for p in to where air.keep(frame, me, p) {
-            took = true
+            if p.engine.takes(frame) { took = true }
             air.queue.append((me, p, { p.engine.receive(frame, via: .wifi) }))
         }
         return took ? nil : "No other member's Help&I confirmed it"
@@ -338,6 +341,101 @@ final class RelayModel {
 
     /// Codex re-review: told of a removal but not yet given the new keys, a caller seals nothing
     /// the removed responder could still open; the call itself still goes.
+    /// Full review: a plain position or choice, which any member holding the channel secret could
+    /// send as the caller, counts for nothing where callers seal and sign for responders.
+    func testPlainPersonalFramesAreNotTakenAsTheCallers() async {
+        caller.engine.press(.red)
+        await air.run()
+        XCTAssertNotNil(responder.engine.group?.secrets.responderPublicKey)
+        responder.engine.receive(.position(unit: key.unit, request: key.request, latitudeE7: 515_000_000, longitudeE7: -1_000_000, accuracy: 5), via: .mesh)
+        responder.engine.receive(.followUp(unit: key.unit, request: key.request, part: 9, category: .fallen), via: .internet)
+        XCTAssertNil(responder.engine.activity.inbox.requests[key]?.position)
+        XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.orderedCategories, [])
+        caller.engine.sharePosition(latitude: 51.5, longitude: -0.1, accuracy: 5)
+        await air.run()
+        XCTAssertNotNil(responder.engine.activity.inbox.requests[key]?.position, "the caller's own, sealed, still counts")
+    }
+
+    /// Full review: seven days after a removal the others stop listening on the old keys, so a
+    /// phone that never scanned its update shows the cross rather than a "sent" that reaches nobody.
+    func testAPhoneThatNeverScannedItsUpdateShowsTheCrossOnceTheOldKeysStop() async {
+        coordinator.engine.updateGroup { $0.remove(self.responder.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        XCTAssertNotNil(caller.engine.keysEndAt)
+        XCTAssertFalse(caller.engine.keysExpired)
+        await advance(GroupState.changeoverPeriod + 60)
+        XCTAssertTrue(caller.engine.keysExpired)
+        caller.engine.press(.red)
+        await air.run()
+        XCTAssertEqual(caller.request?.status, .notSent)
+        XCTAssertEqual(caller.request?.routes[.mesh], .failed(HelpEngine.keysExpiredReason))
+        let g = coordinator.engine.group!
+        let update = try! Joining.update(g, for: g.member(caller.engine.saved!.me)!, coordinator: coordinator.identity)
+        caller.engine.applyKeyUpdate(try! Joining.openUpdate(update, current: caller.engine.group!, me: caller.identity))
+        XCTAssertNil(caller.engine.keysEndAt)
+        XCTAssertTrue(caller.engine.availableRoutes.contains(.mesh))
+    }
+
+    /// Full review: a responder removed while a call was open is not alerted for ever for a call
+    /// they can no longer acknowledge.
+    func testARemovedResponderStopsBeingAlerted() async {
+        caller.engine.press(.red)
+        await air.run()
+        XCTAssertNotNil(responder.alerts.scheduled[key])
+        coordinator.engine.updateGroup { $0.remove(self.responder.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        XCTAssertNil(responder.alerts.scheduled[key])
+        await advance(600)
+        XCTAssertNil(responder.alerts.scheduled[key], "not topped up again")
+    }
+
+    /// Full review: "not confirmed" and "your inviter left" belong to one phone; another
+    /// coordinator acknowledging their own copy never clears it.
+    func testAPhonesOwnNoticeIsNotClearedByAnotherPhone() async {
+        caller.engine.raise(.unconfirmed)
+        coordinator.engine.raise(.unconfirmed)
+        await advance(1)
+        coordinator.engine.acknowledge(.unconfirmed)
+        await air.run()
+        XCTAssertTrue(caller.engine.showing(.unconfirmed))
+        XCTAssertFalse(coordinator.engine.showing(.unconfirmed))
+    }
+
+    /// Full review: a responder whose phone clock is ten minutes slow still reassures the caller.
+    func testASlowClockedRespondersAcknowledgementStillCounts() async {
+        caller.engine.press(.red)
+        await air.run()
+        let slow = clock.now
+        responder.engine = HelpEngine(identity: responder.identity, mesh: responder.mesh, relay: responder.relay, alerts: responder.alerts, store: NoStore(),
+                                      saved: responder.engine.saved, activity: responder.engine.activity, calendar: Calendar(identifier: .gregorian),
+                                      now: { slow.addingTimeInterval(-600) }, homeWiFi: responder.wifi)
+        XCTAssertTrue(responder.engine.acknowledge(key))
+        await air.run()
+        XCTAssertEqual(caller.request?.status, .seen(responder: responder.engine.saved!.me))
+    }
+
+    /// Full review: two coordinators out of touch both change the settings, making the same
+    /// version. Every phone ends with the same ones: the lower member number's.
+    func testTwoCoordinatorsSameVersionEndWithTheSameSettings() async {
+        coordinator.engine.promote(responder.engine.saved!.me)
+        await air.run()
+        air.keep = { _, _, _ in false }
+        coordinator.engine.updateGroup { $0.policy.profiles[0].calmEvery = 1000 }
+        responder.engine.updateGroup { $0.policy.profiles[0].calmEvery = 2000 }
+        await air.run()
+        air.keep = { _, _, _ in true }
+        XCTAssertEqual(coordinator.engine.group?.settingsVersion, responder.engine.group?.settingsVersion)
+        let a = coordinator.engine.group!.settingsFrame(as: coordinator.engine.saved!.me, identity: coordinator.identity)!
+        let b = responder.engine.group!.settingsFrame(as: responder.engine.saved!.me, identity: responder.identity)!
+        caller.engine.receive(b, via: .mesh)
+        caller.engine.receive(a, via: .mesh)
+        coordinator.engine.receive(b, via: .mesh)
+        responder.engine.receive(a, via: .mesh)
+        for p in [caller!, coordinator!, responder!] {
+            XCTAssertEqual(p.engine.group?.policy.profiles[0].calmEvery, 1000)
+        }
+    }
+
     func testRemovingACallerHoldsNothingBack() {
         var g = responder.engine.group!
         g.apply(membership: .memberRemoved(member: caller.engine.saved!.me, version: g.membershipVersion + 1))
@@ -476,9 +574,11 @@ final class RelayModel {
     /// Codex NR12: in a group made before responders had their own key, where a position goes as
     /// direct messages, the caller is told it was sent only if the box took one.
     func testInAnOlderGroupAPositionIsSentOnlyIfTheBoxTookIt() async {
-        var g = caller.engine.group!
-        g.secrets.responderPublicKey = nil
-        caller.engine.joined(g, as: caller.engine.saved!.me)
+        for p in [caller!, responder!] {
+            var g = p.engine.group!
+            g.secrets.responderPublicKey = nil
+            p.engine.joined(g, as: p.engine.saved!.me)
+        }
         caller.engine.press(.red)
         await air.run()
         caller.mesh.refusesText = true
@@ -675,13 +775,21 @@ final class RelayModel {
     func testResendsNeverUseTheAirtimeANewPressNeeds() async {
         caller.engine.press(.red)
         await air.run()
-        // Use up the optional half of this hour's allowance (10% band: 180 of 360 seconds).
+        // Routine traffic has used its half of this hour's allowance (10% band: 180 of 360 s): the
+        // resend of an unanswered call still goes, from the share kept for resends.
         var budget = caller.engine.activity.airtime!
         _ = budget.record(180, at: clock.now)
         caller.engine.setAirtimeForTesting(budget)
-        let before = air.groupSends.count
+        let calls = { self.air.groupSends.filter { if case .call(_, self.key.request, _, _) = $0 { return true }; return false }.count }
+        var before = calls()
         await advance(30)
-        XCTAssertEqual(air.groupSends.count, before, "the resend waited for radio time")
+        XCTAssertGreaterThan(calls(), before, "routine traffic never leaves a resend no radio time")
+        // Once resends have used their share too (70%: 252 s), they wait.
+        _ = budget.record(72, at: clock.now)
+        caller.engine.setAirtimeForTesting(budget)
+        before = calls()
+        await advance(60)
+        XCTAssertEqual(calls(), before, "the resend waited for radio time")
         caller.engine.press(.red)
         await air.run()
         XCTAssertEqual(caller.request?.routes[.mesh], .sent, "a new press still went out")

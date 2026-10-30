@@ -344,7 +344,8 @@ struct KeyUpdatesSection: View {
 
     var body: some View {
         Section(header: Header("New keys to hand out")) {
-            Text("A phone was removed, so the group has new keys. Show each member their update code.")
+            Text("A phone was removed, so the group has new keys. Show each member their update code"
+                 + (model.group?.previousUntil.map { " by \($0.formatted(date: .long, time: .omitted)). After that, a member who has not scanned it can no longer reach the group." } ?? "."))
             ForEach((model.group?.members ?? []).filter { $0.number != model.saved?.me }) { m in
                 Button("Update code for \(m.name)") { shown = m }
             }

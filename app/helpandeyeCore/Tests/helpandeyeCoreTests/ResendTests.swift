@@ -76,6 +76,7 @@ final class SecondReviewTests: XCTestCase {
         r.update(.mesh, .sent)
         for _ in 0..<4 { XCTAssertTrue(r.resendDue(at: t0.addingTimeInterval(86_400))); r.markResent(at: t0) }
         XCTAssertFalse(r.resendDue(at: t0.addingTimeInterval(86_400)))
+        XCTAssertNil(r.nextResend, "and no next time is shown for it")
     }
 
     func testAlertTailStretchesForHours() {
@@ -122,6 +123,31 @@ final class SecondReviewTests: XCTestCase {
         b.record(18, at: t0)
         let back = try JSONDecoder().decode(AirtimeBudget.self, from: JSONEncoder().encode(b))
         XCTAssertFalse(back.allows(1, kind: .optional, at: t0))
+    }
+
+    /// Full review: one saved call a newer or damaged copy wrote does not lose every other open
+    /// call when the app opens again.
+    func testOneUnreadableSavedCallLosesOnlyItself() throws {
+        var a = Activity()
+        a.outgoing = [OutgoingRequest(unit: 7, number: 1, colour: .red, createdAt: t0), OutgoingRequest(unit: 7, number: 2, colour: .amber, createdAt: t0)]
+        a.inbox.receive(.call(unit: 9, request: 3, colour: .red, sentAt: UInt32(t0.timeIntervalSince1970)), via: .mesh, at: t0)
+        a.inbox.receive(.call(unit: 9, request: 4, colour: .red, sentAt: UInt32(t0.timeIntervalSince1970)), via: .mesh, at: t0)
+        var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(a)) as! [String: Any]
+        var outgoing = json["outgoing"] as! [[String: Any]]
+        outgoing[0]["colour"] = "ultraviolet"
+        json["outgoing"] = outgoing
+        var inbox = json["inbox"] as! [String: Any]
+        var requests = inbox["requests"] as! [Any]
+        var damaged = requests[1] as! [String: Any]
+        damaged["colour"] = "ultraviolet"
+        requests[1] = damaged
+        inbox["requests"] = requests
+        json["inbox"] = inbox
+        json["notices"] = "not what a notice list looks like"
+        let back = try JSONDecoder().decode(Activity.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(back.outgoing.map(\.number), [2])
+        XCTAssertEqual(back.inbox.requests.count, 1)
+        XCTAssertTrue(back.notices.isEmpty)
     }
 
     func testAtMostFourCheckInsADay() {
