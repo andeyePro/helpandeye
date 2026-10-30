@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import relay, { Group, Meter, PUSH_BATCH } from "../src/worker.js";
 import { b64, KEEP_MS, MAX_MEMBERS_REQUEST, MAX_REQUEST, MAX_REMOVED, MAX_MEMBERS, MAX_SKEW_MS, MAX_WAKES_PER_MINUTE, signingInput } from "../src/relay.js";
+import { issue, toB64url } from "../src/pass.js";
 import { MapStorage } from "./storage.js";
 
 async function phone() {
@@ -406,4 +407,60 @@ test("the group's alarm deletes expired messages without anyone posting", async 
   await group.alarm();
   assert.equal(storage.m.has(key), false);
   assert.equal(storage.alarm, null, "nothing left to expire");
+});
+
+async function passIssuer() {
+  const pair = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+  return { pair, ISSUER_KEY: toB64url(await crypto.subtle.exportKey("raw", pair.publicKey)) };
+}
+
+test("with REQUIRE_PASS on, a group without a valid pass is turned away before any group or the meter", async () => {
+  const { pair, ISSUER_KEY } = await passIssuer();
+  const w = worker({ REQUIRE_PASS: "1", ISSUER_KEY });
+  const owner = await phone();
+  const id = await groupId(owner);
+  const path = `/g/${id}/members`, body = firstList(owner);
+  const expiry = Math.floor(Date.now() / 1000) + 86400;
+  const pass = await issue(id, expiry, pair.privateKey);
+  const put = async (pass) => {
+    const r = await w.fetch(await owner.request("PUT", path, body, { headers: pass === undefined ? {} : { "X-HelpA-Pass": pass } }));
+    return [r.status, (await r.json()).error];
+  };
+  assert.deepEqual(await put(), [402, "pass required"]);
+  assert.deepEqual(await put(await issue(id, Math.floor(Date.now() / 1000) - 1, pair.privateKey)), [402, "pass expired"]);
+  assert.deepEqual(await put(await issue(await groupId(await phone()), expiry, pair.privateKey)), [402, "pass is for another group"]);
+  assert.deepEqual(await put(pass.slice(0, -40) + (pass[pass.length - 40] === "A" ? "B" : "A") + pass.slice(-39)), [402, "bad pass"]);
+  const stranger = await (async () => { const p = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]); return p.privateKey; })();
+  assert.deepEqual(await put(await issue(id, expiry, stranger)), [402, "bad pass"]);
+  // The signature is checked first: a pass alone opens nothing.
+  assert.equal((await w.fetch(new Request("https://relay" + path, { method: "PUT", body, headers: { "X-HelpA-Pass": pass } }))).status, 401);
+  await w.settle();
+  assert.deepEqual(w.reached, { groups: 0, meter: 0 });
+  assert.deepEqual(await put(pass), [200, undefined]);
+  await w.settle();
+  assert.deepEqual(w.reached, { groups: 1, meter: 1 });
+  const read = await w.fetch(await owner.request("GET", `/g/${id}/messages?after=-5`, "", { headers: { "X-HelpA-Pass": pass } }));
+  assert.equal(read.status, 200);
+  assert.equal((await w.fetch(await owner.request("GET", `/g/${id}/messages?after=-5`, ""))).status, 402, "every request needs it");
+});
+
+test("with REQUIRE_PASS off, or not set, no pass is needed and one sent is ignored", async () => {
+  const { pair, ISSUER_KEY } = await passIssuer();
+  for (const extra of [{}, { REQUIRE_PASS: "0", ISSUER_KEY }, { REQUIRE_PASS: "", ISSUER_KEY }]) {
+    const w = worker(extra);
+    const owner = await phone();
+    const id = await groupId(owner);
+    assert.equal((await w.fetch(await owner.request("PUT", `/g/${id}/members`, firstList(owner)))).status, 200);
+    const stale = await issue(id, 1, pair.privateKey);
+    assert.equal((await w.fetch(await owner.request("GET", `/g/${id}/messages?after=-5`, "", { headers: { "X-HelpA-Pass": stale } }))).status, 200);
+  }
+});
+
+test("with REQUIRE_PASS on but no issuer key, nothing is let in by mistake", async () => {
+  const w = worker({ REQUIRE_PASS: "1" });
+  const owner = await phone();
+  const r = await w.fetch(await owner.request("PUT", `/g/${await groupId(owner)}/members`, firstList(owner)));
+  assert.deepEqual([r.status, (await r.json()).error], [500, "issuer key not set"]);
+  await w.settle();
+  assert.deepEqual(w.reached, { groups: 0, meter: 0 });
 });

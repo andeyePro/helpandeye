@@ -1,4 +1,5 @@
 import { configured, push } from "./apns.js";
+import { checkPass, PASS_HEADER, requiresPass } from "./pass.js";
 import { authenticate, GroupRelay, KEEP_MS, MAX_MEMBERS_REQUEST, MAX_REQUEST, Meter as MeterLogic, RelayError, unb64 } from "./relay.js";
 
 // Routes:
@@ -8,7 +9,8 @@ import { authenticate, GroupRelay, KEEP_MS, MAX_MEMBERS_REQUEST, MAX_REQUEST, Me
 //   PUT  /g/<groupId>/push             a member registers its push token
 // A message may carry "wake": "call" (a visible push to the others) or "quiet" (wakes their app).
 // Every request carries X-HelpA-Key, X-HelpA-Time and X-HelpA-Signature, checked here before any
-// group sees the request.
+// group sees the request, and, when the relay requires one (REQUIRE_PASS), the group's pass in
+// X-HelpA-Pass, checked the same way.
 // Every response carries X-HelpA-Allowance-Low: 1 when the free daily allowance is nearly used.
 
 const GROUP_ID = /^[A-Za-z0-9_-]{16,64}$/;
@@ -45,6 +47,12 @@ export default {
         // carrier's shared IPv4) never hold each other back.
         if (!(await allowed(env.IP_LIMIT, request.headers.get("CF-Connecting-IP") ?? ""))) throw new RelayError(429, "too many requests");
         throw e;
+      }
+      // With REQUIRE_PASS set, the group must hold Help&I's pass for this relay (pass.js). Checked
+      // here, with nothing stored, so a group without one costs no Durable Object request.
+      if (requiresPass(env)) {
+        if (!env.ISSUER_KEY) throw new RelayError(500, "issuer key not set");
+        await checkPass(request.headers.get(PASS_HEADER), m[1], env.ISSUER_KEY);
       }
       // A post that wakes others for a call is held back only by its group's limits for each phone.
       let call = false;

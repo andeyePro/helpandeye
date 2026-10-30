@@ -11,9 +11,41 @@ Every request is signed by the phone's Ed25519 key. The headers are:
 - `X-HelpA-Key`: the phone's public signing key, base64
 - `X-HelpA-Time`: milliseconds since 1970; refused if more than 5 minutes out
 - `X-HelpA-Signature`: Ed25519 over `HELPA-RELAY-1\n<method>\n<path and query>\n<time>\n<base64 SHA-256 of the body>`
+- `X-HelpA-Pass`: the group's relay pass (below), when the relay requires one
 
 The Worker checks the time and signature before the request reaches its group, and refuses a bad
 one with 401. The group then checks the key is one of its members.
+
+## Passes
+
+Help&I's own relay is a paid service once Help&I pays for it: with the `REQUIRE_PASS` var set to
+`1`, every request for a group must carry a pass for that group in `X-HelpA-Pass`, or it is
+refused with 402 before any Durable Object is called (`{"error": "pass required"}`, `"pass
+expired"`, `"pass is for another group"` or `"bad pass"`). With the var unset or `0`, as deployed
+before passes, every group is taken and a pass sent is ignored.
+
+A pass is `1.<group ID>.<expiry>.<signature>`: the group ID as it appears in the path, the expiry
+in seconds since 1970, and an Ed25519 signature in URL-safe base64 over
+`HELPA-PASS-1\n<group ID>\n<expiry>` by Help&I's issuer key, whose public key the Worker reads
+from the `ISSUER_KEY` var. The relay keeps nothing about passes: it checks the signature once per
+pass it sees (cached in memory, still checked against the clock and the group each time), so a
+group's phones polling cost it nothing more. How a group came by its pass (bought, or given) is no
+concern of the relay: the app holds it as a group setting, shared with every member like the
+relay address, and sends it with each request.
+
+`pass.mjs` issues them, on a machine you trust, never on the relay:
+
+```
+node pass.mjs keygen                  once: makes the issuer key pair, prints the public key
+node pass.mjs public                  prints the public key, for ISSUER_KEY
+node pass.mjs issue <group ID> <days> prints a pass for the group, good for that many days
+node pass.mjs show <pass>             prints the group and expiry a pass names
+```
+
+The key pair is saved to `~/.helpandeye/relay-issuer.json` (or the file `HELPA_ISSUER_KEY`
+names), readable by its owner only and never in a repository; whoever holds it can issue passes.
+A coordinator finds the group's ID in the app under Group, Internet route, and pastes the pass
+there; the app shows until when it is good.
 
 | Request | Who | Body |
 |---|---|---|
@@ -128,5 +160,9 @@ npx wrangler deploy
 Push notifications stay off until these secrets are set (`npx wrangler secret put <name>`):
 `APNS_KEY` (the contents of the `.p8` key from Apple Developer, Certificates, Keys), `APNS_KEY_ID`,
 `APNS_TEAM_ID` and `APNS_TOPIC` (`com.andeye.help`).
+
+To require passes, set `REQUIRE_PASS` to `"1"` and `ISSUER_KEY` to the issuer's public key in
+`wrangler.jsonc` (`vars`) and deploy again. With `REQUIRE_PASS` set and no `ISSUER_KEY`, every
+request is refused with 500 rather than let in.
 
 Then, in the app, open Group, Internet route, and enter the Worker's `https://` address.

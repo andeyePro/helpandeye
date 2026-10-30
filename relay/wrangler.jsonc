@@ -11,6 +11,11 @@
     ]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Group", "Meter"] }],
+  // REQUIRE_PASS "1" turns away any request for a group without a pass issued by Help&I
+  // (relay/pass.mjs), so groups use this relay only while Help&I is paid for it. ISSUER_KEY is the
+  // issuer's public key, from `node pass.mjs public`; it is public, so a var, not a secret. Off by
+  // default, so a relay deployed before passes keeps taking every group.
+  "vars": { "REQUIRE_PASS": "0", "ISSUER_KEY": "" },
   // Requests a minute: failed signature checks per address (a signed request is never limited by
   // address, as phones on one care home's Wi-Fi share one), signed requests per key (a call's post
   // never), reads per group (256 members, phone and watch, polling twice a minute while a call is
