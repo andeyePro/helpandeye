@@ -115,4 +115,10 @@ nobody has been told.
   (choices, typed messages, position) until it is scanned, as the removed phone still holds the
   responders' key it would seal with; the call itself still goes.
 - A new group uses Help&I's relay unless its coordinator sets their own or none (Group, Internet
-  route).
+  route). Help&I's relay is free to groups only while it costs Help&I nothing; once Help&I pays
+  for it, it requires a relay pass for each group: a compact token naming the group and an
+  expiry, signed by Help&I's issuer key, which the relay checks before anything else (with the
+  signature, before its storage is touched) and which carries nothing personal. A coordinator
+  pastes the pass in under Group, Internet route; it is a group setting, so it reaches every
+  member like the relay address, and every member's phone sends it with each request. How a pass
+  is bought is not decided (TODO.md); the relay does not care.

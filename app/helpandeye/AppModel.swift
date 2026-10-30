@@ -204,6 +204,7 @@ final class AppModel: ObservableObject {
         if saveFailed == failedSaves.isEmpty { saveFailed = !failedSaves.isEmpty }
     }
     func setRelay(_ url: String) { engine.setRelay(url) }
+    func setRelayPass(_ token: String) -> Bool { engine.setRelayPass(token) }
     func setOwn(_ change: (inout Profile) -> Void) { engine.setOwn(change) }
 
     func press(_ colour: Colour) {

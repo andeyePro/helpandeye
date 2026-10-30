@@ -407,12 +407,26 @@ struct MyPhoneSection: View {
 struct RelaySection: View {
     @EnvironmentObject var model: AppModel
     @State private var url = ""
+    @State private var pass = ""
+    @State private var passMessage: String?
 
     var body: some View {
         Section(header: Header("Internet route")) {
             let usesOurs = model.group?.relayURL == RelayProtocol.defaultRelay
             Text(usesOurs ? "Calls also go over the internet, through Help&I's relay. It passes on only what is sealed with the group's key, so it cannot read calls."
                  : model.relay.isConfigured ? "Calls also go over the internet, through your own relay." : "Not set up: calls go over the local radio only.")
+            if usesOurs, let group = model.group {
+                Text("Help&I's relay is a paid service. A group uses it with a pass from Help&I.")
+                Text(passWords(group.passState(at: Date())))
+                Text("Group ID, to get a pass: \(RelayProtocol.id(of: group.secrets.groupID))").textSelection(.enabled)
+                LabeledField(label: "Paste the pass here", text: $pass, keyboard: .URL)
+                Button("Save pass") {
+                    passMessage = model.setRelayPass(pass) ? "Saved. Members get the pass at once, over the internet or the local radio, or when they next join."
+                                                           : "That is not a pass for this group. Check it was copied in full."
+                    if passMessage?.hasPrefix("Saved") == true { pass = "" }
+                }
+                if let passMessage { Text(passMessage) }
+            }
             if !usesOurs { Button("Use Help&I's relay") { url = RelayProtocol.defaultRelay; model.setRelay(url) } }
             LabeledField(label: "Or your own relay's address, starting https://", text: $url, keyboard: .URL)
             Button("Save") { model.setRelay(url) }
@@ -420,6 +434,14 @@ struct RelaySection: View {
             Text("Members get the new address at once, over the old address or the local radio, or when they next join.")
         }
         .onAppear { url = model.group?.relayURL ?? "" }
+    }
+
+    private func passWords(_ state: RelayPass.State) -> String {
+        switch state {
+        case .none: return "This group has no pass yet."
+        case let .valid(until): return "This group's pass is good until \(until.formatted(date: .long, time: .omitted))."
+        case let .expired(on): return "This group's pass ran out on \(on.formatted(date: .long, time: .omitted))."
+        }
     }
 }
 

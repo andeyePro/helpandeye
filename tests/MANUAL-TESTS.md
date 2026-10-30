@@ -421,3 +421,15 @@ Needs phones A and B as callers and phone C a responder in two groups (one as it
 
 Pass: in step 1 phone C keeps alerting for both calls through the 15 minutes, neither falling silent. In step 2 a banner says notifications are off, then that Time Sensitive is off, each with Open Settings, and goes once put right. In step 3 phone C reconnects without help. In step 4 it says the box did not answer, or was reset, and keeps trying rather than show Connecting for ever.
 
+## 45. A relay pass
+
+Needs a relay of your own deployed with `REQUIRE_PASS` set to `1` and `ISSUER_KEY` set to the issuer's public key (`relay/README.md`, Passes), phones A (the first coordinator) and B (a responder) on it with the internet route set up and internet on, and the issuer key file on your Mac.
+
+1. On phone A, open Group, Internet route and read the group ID. On the Mac, `cd relay && node pass.mjs issue <group ID> 1`.
+2. Before pasting it, press Help on phone B's caller (or any member's phone) and read the internet route's reason on the call screen; close the call.
+3. On phone A, paste the pass under Paste the pass here and press Save pass. Press Help on phone B again, and acknowledge it from phone A.
+4. On phone B, open Group, Internet route.
+5. The next day, press Help on phone B again.
+
+Pass: in step 2 the internet route says the relay needs a pass for this group and that a coordinator can add one under Group, Internet route; the mesh route is unaffected. In step 3 the pass is saved ("Saved. Members get the pass at once..."), the call goes over the internet route and the acknowledgement comes back. In step 4 phone B shows the pass is good until tomorrow's date, having had it from phone A without scanning anything. In step 5 the internet route says the group's relay pass has run out, and Internet route on both phones says when. Nothing ever says help is coming.
+

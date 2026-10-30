@@ -45,6 +45,7 @@ final class Relay: ObservableObject, RelayLink {
         case let .some((status, _)) where status >= 500 || status == 429: return .unreachable
         // Another coordinator's list, before the first coordinator has registered the group.
         case .some((425, _)): return .notYet
+        case let .some((402, data)): lastProblem = Self.passProblem(data); return .refused
         case let .some((status, _)): lastProblem = "The relay did not take the member list (\(status))."; return .refused
         case .none: return .unreachable
         }
@@ -73,6 +74,7 @@ final class Relay: ObservableObject, RelayLink {
             case .some((200, _)): result = nil
             // Busy or briefly unreachable: the next resend tries again.
             case let .some((status, _)) where status == 429 || status >= 500: result = "Trying again"
+            case let .some((402, data)): result = Self.passProblem(data)
             case let .some((status, _)): result = "Relay refused it (\(status))"
             case .none: result = lastProblem ?? "No internet"
             }
@@ -151,6 +153,7 @@ final class Relay: ObservableObject, RelayLink {
             let response = await request("GET", RelayProtocol.path(for: group.secrets, "messages") + "?after=\(RelayPoll.after(stored))", body: Data())
             switch response {
             case .some((403, _)): lastProblem = "The relay does not list this phone. Ask your coordinator to open Help&I."; return
+            case let .some((402, data)): lastProblem = Self.passProblem(data); return
             case .some((401, _)):
                 // Usually the phone's clock: the relay takes only requests made in the last five minutes.
                 if let off = clockOff, abs(off) > 240 {
@@ -177,6 +180,14 @@ final class Relay: ObservableObject, RelayLink {
         }
     }
 
+    /// The relay requires a pass for the group (relay/README.md, Passes) and this group's is
+    /// missing or has run out. Only a person can put that right, so it says who and where.
+    private static func passProblem(_ data: Data) -> String {
+        let error = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
+        return error == "pass expired" ? "This group's relay pass has run out. A coordinator can add a new one under Group, Internet route."
+                                       : "The relay needs a pass for this group. A coordinator can add one under Group, Internet route."
+    }
+
     /// How far this phone's clock is ahead of the relay's, from its last answer.
     private var clockOff: TimeInterval?
     private static let httpDate: DateFormatter = {
@@ -193,7 +204,7 @@ final class Relay: ObservableObject, RelayLink {
         req.httpMethod = method
         if method != "GET" { req.httpBody = body }
         guard let headers = try? RelayProtocol.headers(method: method, pathAndQuery: path, body: method == "GET" ? Data() : body,
-                                                       identity: identity, now: Date()) else { return nil }
+                                                       identity: identity, now: Date(), pass: group?.pass?.token) else { return nil }
         headers.forEach { req.setValue($1, forHTTPHeaderField: $0) }
         do {
             let (data, response) = try await session.data(for: req)
