@@ -9,7 +9,8 @@ export const PRICES = {
 };
 
 /// The estimated cost in dollars of one reply, from its token counts. A model not in the table
-/// is costed as the dearest one, so an unknown model is never under-counted.
+/// is costed as the dearest one here; the Worker refuses to run one, since a dearer model would
+/// be under-counted.
 export function cost(model, usage) {
   const p = PRICES[model] ?? PRICES["claude-opus-5-5"];
   const n = (v) => (typeof v === "number" ? v : 0);

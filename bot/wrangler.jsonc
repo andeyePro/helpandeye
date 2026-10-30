@@ -7,6 +7,8 @@
   "main": "src/worker.js",
   "compatibility_date": "2026-10-01",
   "assets": { "directory": "./public" },
+  // Workers Logs and traces, for `npx wrangler tail` and the dashboard.
+  "observability": { "enabled": true, "traces": { "enabled": true } },
   "durable_objects": {
     "bindings": [{ "name": "LEDGER", "class_name": "Ledger" }]
   },

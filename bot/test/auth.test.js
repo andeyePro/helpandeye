@@ -6,15 +6,26 @@ const SECRET = "test-secret";
 
 test("a signed token carries its payload until it expires, and not if altered", async () => {
   const now = 1_793_000_000_000;
-  const token = await sign(SECRET, { id: "github:1" }, now + 1000);
-  assert.deepEqual(await verify(SECRET, token, now), { id: "github:1", exp: now + 1000 });
-  assert.equal(await verify(SECRET, token, now + 1000), null);
-  assert.equal(await verify("other", token, now), null);
+  const token = await sign(SECRET, "session", { id: "github:1" }, now + 1000);
+  assert.deepEqual(await verify(SECRET, "session", token, now), { id: "github:1", use: "session", exp: now + 1000 });
+  assert.equal(await verify(SECRET, "session", token, now + 1000), null);
+  assert.equal(await verify("other", "session", token, now), null);
   const [body, sig] = token.split(".");
-  assert.equal(await verify(SECRET, body + "x." + sig, now), null);
-  assert.equal(await verify(SECRET, body + "." + sig.slice(0, -2) + "AA", now), null);
-  assert.equal(await verify(SECRET, "nonsense", now), null);
-  assert.equal(await verify(SECRET, undefined, now), null);
+  assert.equal(await verify(SECRET, "session", body + "x." + sig, now), null);
+  assert.equal(await verify(SECRET, "session", body + "." + sig.slice(0, -2) + "AA", now), null);
+  assert.equal(await verify(SECRET, "session", "nonsense", now), null);
+  assert.equal(await verify(SECRET, "session", undefined, now), null);
+});
+
+test("a token made for one thing is not taken for another", async () => {
+  const now = 1_793_000_000_000;
+  const link = await sign(SECRET, "link", { id: "email:abc" }, now + 1000);
+  assert.equal(await verify(SECRET, "session", link, now), null);
+  assert.equal(await verify(SECRET, "state", link, now), null);
+  assert.ok(await verify(SECRET, "link", link, now));
+  // A payload that names a use itself is overridden by the one it is signed for.
+  const forged = await sign(SECRET, "link", { id: "email:abc", use: "session" }, now + 1000);
+  assert.equal(await verify(SECRET, "session", forged, now), null);
 });
 
 test("the address hash is the same all day, and different the next day and with another secret", async () => {

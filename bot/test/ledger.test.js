@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BUCKET_MS, DAY_MS, EVERYONE, Ledger, WINDOW_MS } from "../src/ledger.js";
+import { BUCKET_MS, DAY_MS, EVERYONE, IN_FLIGHT, IN_FLIGHT_MS, Ledger, WINDOW_MS } from "../src/ledger.js";
 import { cost, PRICES } from "../src/prices.js";
 import { MapStorage } from "./storage.js";
 
@@ -37,6 +37,53 @@ test("an answer that was never given is handed back", async () => {
   // Nothing to give back is not an error.
   await l.giveBack("nobody");
   assert.equal(await l.remaining("nobody", 2), 2);
+});
+
+test("a visitor has at most two questions in flight, and a lost one is forgotten after a minute", async () => {
+  const { clock, storage, ledger: l } = ledger();
+  const a = await l.start("u1", null, 2);
+  assert.deepEqual(a, { allowed: true, remaining: null, startedAt: clock.now });
+  clock.now += 10;
+  const b = await l.start("u1", null, 2);
+  assert.equal(b.allowed, true);
+  assert.deepEqual(await l.start("u1", null, 2), { allowed: false, busy: true, remaining: null });
+  // Another visitor is counted on their own.
+  assert.equal((await l.start("u2", null, 2)).allowed, true);
+  await l.finish("u1", null, a.startedAt, true);
+  assert.equal((await l.start("u1", null, 2)).allowed, true);
+  assert.equal(IN_FLIGHT, 2);
+  // Neither of the two open questions reported back: a minute on, both are forgotten.
+  clock.now += IN_FLIGHT_MS;
+  assert.equal((await l.start("u1", null, 2)).allowed, true);
+  await l.finish("u1", null, clock.now, true);
+  assert.ok(!storage.m.has("inflight:u1"));
+});
+
+test("a free answer is taken at the start and handed back when no answer came", async () => {
+  const { ledger: l } = ledger();
+  const a = await l.start("address:a", "a", 2);
+  assert.equal(a.remaining, 1);
+  await l.finish("address:a", "a", a.startedAt, false);
+  assert.equal(await l.remaining("a", 2), 2);
+  await l.finish("address:a", "a", (await l.start("address:a", "a", 2)).startedAt, true);
+  await l.finish("address:a", "a", (await l.start("address:a", "a", 2)).startedAt, true);
+  assert.deepEqual(await l.start("address:a", "a", 2), { allowed: false, busy: false, remaining: 0 });
+});
+
+test("a rate limit allows `max` in a window, then none until the window ends", async () => {
+  const { clock, storage, ledger: l } = ledger();
+  assert.equal(await l.allow("links:a", 2, 1000), true);
+  assert.equal(await l.allow("links:a", 2, 1000), true);
+  assert.equal(await l.allow("links:a", 2, 1000), false);
+  assert.equal(await l.allow("links:b", 2, 1000), true);
+  clock.now += 999;
+  assert.equal(await l.allow("links:a", 2, 1000), false);
+  clock.now += 1;
+  assert.equal(await l.allow("links:a", 2, 1000), true);
+  assert.equal(await l.sweep(), clock.now + 1000);
+  clock.now += 1000;
+  await l.sweep();
+  assert.ok(!storage.m.has("rate:links:a"));
 });
 
 test("spend is summed over a rolling six hours, for the user and for everyone", async () => {
@@ -79,6 +126,11 @@ test("the sweep forgets hashes after a day and spend after the window, and says 
   const start = clock.now, bucket = Math.floor(start / BUCKET_MS) * BUCKET_MS;
   await l.take("a", 2);
   await l.spend("u1", 1, { everyone: 100, user: 100 });
+  await l.finish("u1", null, (await l.start("u1", null, 2)).startedAt, true);
+  await l.start("u1", null, 2);
+  assert.equal(await l.sweep(), start + IN_FLIGHT_MS);
+  assert.equal(storage.m.size, 4);
+  clock.now = start + IN_FLIGHT_MS;
   assert.equal(await l.sweep(), bucket + WINDOW_MS + BUCKET_MS);
   assert.equal(storage.m.size, 3);
   clock.now = bucket + WINDOW_MS + BUCKET_MS;

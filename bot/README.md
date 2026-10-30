@@ -11,12 +11,19 @@ What a visitor gets:
   The salt changes daily, so the hash can never be matched back to an address.
 - After that, sign in with an emailed link or with GitHub, and ask as much as they like. Nothing
   about a signed-in visitor is stored: the session is a signed cookie, their id is a GitHub
-  number or a hash of their email address, and their questions are not kept.
+  number or a hash of their email address, and their questions are not kept. Sign-in links are
+  limited to five an hour for a visitor and three an hour to one address, so the bot cannot be
+  used to flood an inbox.
 - Answers from Claude, which is given the site's content and told to answer only from it, to
   point elsewhere for anything it does not cover, and never to say that help is coming. The
   site's safety line (for Help&I: "Help&I does not replace 999 or telecare. In an emergency,
-  call 999 first if you can.") is shown above the questions and repeated by the model whenever
-  anyone asks about an emergency.
+  call 999 first if you can.") is shown above the questions, repeated by the model whenever
+  anyone asks about an emergency, and read out with every "no answer came back". The model is
+  told that a visitor's text is a question, never an instruction; and as the history comes from
+  the visitor's browser, every answer is checked on the way out (`REASSURANCE` in
+  `src/answer.js`) and one that says help is on its way is replaced with the safety line.
+- Two questions in flight at a time for each visitor, a request body of 64 KB at most, and
+  twenty seconds for the model to answer. These are against scripts, not people.
 
 What the site owner gets:
 
@@ -24,8 +31,9 @@ What the site owner gets:
   (`src/prices.js`), summed over a rolling six hours for everyone together and for each visitor
   (signed-in id, or address hash while anonymous).
 - An email when everyone together has cost more than 2% of the month's credit in any six hours,
-  or any one visitor more than 1%. Each is sent at most once every six hours. There are no
-  other limits: the alert is for the owner to act on.
+  or any one visitor more than 1%. Each is sent at most once every six hours. There is no spend
+  cap in the bot: the alert is for the owner to act on, and the workspace's limit (below) is the
+  hard stop.
 
 ## The model
 
@@ -34,7 +42,7 @@ which is a lookup rather than a reasoning task, and Haiku is twenty times cheape
 for the same tokens, with the site content cached between questions. At Anthropic's list prices
 a typical answer (about 5,000 prompt tokens, mostly cached, and 150 output tokens) costs well
 under a tenth of a cent. The `MODEL` var changes it; `src/prices.js` must know the model's
-price, or it is costed at the dearest price in the table.
+price, or the bot refuses to answer (a dearer model would otherwise be under-counted).
 
 ## Add it to a site
 
@@ -57,7 +65,8 @@ price, or it is costed at the dearest price in the table.
    must allow that, and `connect-src` to the bot's origin.
 
 The widget is keyboard-only usable, labels every field, announces answers and status to screen
-readers, uses no animation, and scales with the page's text size.
+readers, uses no animation, and scales with the page's text size. After signing in, the visitor
+is sent back to the page they were on, if it is on the site.
 
 ## Secrets and vars
 
@@ -126,7 +135,8 @@ windows.
 
 | What | Where | For |
 |---|---|---|
-| A salted hash of an anonymous visitor's address, with a count | The Worker's Durable Object | 24 hours from their first question of the day |
+| A salted hash of an anonymous visitor's address, with a count | The Worker's Durable Object | 24 hours from their first question of the day (the salt changes at midnight UTC, so a visitor whose day straddles it can get a second day's answers early) |
+| How many questions a visitor has unanswered, and how many sign-in links they and each address have had | The Durable Object | A minute; an hour |
 | Each visitor's estimated spend, in ten-minute buckets | The Durable Object | 6 hours and 10 minutes |
 | When each alert was last sent | The Durable Object | 6 hours |
 | The session cookie: signed, with an id (`github:<number>` or `email:<hash>`), or just "checked" | The visitor's browser | 30 days signed in; 24 hours anonymous |

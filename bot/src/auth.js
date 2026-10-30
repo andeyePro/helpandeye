@@ -19,13 +19,16 @@ async function hmac(secret, text) {
 }
 
 /// A token carrying `payload` until `expiresAt` (milliseconds), signed so it cannot be altered.
-export async function sign(secret, payload, expiresAt) {
-  const body = b64url(enc.encode(JSON.stringify({ ...payload, exp: expiresAt })));
+/// `use` names what it is for (a session, a sign-in link, a GitHub state), so a token made for
+/// one thing is never taken for another.
+export async function sign(secret, use, payload, expiresAt) {
+  const body = b64url(enc.encode(JSON.stringify({ ...payload, use, exp: expiresAt })));
   return `${body}.${b64url(await hmac(secret, body))}`;
 }
 
-/// The payload of a token, or null if it was altered, signed with another secret, or has expired.
-export async function verify(secret, token, now = Date.now()) {
+/// The payload of a token made for `use`, or null if it was altered, signed with another secret,
+/// made for something else, or has expired.
+export async function verify(secret, use, token, now = Date.now()) {
   if (typeof token !== "string") return null;
   const dot = token.indexOf(".");
   if (dot < 0) return null;
@@ -38,7 +41,7 @@ export async function verify(secret, token, now = Date.now()) {
   if (diff !== 0) return null;
   try {
     const payload = JSON.parse(new TextDecoder().decode(unb64url(body)));
-    return typeof payload.exp === "number" && payload.exp > now ? payload : null;
+    return payload.use === use && typeof payload.exp === "number" && payload.exp > now ? payload : null;
   } catch {
     return null;
   }

@@ -1,12 +1,17 @@
-// The counts the bot keeps: free answers a day by salted address hash, and what each user and
-// everyone together have cost in the last six hours. Storage is Durable Object storage (or
-// anything with the same get, put, delete and list); `now` is a clock, so tests can set it.
+// The counts the bot keeps: free answers a day by salted address hash, questions in flight for
+// each visitor, rate limits, and what each user and everyone together have cost in the last six
+// hours. Storage is Durable Object storage (or anything with the same get, put, delete and
+// list); `now` is a clock, so tests can set it.
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 export const WINDOW_MS = 6 * 60 * 60 * 1000;
 // Spend is kept in ten-minute buckets, so a window of six hours is at most 36 keys to sum.
 export const BUCKET_MS = 10 * 60 * 1000;
 export const EVERYONE = "*";
+// Questions one visitor may have unanswered at once, and how long one counts as unanswered if
+// the Worker that asked it never reports back.
+export const IN_FLIGHT = 2;
+export const IN_FLIGHT_MS = 60 * 1000;
 
 export class Ledger {
   constructor(storage, now = Date.now) {
@@ -40,6 +45,40 @@ export class Ledger {
     return Math.max(0, limit - r.count);
   }
 
+  /// `who` is about to ask a question. Refused while `who` already has IN_FLIGHT unanswered, or
+  /// (with a `hash`) when today's free answers are gone. Returns the question's start time,
+  /// which `finish` takes.
+  async start(who, hash, limit) {
+    const now = this.now();
+    const key = `inflight:${who}`;
+    const open = ((await this.storage.get(key)) ?? []).filter((t) => now - t < IN_FLIGHT_MS);
+    if (open.length >= IN_FLIGHT) return { allowed: false, busy: true, remaining: null };
+    const taken = hash === null ? { allowed: true, remaining: null } : await this.take(hash, limit);
+    if (!taken.allowed) return { allowed: false, busy: false, remaining: 0 };
+    await this.storage.put(key, [...open, now]);
+    return { allowed: true, remaining: taken.remaining, startedAt: now };
+  }
+
+  /// The question started at `startedAt` is over; an answer that never came is given back.
+  async finish(who, hash, startedAt, answered) {
+    const key = `inflight:${who}`;
+    const open = ((await this.storage.get(key)) ?? []).filter((t) => t !== startedAt);
+    if (open.length) await this.storage.put(key, open); else await this.storage.delete(key);
+    if (!answered && hash !== null) await this.giveBack(hash);
+  }
+
+  /// Counts one more `what` against `max` in a window of `windowMs`, and says whether it fits.
+  async allow(what, max, windowMs) {
+    const now = this.now();
+    const key = `rate:${what}`;
+    let r = await this.storage.get(key);
+    if (!r || now >= r.until) r = { count: 0, until: now + windowMs };
+    if (r.count >= max) return false;
+    r.count += 1;
+    await this.storage.put(key, r);
+    return true;
+  }
+
   /// Records that `who` cost `usd`, and says which alerts to send: everyone together past
   /// `thresholds.everyone` in the window, or this user past `thresholds.user`. Each is sent at
   /// most once a window.
@@ -71,8 +110,8 @@ export class Ledger {
     return sum;
   }
 
-  /// Forgets address hashes a day old and spend and alerts a window old. Returns when to sweep
-  /// next, or null when there is nothing left.
+  /// Forgets address hashes a day old, spend and alerts a window old, and stale in-flight and
+  /// rate records. Returns when to sweep next, or null when there is nothing left.
   async sweep() {
     const now = this.now();
     let next = null;
@@ -87,6 +126,13 @@ export class Ledger {
     }
     for (const [key, at] of await this.storage.list({ prefix: "alerted:" })) {
       if (now - at >= WINDOW_MS) gone.push(key); else due(at + WINDOW_MS);
+    }
+    for (const [key, open] of await this.storage.list({ prefix: "inflight:" })) {
+      const latest = Math.max(...open);
+      if (now - latest >= IN_FLIGHT_MS) gone.push(key); else due(latest + IN_FLIGHT_MS);
+    }
+    for (const [key, r] of await this.storage.list({ prefix: "rate:" })) {
+      if (now >= r.until) gone.push(key); else due(r.until);
     }
     for (let i = 0; i < gone.length; i += 128) await this.storage.delete(gone.slice(i, i + 128));
     return next;

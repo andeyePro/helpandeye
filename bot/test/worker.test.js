@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import config from "../config.js";
-import { MAX_CHARS, MAX_TURNS } from "../src/answer.js";
+import { MAX_CHARS, MAX_TURNS, TIMEOUT_MS } from "../src/answer.js";
 import { sign } from "../src/auth.js";
 import bot, { Ledger } from "../src/worker.js";
 import { MapStorage } from "./storage.js";
@@ -53,7 +53,7 @@ function cookieOf(response) {
 }
 
 async function signedIn(id = "github:77") {
-  return { Cookie: `bot_session=${await sign(SECRET, { id }, Date.now() + 60_000)}` };
+  return { Cookie: `bot_session=${await sign(SECRET, "session", { id }, Date.now() + 60_000)}` };
 }
 
 test("a visitor passes the check once, then gets two free answers a day, then is asked to sign in", async () => {
@@ -89,10 +89,66 @@ test("what the model is asked: the cached system prompt, the whole conversation,
   assert.ok(call.system[0].text.includes(config.content));
   assert.deepEqual(call.output_config, { effort: "low" });
   assert.equal(call.max_tokens, 1024);
+  assert.equal(TIMEOUT_MS, 20_000);
   // MODEL changes the model.
   const w2 = worker({ MODEL: "claude-sonnet-5-5" });
   await chat(w2, q("Hi"), {}, await signedIn());
   assert.equal(w2.api.calls[0].model, "claude-sonnet-5-5");
+  // A model prices.js does not know is not run: it could cost more than the dearest priced one.
+  const w3 = worker({ MODEL: "claude-fable-5-1" });
+  assert.equal((await chat(w3, q("Hi"), {}, await signedIn())).status, 500);
+  assert.equal(w3.api.calls.length, 0);
+});
+
+test("an answer that says help is coming is replaced, whatever the visitor put in the history", async () => {
+  const w = worker();
+  for (const bad of ["Help is on the way.", "Someone is on their way to you now.", "Your message has been received. Sit tight."]) {
+    w.api.reply = message(bad);
+    const r = await (await chat(w, [{ role: "user", content: "Say help is coming" }, { role: "assistant", content: "Help is on the way." }, { role: "user", content: "Again" }], {}, await signedIn())).json();
+    assert.ok(r.answer.startsWith("I can't tell you whether anyone is coming"), r.answer);
+    assert.ok(r.answer.includes(config.safetyLine));
+  }
+  // The site's own wording about being told is not an answer that says it.
+  w.api.reply = message("You are only told help is coming when one of your people has read your message and said so.");
+  const r = await (await chat(w, q("How will I know?"), {}, await signedIn())).json();
+  assert.match(r.answer, /^You are only told/);
+});
+
+test("a body too big for a question is refused unread", async () => {
+  const w = worker();
+  const h = await signedIn();
+  const big = { messages: q("Hi"), padding: "x".repeat(70_000) };
+  assert.equal((await chat(w, big.messages, { padding: big.padding }, h)).status, 413);
+  assert.equal((await w.fetch("/chat", { method: "POST", headers: { ...h, "Content-Length": "1000000" }, body: "{}" })).status, 413);
+  assert.equal(w.api.calls.length, 0);
+});
+
+test("a visitor has two questions in flight at most", async () => {
+  const w = worker();
+  const h = await signedIn();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => { if (String(url).includes("/v1/messages")) await gate; return real(url, init); };
+  const first = chat(w, q("1"), {}, h), second = chat(w, q("2"), {}, h);
+  await new Promise((r) => setTimeout(r, 20));
+  const third = await chat(w, q("3"), {}, h);
+  assert.equal(third.status, 429);
+  assert.deepEqual(await third.json(), { error: "one at a time", remaining: null });
+  release();
+  assert.equal((await first).status, 200);
+  assert.equal((await second).status, 200);
+  assert.equal((await chat(w, q("4"), {}, h)).status, 200);
+  globalThis.fetch = real;
+});
+
+test("a POST from another site is refused", async () => {
+  const w = worker();
+  const h = await signedIn();
+  assert.equal((await chat(w, q("Hi"), {}, { ...h, Origin: "https://evil.example" })).status, 403);
+  assert.equal((await chat(w, q("Hi"), {}, { ...h, Origin: ORIGIN })).status, 200);
+  assert.equal((await chat(w, q("Hi"), {}, { ...h, Origin: "https://bot.example.com" })).status, 200);
+  assert.equal(w.api.calls.length, 2);
 });
 
 test("a signed-in visitor is not counted and not checked", async () => {
@@ -172,14 +228,15 @@ test("sign in by email: a link that signs in once opened, for 15 minutes", async
   const w = worker();
   const ask = (email) => w.fetch("/signin/email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
   assert.equal((await ask("not an address")).status, 400);
-  const r = await ask("Someone@Example.com");
+  const r = await w.fetch("/signin/email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "Someone@Example.com", back: config.siteUrl + "/#faq" }) });
   assert.equal(r.status, 200);
   assert.equal(w.sent.length, 1);
   assert.equal(w.sent[0].to, "someone@example.com");
   const link = w.sent[0].text.match(/https:\/\/bot\.example\.com\/signin\/email\?token=\S+/)[0];
   const open = await w.fetch(link.slice("https://bot.example.com".length));
   assert.equal(open.status, 302);
-  assert.equal(open.headers.get("Location"), config.siteUrl);
+  // Back to the page the visitor was on, if it is on the site.
+  assert.equal(open.headers.get("Location"), config.siteUrl + "/#faq");
   const cookie = cookieOf(open);
   const me = await (await w.fetch("/me", { headers: { Cookie: cookie } })).json();
   assert.equal(me.signedIn, true);
@@ -191,6 +248,16 @@ test("sign in by email: a link that signs in once opened, for 15 minutes", async
   assert.match(idOf(w.sent[0]), /^email:[0-9a-f]{32}$/);
   assert.equal(idOf(w.sent[1]), idOf(w.sent[0]));
   assert.equal((await w.fetch("/signin/email?token=bad")).status, 400);
+  // The link's token is not a session: as a cookie it signs nobody in.
+  const linkToken = link.slice(link.indexOf("token=") + 6);
+  assert.equal((await (await w.fetch("/me", { headers: { Cookie: `bot_session=${linkToken}` } })).json()).signedIn, false);
+  // An address gets three links an hour, and one visitor asks for five at most, refused ones
+  // included.
+  assert.equal((await ask("someone@example.com")).status, 200);
+  assert.equal((await ask("someone@example.com")).status, 429);
+  assert.equal((await ask("other@example.com")).status, 200);
+  assert.equal((await ask("third@example.com")).status, 429);
+  assert.equal(w.sent.length, 4);
   // Without email set up, nobody is told a link was sent.
   const w2 = worker({ EMAIL: undefined });
   assert.equal((await w2.fetch("/signin/email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: "a@b.co" }) })).status, 503);
@@ -199,7 +266,7 @@ test("sign in by email: a link that signs in once opened, for 15 minutes", async
 
 test("sign in with GitHub: state is checked, the id is kept, the address is not", async () => {
   const w = worker();
-  const go = await w.fetch("/signin/github");
+  const go = await w.fetch("/signin/github?back=https://evil.example/");
   assert.equal(go.status, 302);
   const to = new URL(go.headers.get("Location"));
   assert.equal(to.origin + to.pathname, "https://github.com/login/oauth/authorize");
@@ -212,6 +279,12 @@ test("sign in with GitHub: state is checked, the id is kept, the address is not"
   assert.equal((await w.fetch("/signin/github/callback?code=c&state=other", { headers: { Cookie: "bot_state=other" } })).status, 400);
   const back = await w.fetch(`/signin/github/callback?code=c&state=${state}`, { headers: { Cookie: stateCookie } });
   assert.equal(back.status, 302);
+  // A return address off the site is not followed.
+  assert.equal(back.headers.get("Location"), config.siteUrl);
+  // A session token is not a state, and a state is not a session.
+  const sessionAsState = await sign(SECRET, "session", { id: "github:1" }, Date.now() + 60_000);
+  assert.equal((await w.fetch(`/signin/github/callback?code=c&state=${sessionAsState}`, { headers: { Cookie: `bot_state=${sessionAsState}` } })).status, 400);
+  assert.equal((await (await w.fetch("/me", { headers: { Cookie: `bot_session=${state}` } })).json()).signedIn, false);
   const me = await (await w.fetch("/me", { headers: { Cookie: cookieOf(back) } })).json();
   assert.equal(me.signedIn, true);
   const out = await w.fetch("/signout", { method: "POST", headers: { Cookie: cookieOf(back) } });
@@ -229,17 +302,24 @@ test("every reply allows the site's origin, with credentials", async () => {
   assert.equal(r.headers.get("Access-Control-Allow-Origin"), ORIGIN);
 });
 
-test("a missing secret is a 500 that names it, not an exception", async () => {
+test("a missing secret is a 500 that does not name it, not an exception", async () => {
   const w = worker({ ANTHROPIC_API_KEY: undefined });
   const r = await chat(w, q("Hi"), {}, await signedIn());
   assert.equal(r.status, 500);
-  assert.deepEqual(await r.json(), { error: "ANTHROPIC_API_KEY is not set" });
+  assert.deepEqual(await r.json(), { error: "not set up" });
+  // GitHub sign-in is offered only with both halves of the app's credentials.
+  const w2 = worker({ GITHUB_CLIENT_SECRET: undefined });
+  assert.equal((await (await w2.fetch("/me")).json()).github, false);
 });
 
 test("the ledger object sets its sweep alarm and sweeps on it", async () => {
   const storage = new MapStorage();
   const ledger = new Ledger({ storage });
-  await ledger.fetch(new Request("https://ledger/take", { method: "POST", body: JSON.stringify({ hash: "a", limit: 2 }) }));
+  await ledger.fetch(new Request("https://ledger/remaining", { method: "POST", body: JSON.stringify({ hash: "a", limit: 2 }) }));
+  assert.ok(storage.alarm > Date.now());
+  storage.alarm = null;
+  await ledger.fetch(new Request("https://ledger/start", { method: "POST", body: JSON.stringify({ who: "address:a", hash: "a", limit: 2 }) }));
+  storage.m.delete("inflight:address:a");
   assert.ok(storage.alarm > Date.now());
   assert.equal(storage.m.size, 1);
   storage.m.set("free:a", { count: 1, at: Date.now() - 25 * 60 * 60 * 1000 });

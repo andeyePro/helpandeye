@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { cost } from "./prices.js";
+import { cost, PRICES } from "./prices.js";
 
 // Haiku 5.5 answers from a short, fixed text at a fraction of the price of the larger models,
 // and this is a FAQ, not a reasoning task. MODEL changes it.
@@ -8,6 +8,12 @@ export const DEFAULT_MODEL = "claude-haiku-5-5";
 // 100K-token price step, whatever a visitor sends.
 export const MAX_TURNS = 20;
 export const MAX_CHARS = 2000;
+// A short answer from Haiku takes a few seconds; a request still open after this has failed.
+export const TIMEOUT_MS = 20 * 1000;
+// What no answer may say, whatever the visitor typed or put into the history: only a person
+// who has read a call may tell anyone that help is coming. The site's own wording ("you are
+// only told help is coming when ...") is not matched.
+export const REASSURANCE = /help is on (the|its) way|on (their|the) way to you|(message|call) has been received|we have received your|help will be with you|sit tight/i;
 
 export class BotError extends Error {
   constructor(status, message) {
@@ -28,8 +34,9 @@ export function conversation(messages) {
 }
 
 /// Asks the model. Returns the answer's text, the token counts and the estimated cost.
-export async function answer({ apiKey, model = DEFAULT_MODEL, system, messages, refusal }) {
-  const client = new Anthropic({ apiKey, maxRetries: 1 });
+export async function answer({ apiKey, model = DEFAULT_MODEL, system, messages, refusal, reassured }) {
+  if (!PRICES[model]) throw new BotError(500, "not set up");
+  const client = new Anthropic({ apiKey, maxRetries: 1, timeout: TIMEOUT_MS });
   let response;
   try {
     response = await client.messages.create({
@@ -47,8 +54,9 @@ export async function answer({ apiKey, model = DEFAULT_MODEL, system, messages, 
     throw e;
   }
   const usage = response.usage ?? {};
-  const text = response.stop_reason === "refusal"
+  let text = response.stop_reason === "refusal"
     ? refusal
     : response.content.filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+  if (REASSURANCE.test(text)) text = reassured;
   return { text: text || refusal, usage, usd: cost(model, usage) };
 }
