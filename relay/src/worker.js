@@ -1,6 +1,6 @@
 import { configured, push } from "./apns.js";
 import { checkPass, PASS_HEADER, requiresPass } from "./pass.js";
-import { authenticate, GroupRelay, KEEP_MS, MAX_MEMBERS_REQUEST, MAX_REQUEST, Meter as MeterLogic, RelayError, unb64 } from "./relay.js";
+import { authenticate, GroupRelay, KEEP_MS, MAX_MEMBERS_REQUEST, MAX_REQUEST, Meter as MeterLogic, NOT_MEMBER, RelayError, unb64 } from "./relay.js";
 
 // Routes:
 //   PUT  /g/<groupId>/members          coordinator sends the member list (public keys only)
@@ -21,6 +21,15 @@ export const PUSH_BATCH = SUBREQUESTS - 1;
 
 // The meter's last answer. It is asked after the reply, so a slow or failing meter never holds one up.
 let low = false;
+
+// Any fresh key passes the signature check, so a stranger rotating keys costs a group's Durable
+// Object a request each time. A group's refusals of non-members are counted by address, as failed
+// signature checks are; past the limit, that address's requests stop here for a minute, except a
+// call and a key a group has already answered here. Both are kept in this isolate only, so this
+// is a best effort that never adds a wait to a member's request.
+export const REFUSE_MS = 60_000;
+const CACHE_MAX = 10_000;
+const refusing = new Map(), answered = new Set();
 
 export default {
   async fetch(request, env, ctx) {
@@ -66,9 +75,21 @@ export default {
       // A post that wakes others for a call is held back only by its group's limits for each phone.
       let call = false;
       try { call = m[2] === "messages" && request.method === "POST" && JSON.parse(body)?.wake === "call"; } catch {}
+      const known = m[1] + " " + key;
+      if (!call && !answered.has(known) && (refusing.get(address) ?? 0) > Date.now()) throw new RelayError(429, "too many requests");
       if (!call && !(await allowed(env.KEY_LIMIT, key))) throw new RelayError(429, "too many requests");
       const stub = env.GROUPS.get(env.GROUPS.idFromName(m[1]));
       response = await stub.fetch(request.url, { method: request.method, headers: request.headers, body: body || undefined });
+      if (response.ok) {
+        if (answered.size >= CACHE_MAX) answered.clear();
+        answered.add(known);
+      }
+      else if (response.status === 403 && (await response.clone().json().catch(() => ({}))).error === NOT_MEMBER
+               && !(await allowed(env.IP_LIMIT, address))) {
+        if (refusing.size >= CACHE_MAX) refusing.clear();
+        refusing.set(address, Date.now() + REFUSE_MS);
+        response = json(429, { error: "too many requests" });
+      }
       ctx.waitUntil(count(env));
     } catch (e) {
       if (!(e instanceof RelayError)) throw e;

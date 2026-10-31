@@ -183,6 +183,30 @@ test("only requests that fail the signature check are limited by address", async
   assert.deepEqual(ip.asked, ["203.0.113.9", "203.0.113.10"], "a signed request is not counted");
 });
 
+test("strangers with throwaway keys are counted by address and then stopped before the group", async () => {
+  const ip = limiter();
+  const w = worker({ IP_LIMIT: ip });
+  const owner = await phone(), member = await phone();
+  const id = await groupId(owner);
+  const path = (kind) => `/g/${id}/${kind}`;
+  const busy = { headers: { "CF-Connecting-IP": "198.51.100.7" } }, other = { headers: { "CF-Connecting-IP": "198.51.100.8" } };
+  assert.equal((await w.fetch(await owner.request("PUT", path("members"), firstList(owner, member), busy))).status, 200);
+  assert.equal((await w.fetch(await member.request("GET", path("messages"), "", busy))).status, 200);
+  assert.equal((await w.fetch(await (await phone()).request("GET", path("messages"), "", busy))).status, 403);
+  assert.deepEqual(ip.asked, ["198.51.100.7"], "a refusal is counted by address; members' requests are not");
+  ip.refused.add("198.51.100.7");
+  assert.equal((await w.fetch(await (await phone()).request("GET", path("messages"), "", busy))).status, 429, "past the limit");
+  const reached = w.reached.groups;
+  assert.equal((await w.fetch(await (await phone()).request("GET", path("messages"), "", busy))).status, 429);
+  assert.equal((await w.fetch(await (await phone()).request("PUT", path("push"), JSON.stringify({ token: "b".repeat(64) }), busy))).status, 429);
+  assert.equal(w.reached.groups, reached, "stopped before the group's Durable Object");
+  assert.equal((await w.fetch(await member.request("GET", path("messages"), "", busy))).status, 200, "a member on the same address is not");
+  await w.fetch(await (await phone()).request("POST", path("messages"), '{"sealed":"AA==","wake":"call"}', busy));
+  assert.equal(w.reached.groups, reached + 2, "a call always reaches the group, which decides");
+  assert.equal((await w.fetch(await (await phone()).request("GET", path("messages"), "", other))).status, 403, "another address is not");
+  await w.settle();
+});
+
 test("signed requests are limited per key, but never a post that wakes others for a call", async () => {
   const keys = limiter();
   const w = worker({ KEY_LIMIT: keys });

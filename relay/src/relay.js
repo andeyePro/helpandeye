@@ -37,6 +37,7 @@ export const TAKEOVER_SILENCE_MS = 7 * 24 * 3600 * 1000;
 // The owner's requests are noted at most this often, not at every poll, to spare storage writes.
 // A request between notes is not recorded, so a takeover after silence waits this much longer.
 export const OWNER_SEEN_EVERY_MS = 5 * 60 * 1000;
+export const NOT_MEMBER = "not a member of this group";
 // Durable Object storage takes at most 128 keys in one delete or put.
 const STORAGE_BATCH = 128;
 
@@ -264,7 +265,7 @@ export class GroupRelay {
   }
 
   async requireMember(key) {
-    if (!(await this.isMember(key))) throw new RelayError(403, "not a member of this group");
+    if (!(await this.isMember(key))) throw new RelayError(403, NOT_MEMBER);
   }
 
   /// A member's phone, or their watch acting for it, tells the relay where to push to wake it.
