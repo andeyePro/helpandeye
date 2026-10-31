@@ -64,6 +64,9 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     public private(set) var notes: [String] = []
     public private(set) var acknowledgedBy: [UInt16] = []
     public private(set) var settled: Settled?
+    /// Made on the household's Help&I box, not this phone: the box sends it on the radio and
+    /// settles it, and the phone carries it on its other routes (firmware/DESIGN.md, section 4).
+    public let fromBox: Bool
 
     /// Only a settlement made after this call was pressed counts, so an old one for the same
     /// numbers (a missed check-in's, or a replayed one) can never close a live call.
@@ -92,8 +95,8 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
         while now >= Resend.due(resends + 1, after: createdAt) { resends += 1 }
     }
 
-    public init(unit: UInt32, number: UInt16, colour: Colour, createdAt: Date) {
-        self.unit = unit; self.number = number; self.colour = colour; self.createdAt = createdAt
+    public init(unit: UInt32, number: UInt16, colour: Colour, createdAt: Date, fromBox: Bool = false) {
+        self.unit = unit; self.number = number; self.colour = colour; self.createdAt = createdAt; self.fromBox = fromBox
     }
 
     public mutating func update(_ route: Route, _ state: RouteState) { routes[route] = state }
@@ -226,6 +229,11 @@ public struct IncomingRequest: Equatable, Sendable, Identifiable, Codable {
 
     public var isAcknowledged: Bool { !acknowledgedBy.isEmpty }
     public var isClosed: Bool { settled?.state.closes == true }
+    /// A Help&I box's report of a power cut at its home (firmware/DESIGN.md, section 10): a
+    /// request with no press behind it, so it is worded calmly, never as a call for help.
+    public var isPowerReport: Bool { colour == nil && categories.values.contains(.powerCut) }
+    /// The box has no mains wire and judged the cut from its battery, so it may be wrong.
+    public var powerCutIsProbable: Bool { isPowerReport && notes.values.contains(HelpBox.probablePowerCutNote) }
     /// Nobody has acknowledged it and nobody has closed it.
     public var isOpen: Bool { !isAcknowledged && !isClosed }
     /// The caller pressed I'm OK after it: still open, until a responder has checked.
@@ -443,6 +451,7 @@ extension OutgoingRequest {
         settled = try c.decodeIfPresent(Settled.self, forKey: .settled)
         parts = try c.value(.parts, or: 0)
         resends = try c.value(.resends, or: 0)
+        fromBox = try c.value(.fromBox, or: false)
     }
 }
 

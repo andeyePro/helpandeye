@@ -154,9 +154,18 @@ public struct GroupState: Codable, Equatable, Sendable {
         public var keepsLog = true
         /// The antenna on each unit's box, by member number (decision 8); the standard whip unless set.
         public var antennaOf: [UInt16: Antenna] = [:]
+        /// The boxes whose households chose to have a power cut reported to responders, by the
+        /// box's member number (decisions 3 and 4; firmware/DESIGN.md, section 10). Off unless chosen.
+        public var reportsPowerCut: Set<UInt16> = []
+        /// Whether Help&I boxes hold responders' first names, to say who has seen a call
+        /// (firmware/DESIGN.md, section 6). Off unless a coordinator turns it on, as Martin may still
+        /// decide against names on boxes (section 14); with it off no name is sent.
+        public var namesOnBox = false
         public init() {}
 
-        enum CodingKeys: String, CodingKey { case useDistance, profiles, profileOf, keepsLog, antennaOf, redInterval, amberInterval, buttonWords }
+        enum CodingKeys: String, CodingKey {
+            case useDistance, profiles, profileOf, keepsLog, antennaOf, reportsPowerCut, namesOnBox, redInterval, amberInterval, buttonWords
+        }
 
         /// Settings from before profiles (escalation times and button words for the whole group)
         /// become the first profile's.
@@ -166,6 +175,8 @@ public struct GroupState: Codable, Equatable, Sendable {
             profileOf = try c.value(.profileOf, or: [:])
             keepsLog = try c.value(.keepsLog, or: true)
             antennaOf = try c.value(.antennaOf, or: [:])
+            reportsPowerCut = try c.value(.reportsPowerCut, or: [])
+            namesOnBox = try c.value(.namesOnBox, or: false)
             if let p = try c.decodeIfPresent([Profile].self, forKey: .profiles), !p.isEmpty {
                 profiles = p
             } else {
@@ -184,6 +195,8 @@ public struct GroupState: Codable, Equatable, Sendable {
             try c.encode(profileOf, forKey: .profileOf)
             try c.encode(keepsLog, forKey: .keepsLog)
             if !antennaOf.isEmpty { try c.encode(antennaOf, forKey: .antennaOf) }
+            if !reportsPowerCut.isEmpty { try c.encode(reportsPowerCut.sorted(), forKey: .reportsPowerCut) }
+            if namesOnBox { try c.encode(namesOnBox, forKey: .namesOnBox) }
         }
     }
 

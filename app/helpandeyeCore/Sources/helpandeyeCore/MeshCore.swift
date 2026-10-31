@@ -27,6 +27,15 @@ public enum MeshCore {
         case addContact(publicKey: Data, name: String)
         /// The six-digit Bluetooth pairing code (CMD_SET_DEVICE_PIN, 37 in the firmware source).
         case setPin(UInt32)
+        /// Help&I's own commands, answered only by a box on Help&I's firmware (firmware/DESIGN.md,
+        /// section 6): what the box holds, the group, its members and responders' first names
+        /// (`HelpBox.Setup`), its calls, and what the phone's routes did with one.
+        case boxInfo
+        case boxSetGroup(body: Data)
+        case boxSetMembers(page: Data)
+        case boxSetNames(page: Data)
+        case boxGetCalls
+        case boxRouteResult(request: UInt16, sent: Bool)
 
         public func encoded() throws -> Data {
             var w = ByteWriter()
@@ -62,6 +71,20 @@ public enum MeshCore {
                 var n = Data(name.utf8.prefix(31)); n.append(Data(count: 32 - n.count))
                 w.u8(0x09); w.bytes(key); w.u8(1); w.u8(0); w.u8(0xFF); w.bytes(Data(count: 64)); w.bytes(n)
                 w.u32(0); w.i32(0); w.i32(0)
+            case .boxInfo: w.u8(0x70)
+            case let .boxSetGroup(body):
+                guard body.count == HelpBox.groupBodyBytes else { throw MeshCoreError.badBoxSetup }
+                w.u8(0x71); w.bytes(body)
+            case let .boxSetMembers(page):
+                guard page.count >= 6, (page.count - 6) % HelpBox.memberBytes == 0, page.count <= 6 + HelpBox.membersPerPage * HelpBox.memberBytes else {
+                    throw MeshCoreError.badBoxSetup
+                }
+                w.u8(0x72); w.bytes(page)
+            case let .boxSetNames(page):
+                guard page.count >= 6 else { throw MeshCoreError.badBoxSetup }
+                w.u8(0x76); w.bytes(page)
+            case .boxGetCalls: w.u8(0x73)
+            case let .boxRouteResult(request, sent): w.u8(0x74); w.u16(request); w.u8(sent ? 1 : 0)
             }
             return w.data
         }
@@ -81,6 +104,44 @@ public enum MeshCore {
         public let blePin: UInt32
         public let model: String
         public let version: String
+
+        /// Help&I's build of the firmware says so in its version, `v1.18.0-hi1` (firmware/DESIGN.md,
+        /// section 6); a stock box does not, and gets no Help&I command.
+        public var isHelpBox: Bool { version.range(of: #"-hi[0-9]+$"#, options: .regularExpression) != nil }
+    }
+
+    /// What a Help&I box holds (reply 0xA0 to `boxInfo`).
+    public struct BoxInfo: Equatable, Sendable {
+        public enum Mains: UInt8, Sendable { case unknown = 0, on = 1, off = 2 }
+        public let protocolVersion: UInt8
+        public let provisioned: Bool
+        public let unit: UInt32
+        public let member: UInt16
+        public let nextRequest: UInt16
+        public let mains: Mains
+        /// Mains from the battery's trend, on a box without the mains wire: "probably".
+        public let mainsEstimated: Bool
+        public let batteryMillivolts: Int
+        public let hoursLeft: Int
+        public let antennaCode: UInt8
+        /// The highest radio setting the box allows itself, in dBm; nil where it must not send.
+        public let powerCap: Int?
+        public let members: Int
+        public let calls: Int
+        /// The X25519 key the box seals with, for its member entry; all zero if it could not read
+        /// its own key.
+        public let sealKey: Data
+        /// How many responders' first names it holds.
+        public let names: Int
+    }
+
+    /// One of the box's own calls (reply 0xA1 to `boxGetCalls`), with the status the box shows.
+    public struct BoxCall: Equatable, Sendable {
+        public let request: UInt16
+        public let colour: Colour
+        public let pressedAt: UInt32
+        public let status: CallerStatus
+        public let acknowledgements: Int
     }
 
     public enum Response: Equatable, Sendable {
@@ -97,6 +158,12 @@ public enum MeshCore {
         case battery(millivolts: Int)
         case messagesWaiting
         case sendConfirmed
+        /// From a Help&I box: what it holds, each of its calls and the end of them, and a frame it
+        /// made for the phone to carry (push 0xA3).
+        case boxInfo(BoxInfo)
+        case boxCall(BoxCall)
+        case boxEndOfCalls
+        case boxFrame(HelpFrame)
         case other(code: UInt8)
 
         // swiftlint:disable:next cyclomatic_complexity
@@ -147,6 +214,31 @@ public enum MeshCore {
                 self = .channelData(channel: ch, dataType: type, payload: Data(payload), snr: Double(Int8(bitPattern: snr)) / 4)
             case 0x82: self = .sendConfirmed
             case 0x83: self = .messagesWaiting
+            case 0xA0:
+                guard let proto = r.u8(), let provisioned = r.u8(), let unit = r.u32(), let member = r.u16(), let next = r.u16(),
+                      let mainsByte = r.u8(), let mains = BoxInfo.Mains(rawValue: mainsByte & 3), let mv = r.u16(), let hours = r.u16(),
+                      let antenna = r.u8(), let cap = r.u8(), let members = r.u8(), let calls = r.u8(), let seal = r.take(32),
+                      let names = r.u8() else { return nil }
+                self = .boxInfo(BoxInfo(protocolVersion: proto, provisioned: provisioned != 0, unit: unit, member: member, nextRequest: next,
+                                        mains: mains, mainsEstimated: mainsByte & 4 != 0, batteryMillivolts: Int(mv), hoursLeft: Int(hours),
+                                        antennaCode: antenna, powerCap: Int8(bitPattern: cap) == -128 ? nil : Int(Int8(bitPattern: cap)),
+                                        members: Int(members), calls: Int(calls), sealKey: Data(seal), names: Int(names)))
+            case 0xA1:
+                guard let request = r.u16(), let colour = r.u8().flatMap(Colour.init), let at = r.u32(), let status = r.u8(), let acks = r.u8() else { return nil }
+                let s: CallerStatus
+                switch status {
+                case 0: s = .sending
+                case 1: s = .waitingForResponder
+                case 2: s = .seen(responder: 0)
+                case 3: s = .notSent
+                case 4: s = .closed(by: 0)
+                default: return nil
+                }
+                self = .boxCall(BoxCall(request: request, colour: colour, pressedAt: at, status: s, acknowledgements: Int(acks)))
+            case 0xA2: self = .boxEndOfCalls
+            case 0xA3:
+                guard let f = HelpFrame(Data(r.rest())) else { return nil }
+                self = .boxFrame(f)
             default: self = .other(code: code)
             }
         }
@@ -154,7 +246,7 @@ public enum MeshCore {
 }
 
 public enum MeshCoreError: Error, Equatable {
-    case badSecret, payloadTooLarge, badContact, badPin
+    case badSecret, payloadTooLarge, badContact, badPin, badBoxSetup
 }
 
 private func cString(_ bytes: [UInt8]) -> String {

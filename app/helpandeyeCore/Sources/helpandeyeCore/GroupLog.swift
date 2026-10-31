@@ -48,6 +48,8 @@ extension GroupSettings {
         if policy.profileOf != old.policy.profileOf { out.append("changed who has which profile") }
         if policy.keepsLog != old.policy.keepsLog { out.append(policy.keepsLog ? "switched the log on" : "switched the log off") }
         if policy.antennaOf != old.policy.antennaOf { out.append("changed a unit's antenna") }
+        if policy.reportsPowerCut != old.policy.reportsPowerCut { out.append("changed whether a box reports power cuts") }
+        if policy.namesOnBox != old.policy.namesOnBox { out.append(policy.namesOnBox ? "put responders' first names on boxes" : "took responders' first names off boxes") }
         if policy.useDistance != old.policy.useDistance { out.append("changed whether distance counts") }
         if relayURL != old.relayURL { out.append("changed the relay address") }
         if relayPass != old.relayPass { out.append("added a relay pass") }

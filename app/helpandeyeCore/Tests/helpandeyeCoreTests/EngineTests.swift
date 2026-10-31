@@ -32,7 +32,7 @@ import XCTest
     weak var phone: Phone?
     var isReady = true
     var radio: RadioSettings? = RadioSettings(frequencyMHz: 869.618, bandwidthKHz: 62.5, spreadingFactor: 8, codingRate: 8)
-    let boxPublicKey: Data? = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
+    var boxPublicKey: Data? = Data((0..<32).map { _ in UInt8.random(in: 0...255) })
     var channelsPerSend: Int { max(secrets.count, 1) }
     var unavailableReason = "No box connected"
     var secrets: [Data] = []

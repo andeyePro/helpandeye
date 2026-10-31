@@ -236,10 +236,16 @@ public final class HelpEngine: ObservableObject {
     public var group: GroupState? { saved?.group }
     private var groupID: Data { group?.secrets.groupID ?? Data() }
     public var me: Member? { saved.flatMap { $0.group.member($0.me) } }
-    public var current: OutgoingRequest? { activity.outgoing.last }
+    /// This phone's own latest call; the household's box's calls are kept apart (`fromBox`).
+    public var current: OutgoingRequest? { activity.outgoing.last { !$0.fromBox } }
 
     public func name(ofUnit unit: UInt32) -> String { group?.member(unit: unit)?.name ?? "Unit \(unit)" }
     public func name(ofMember n: UInt16) -> String { n == saved?.me ? "You" : (group?.member(n)?.name ?? "Responder \(n)") }
+
+    /// The unit of the Help&I box paired with this phone, when it is a member of this group: the
+    /// household's own, so its calls are never alerted for here (firmware/DESIGN.md, section 4).
+    public var pairedBoxUnit: UInt32? { group?.boxMember(key: mesh.boxPublicKey)?.unit }
+    private func isHousehold(_ unit: UInt32) -> Bool { unit == me?.unit || unit == pairedBoxUnit }
 
     /// Runs `work` and remembers it, so tests can wait for every send to finish.
     private func spawn(_ work: @escaping @MainActor () async -> Void) {
@@ -597,9 +603,8 @@ public final class HelpEngine: ObservableObject {
     public func add(_ category: CallCategory) -> String? {
         guard current?.partsLeft ?? 0 > 0 else { return "This call cannot take any more messages. If you need help now, call 999." }
         if category != .missedCheckIn, let keyProblem { return keyProblem }
-        guard var r = activity.outgoing.popLast() else { return nil }
-        let frame = r.add(category)
-        activity.outgoing.append(r)
+        guard let i = activity.outgoing.lastIndex(where: { !$0.fromBox }) else { return nil }
+        let frame = activity.outgoing[i].add(category)
         let gid = groupID
         // A missed check-in is not the caller's choice, so it goes plainly, like the call.
         if frame.personalPart == nil {
@@ -615,9 +620,8 @@ public final class HelpEngine: ObservableObject {
     public func withdraw(_ category: CallCategory) -> String? {
         // Taken back here but not there would leave responders acting on it.
         if let keyProblem { return keyProblem }
-        guard var r = activity.outgoing.popLast() else { return nil }
-        let frame = r.withdraw(category)
-        activity.outgoing.append(r)
+        guard let i = activity.outgoing.lastIndex(where: { !$0.fromBox }) else { return nil }
+        let frame = activity.outgoing[i].withdraw(category)
         let gid = groupID
         if let frame { spawn { await self.sendPersonal(frame, in: gid) } }
         return nil
@@ -629,7 +633,7 @@ public final class HelpEngine: ObservableObject {
     /// those still waiting for a responder when it only stops the urgent repeats.
     public var settledByOK: [OutgoingRequest] {
         activity.outgoing.filter { r in
-            guard r.isUnsettled else { return false }
+            guard r.isUnsettled, !r.fromBox else { return false }
             if profile.afterOK == .closesCall { return true }
             if case .seen = r.status { return false }
             return r.settled == nil
@@ -648,7 +652,7 @@ public final class HelpEngine: ObservableObject {
 
     /// The caller closes their latest open call, where their profile lets them.
     public func closeMyCall() {
-        guard profile.callerMayClose, let n = saved?.me, let r = activity.outgoing.last(where: \.isUnsettled) else { return }
+        guard profile.callerMayClose, let n = saved?.me, let r = activity.outgoing.last(where: { $0.isUnsettled && !$0.fromBox }) else { return }
         settleCall(r.unit, r.number, Settled(state: .closedByCaller, by: n, at: now()))
     }
 
@@ -759,7 +763,7 @@ public final class HelpEngine: ObservableObject {
     /// message for responders only if this member responds and it is not their own.
     public func takes(_ frame: HelpFrame) -> Bool {
         switch frame {
-        case let .call(unit, _, _, _): me?.canRespond == true && unit != me?.unit
+        case let .call(unit, _, _, _): me?.canRespond == true && !isHousehold(unit)
         // Sealed for responders: only one that can open it holds it.
         case .forResponders: me?.canRespond == true && group.flatMap { ForResponders.open(frame, in: $0, at: now()) } != nil
         // Personal detail sent plainly (an older group) is for responders only, too.
@@ -778,10 +782,10 @@ public final class HelpEngine: ObservableObject {
     public func addNote(_ text: String) -> String? {
         if let keyProblem { return keyProblem }
         guard canSendPersonal else { return Self.cannotSendPersonal }
-        guard var r = activity.outgoing.popLast() else { return nil }
+        guard let i = activity.outgoing.lastIndex(where: { !$0.fromBox }) else { return nil }
         // Sealed and signed for responders, long text goes as several notes that each fit the radio.
-        let frames = group?.secrets.responderPublicKey == nil ? [r.addNote(text)].compactMap { $0 } : r.addNotes(text, pieceBytes: ForResponders.maxNoteBytes)
-        activity.outgoing.append(r)
+        let frames = group?.secrets.responderPublicKey == nil ? [activity.outgoing[i].addNote(text)].compactMap { $0 }
+            : activity.outgoing[i].addNotes(text, pieceBytes: ForResponders.maxNoteBytes)
         if frames.isEmpty, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "This call cannot take any more messages. If you need help now, call 999."
         }
@@ -925,6 +929,68 @@ public final class HelpEngine: ObservableObject {
         for m in members.sorted() { await shareCheckIns(to: m) }
     }
 
+    // MARK: A Help&I box of its own
+
+    /// A coordinator adds the Help&I box with this MeshCore key and sealing key (from its info
+    /// reply) as a member of its own, a caller with its own unit (decision 8), told to everyone
+    /// like any member. Returns why it could not be, if it could not.
+    @discardableResult
+    public func addBox(key: Data, sealKey: Data, name: String) -> String? {
+        guard actsAsCoordinator, let g = group else { return "Only a coordinator can add a box to the group" }
+        guard g.boxMember(key: key) == nil else { return "This box is already in the group" }
+        let me = saved?.me
+        var added: UInt16?
+        updateGroup { added = $0.addBox(key: key, sealKey: sealKey, name: name, by: me) }
+        guard added != nil else { return "This box could not be added" }
+        log("You added the box \(name)")
+        return nil
+    }
+
+    /// A frame the paired Help&I box made (push 0xA3): its call, its signed I'm OK or close, or a
+    /// sealed power-cut report. The box has sent it on the radio itself; the phone takes it in as
+    /// if heard there and carries it on its other routes, like its own. A call is kept as the
+    /// household's own, never alerted for here, and what comes back for it (acknowledgements,
+    /// closes) reaches its record like the phone's own calls'. Returns whether any route took a
+    /// call, for the box (0x74); nil for anything else.
+    public func receiveFromBox(_ frame: HelpFrame) async -> Bool? {
+        guard !companion, let unit = pairedBoxUnit, let g = group else { return nil }
+        let gid = g.secrets.groupID
+        switch frame {
+        case let .call(u, number, colour, sentAt) where u == unit:
+            let pressed = Date(timeIntervalSince1970: TimeInterval(sentAt))
+            if let i = activity.outgoing.firstIndex(where: { $0.unit == u && $0.number == number }) {
+                // The same call again: nothing more to do. A different press under the same number
+                // is a box that started its numbering afresh: the old record goes.
+                if abs(activity.outgoing[i].createdAt.timeIntervalSince(pressed)) <= OutgoingRequest.clockAllowance {
+                    return activity.outgoing[i].routes.values.contains(.sent)
+                }
+                activity.outgoing.remove(at: i)
+            }
+            var r = OutgoingRequest(unit: u, number: number, colour: colour, createdAt: pressed, fromBox: true)
+            let routes = RoutePlan.firstAttempt(available: availableRoutes.subtracting([.mesh]), smsIsAutomatic: false)
+            let expired = keysExpired ? Self.keysExpiredReason : nil
+            if !routes.contains(.internet) { r.update(.internet, .failed(expired ?? relay.lastProblem ?? "Internet route not set up")) }
+            if homeWiFi.isEnabled, !routes.contains(.wifi) { r.update(.wifi, .failed(expired ?? homeWiFi.unavailableReason)) }
+            for route in routes { r.update(route, .sending) }
+            activity.outgoing.append(r)
+            trimOutgoing()
+            log("\(describe(u, number, colour)) pressed on the box")
+            var took = false
+            for route in routes {
+                let failure = route == .internet ? await sendOnInternet(frame, wake: .call, in: gid) : await send(frame, on: route, kind: .call, in: gid)
+                updateOutgoing(r, route, failure.map(RouteState.failed) ?? .sent)
+                if failure == nil { took = true }
+            }
+            return took
+        case .signed, .forResponders:
+            receive(frame, via: .mesh)
+            _ = await sendOffAir(frame, in: gid)
+            return nil
+        default:
+            return nil
+        }
+    }
+
     /// Tells the group which box is this phone's, and adds the other members' boxes as contacts.
     public func boxReady() async {
         guard let myNumber = saved?.me, let key = mesh.boxPublicKey else { return }
@@ -1051,7 +1117,9 @@ public final class HelpEngine: ObservableObject {
             activity.outgoing[i].markResent(at: t)
             let r = activity.outgoing[i]
             let gid = groupID
-            for route in RoutePlan.firstAttempt(available: availableRoutes, smsIsAutomatic: false) {
+            // The box sends its own calls on the radio; the phone carries them on its other routes.
+            let available = r.fromBox ? availableRoutes.subtracting([.mesh]) : availableRoutes
+            for route in RoutePlan.firstAttempt(available: available, smsIsAutomatic: false) {
                 // The first time a call reaches the relay, ask it to wake the others, even if that is
                 // on a resend because the internet came back.
                 let firstOnInternet = route == .internet && r.routes[.internet] != .sent
@@ -1060,7 +1128,7 @@ public final class HelpEngine: ObservableObject {
                     let failure = firstOnInternet ? await self.sendOnInternet(r.callFrame, wake: .call, in: gid)
                         : await self.send(r.callFrame, on: route, kind: r.colour == .green ? .optional : .resend, in: gid)
                     if failure == nil { self.updateOutgoing(r, route, .sent) }
-                    if let ok = self.okFrame(r) { _ = await self.send(ok, on: route, kind: .optional, in: gid) }
+                    if !r.fromBox, let ok = self.okFrame(r) { _ = await self.send(ok, on: route, kind: .optional, in: gid) }
                 }
             }
         }
@@ -1116,7 +1184,14 @@ public final class HelpEngine: ObservableObject {
             }
             activity.lastAnswered[who] = max(activity.lastAnswered[who] ?? .distantPast, Date(timeIntervalSince1970: TimeInterval(at)))
             if let i = activity.outgoing.firstIndex(where: { $0.unit == unit && $0.number == request }) {
+                let before = activity.outgoing[i].acknowledgedBy
                 activity.outgoing[i].receive(frame)
+                // The box hears only the radio: an acknowledgement of its call that came another
+                // way goes on the radio for it, so it can show that someone has seen the call.
+                if activity.outgoing[i].fromBox, route != .mesh, activity.outgoing[i].acknowledgedBy != before {
+                    let gid = groupID
+                    spawn { _ = await self.sendOnMesh(frame, kind: .optional, in: gid) }
+                }
             }
         case .availability, .noticeAck, .memberAdded, .memberRemoved, .memberName, .memberRole, .memberPhone, .callState, .changeRequest, .changeoverEnds:
             // Counted only when signed (below), so a removed phone cannot fake them.
@@ -1179,6 +1254,12 @@ public final class HelpEngine: ObservableObject {
                 if allowed {
                     settleCall(IncomingRequest.Key(unit: unit, request: request),
                            Settled(state: state, by: signer, at: Date(timeIntervalSince1970: TimeInterval(at)), reason: reason), via: route)
+                    // A coordinator's close of the paired box's call, heard off the air, goes on
+                    // the radio for the box.
+                    if unit == pairedBoxUnit, route != .mesh, sender.unit != unit {
+                        let gid = groupID
+                        spawn { _ = await self.sendOnMesh(frame, kind: .optional, in: gid) }
+                    }
                 }
             case let .memberAdded(n, _, _, _, _, _) where n == saved?.me && signer == group?.primaryCoordinator:
                 // The first coordinator lists this phone: the whole group knows it is in.
@@ -1251,8 +1332,9 @@ public final class HelpEngine: ObservableObject {
             // Counted only signed by the caller (below) or as a direct message from their box.
             return
         case let .call(unit, _, _, _), let .followUp(unit, _, _, _), let .note(unit, _, _, _), let .position(unit, _, _, _, _):
-            // A phone never alerts for its own calls, however they come back to it.
-            if unit == me?.unit { return }
+            // A phone never alerts for its own calls, nor its household's box's, however they come
+            // back to it.
+            if isHousehold(unit) { return }
             activity.checkInWatch.apply(frame)
             if case .followUp(_, _, _, .missedCheckIn) = frame { activity.checkInWatch.heardRaised(unit: unit, at: now(), calendar: calendar) }
         }
@@ -1262,6 +1344,8 @@ public final class HelpEngine: ObservableObject {
             log("\(describe(key.unit, key.request, activity.inbox.requests[key]?.colour)) heard over \(route.words)")
             scheduleAlerts(for: key)
         case let .updated(key) where activity.inbox.requests[key]?.isOpen == false: alerts.cancel(key)
+        // A box's power-cut report: a later part (its "probably") can change what the alert says.
+        case let .updated(key) where activity.inbox.requests[key]?.isPowerReport == true: scheduleAlerts(for: key)
         case .duplicate:
             // The caller is still sending, so it has not heard an acknowledgement. Pass on the
             // signed acknowledgements this phone has, its own or another responder's.
@@ -1348,7 +1432,7 @@ public final class HelpEngine: ObservableObject {
     /// acknowledges.
     private func scheduleAlerts(for key: IncomingRequest.Key) {
         guard let r = activity.inbox.requests[key], r.isOpen, let e = escalation(for: r), let me = self.me?.number, self.me?.canRespond == true else { return }
-        let calm = r.colour == .green || r.callerIsOK
+        let calm = r.colour == .green || r.callerIsOK || r.isPowerReport
         let turn = TimeInterval(e.order.firstIndex(of: me) ?? e.order.count) * e.interval
         let turnAt = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn)
         // "I'm OK" asks for no one: tell them once, calmly, and never again.
@@ -1364,6 +1448,8 @@ public final class HelpEngine: ObservableObject {
         let times: [Date]
         switch r.colour {
         case .green?: times = [max(turnAt, t)]
+        // A box's power cut at someone's home: nobody pressed, so calm reminders, spaced out.
+        case nil where r.isPowerReport: times = alertTimes(turnAt: turnAt, every: 1800, quick: 2, later: 7200, from: t, count: count)
         // The caller said they are OK after it: calm reminders, as often and as many as their
         // coordinator chose, until a responder has checked.
         case _ where r.callerIsOK:
@@ -1385,7 +1471,9 @@ public final class HelpEngine: ObservableObject {
         var title = "\(who): \(ButtonWords.words(r.colour ?? .red, in: group?.profile(ofUnit: key.unit)))"
         if key.request == 0 { title = "\(who) missed a check-in" }
         if r.callerIsOK { title = "\(who) says they're OK now" }
-        let body = r.callerIsOK ? "Please check on them, then acknowledge in Help&I." : "Open Help&I to acknowledge."
+        if r.isPowerReport { title = r.powerCutIsProbable ? "\(who): probably a power cut at home" : "\(who): power cut at home" }
+        let body = r.isPowerReport ? "Their box is on its battery. Please check on them when you can, then acknowledge in Help&I."
+            : r.callerIsOK ? "Please check on them, then acknowledge in Help&I." : "Open Help&I to acknowledge."
         alerts.schedule(Alert(key: key, title: title, body: body, calm: calm, times: times))
     }
 
