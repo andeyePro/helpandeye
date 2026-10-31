@@ -108,8 +108,9 @@ keys; the new owner's own is required, and every signer must be a coordinator ot
 The relay takes it with proof: the owner's naming of them as deputy (signed over `HELPA-DEPUTY-1`,
 the ID, the deputy's key and the version, little-endian), a second coordinator's signature, or no
 request from the owner for seven days (counted from the first takeover tried, for a group the relay
-began watching only then). Only the new owner's own list brings a takeover; anyone else's waits
-with 425 until it has. The new owner's namings of a deputy count from 0 again, as on the phones:
+began watching only then). The relay notes the owner's requests at most once every five minutes,
+not at every poll, so it waits seven days and five minutes from the last it noted. Only the new
+owner's own list brings a takeover; anyone else's waits with 425 until it has. The new owner's namings of a deputy count from 0 again, as on the phones:
 the lost owner's, signed with the lost owner's key, can prove nothing now. Of two coordinators taking over
 at once, the relay keeps the first it can check, and the other's is refused (403) as no longer a
 takeover from the owner; every member reads which with its messages (`owner`), and the phones all

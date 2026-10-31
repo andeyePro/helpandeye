@@ -31,8 +31,12 @@ export const RESEND_WINDOW_MS = 15 * 60 * 1000;
 export const MAX_MEMBERS = 256;
 export const MAX_REMOVED = 1024;
 // How long the first coordinator must go unheard by the relay before one other coordinator alone
-// can take the group over (decision 20). The app waits the same.
+// can take the group over (decision 20). The app waits the same; the relay up to
+// OWNER_SEEN_EVERY_MS longer.
 export const TAKEOVER_SILENCE_MS = 7 * 24 * 3600 * 1000;
+// The owner's requests are noted at most this often, not at every poll, to spare storage writes.
+// A request between notes is not recorded, so a takeover after silence waits this much longer.
+export const OWNER_SEEN_EVERY_MS = 5 * 60 * 1000;
 // Durable Object storage takes at most 128 keys in one delete or put.
 const STORAGE_BATCH = 128;
 
@@ -241,7 +245,7 @@ export class GroupRelay {
     }
     if (signers.size >= 2) return;
     const seen = await this.storage.get("ownerSeenAt");
-    if (seen !== undefined && this.now() - seen >= TAKEOVER_SILENCE_MS) return;
+    if (seen !== undefined && this.now() - seen >= TAKEOVER_SILENCE_MS + OWNER_SEEN_EVERY_MS) return;
     // A group registered before the relay kept watch: its seven days start now.
     if (seen === undefined) await this.storage.put("ownerSeenAt", this.now());
     throw new RelayError(425, "the first coordinator has been heard from within seven days");
@@ -249,7 +253,9 @@ export class GroupRelay {
 
   /// Notes a request from the owner, so a takeover after silence can be checked.
   async heard(key) {
-    if (key === (await this.storage.get("owner"))) await this.storage.put("ownerSeenAt", this.now());
+    if (key !== (await this.storage.get("owner"))) return;
+    const seen = await this.storage.get("ownerSeenAt");
+    if (seen === undefined || this.now() - seen >= OWNER_SEEN_EVERY_MS) await this.storage.put("ownerSeenAt", this.now());
   }
 
   async isMember(key) {

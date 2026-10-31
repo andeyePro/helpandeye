@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { authenticate, b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS, RESEND_WINDOW_MS, TAKEOVER_SILENCE_MS } from "../src/relay.js";
+import { authenticate, b64, GroupRelay, isKey, verify, KEEP_MS, MAX_SKEW_MS, Meter, ownsGroup, RelayError, signingInput, WARN_FRACTION, FREE_DAILY_REQUESTS, RESEND_WINDOW_MS, TAKEOVER_SILENCE_MS, OWNER_SEEN_EVERY_MS } from "../src/relay.js";
 import { MapStorage } from "./storage.js";
 
 async function phone() {
@@ -375,7 +375,7 @@ test("a takeover needs the new first coordinator's signature and proof; alone it
   await rejects(relay.setMembers(second.key, list(second, { signatures: [mine] }), id), 425);
   await rejects(relay.setMembers(third.key, list(second, { signatures: [mine] }), id), 425);
   // The lost phone must be among the removed.
-  takeoverSetUp.now += TAKEOVER_SILENCE_MS;
+  takeoverSetUp.now += TAKEOVER_SILENCE_MS + OWNER_SEEN_EVERY_MS;
   await rejects(relay.setMembers(second.key, { ...list(second, { signatures: [mine] }), removed: [] }, id), 400);
   assert.equal((await relay.members()).members.some((e) => e.key === owner.key), true, "nothing changed");
   // Seven days on, the single signature is enough.
@@ -426,12 +426,33 @@ test("the owner's request resets the seven days, and two coordinators or the nam
   await rejects(agreed.setMembers(second.key, list(second, { signatures: [mine, await sign(third)] })), 400);
 });
 
+test("the owner's polls are written down at most every five minutes, and the seven days still hold", async () => {
+  const { relay, owner, second, id, sign, list } = await takeoverSetUp();
+  const mine = await sign(second);
+  const writes = relay.storage.puts;
+  for (let i = 0; i < 10; i++) { takeoverSetUp.now += 20_000; await relay.heard(owner.key); }
+  assert.equal(relay.storage.puts, writes, "a poll every 20 seconds since registering: nothing written");
+  takeoverSetUp.now += OWNER_SEEN_EVERY_MS - 200_000;
+  await relay.heard(owner.key);
+  assert.equal(relay.storage.puts, writes + 1, "five minutes on, once");
+  const noted = takeoverSetUp.now;
+  // Polls for four more minutes, none written down; then the phone is lost.
+  for (let i = 0; i < 12; i++) { takeoverSetUp.now += 20_000; await relay.heard(owner.key); }
+  assert.equal(relay.storage.puts, writes + 1);
+  const last = takeoverSetUp.now;
+  takeoverSetUp.now = last + TAKEOVER_SILENCE_MS - 1000;
+  await rejects(relay.setMembers(second.key, list(second, { signatures: [mine] }), id), 425, "the last poll was within seven days");
+  takeoverSetUp.now = noted + TAKEOVER_SILENCE_MS + OWNER_SEEN_EVERY_MS;
+  await relay.setMembers(second.key, list(second, { signatures: [mine] }), id);
+  assert.equal(await relay.storage.get("owner"), second.key);
+});
+
 test("a group registered before the relay kept watch starts its seven days at the first takeover", async () => {
   const { relay, second, id, sign, list } = await takeoverSetUp();
   await relay.storage.delete("ownerSeenAt");
   const mine = await sign(second);
   await rejects(relay.setMembers(second.key, list(second, { signatures: [mine] }), id), 425);
-  takeoverSetUp.now += TAKEOVER_SILENCE_MS - 1000;
+  takeoverSetUp.now += TAKEOVER_SILENCE_MS + OWNER_SEEN_EVERY_MS - 1000;
   await rejects(relay.setMembers(second.key, list(second, { signatures: [mine] }), id), 425, "not seven days since the relay began to watch");
   takeoverSetUp.now += 1000;
   await relay.setMembers(second.key, list(second, { signatures: [mine] }), id);
@@ -442,7 +463,7 @@ test("a new first coordinator's deputy counts afresh, whatever the lost phone's 
   const { relay, owner, second, third, member, id, raw, sign, list, c, m } = await takeoverSetUp();
   // The lost phone had named deputies up to version 5.
   await relay.setMembers(owner.key, { generation: 2, members: [c(owner), c(second), c(third), m(member)], primary: owner.key, deputyVersion: 5 }, id);
-  takeoverSetUp.now += TAKEOVER_SILENCE_MS;
+  takeoverSetUp.now += TAKEOVER_SILENCE_MS + OWNER_SEEN_EVERY_MS;
   await relay.setMembers(second.key, { ...list(second, { signatures: [await sign(second)] }), generation: 3 }, id);
   assert.equal(await relay.storage.get("owner"), second.key);
   assert.equal(await relay.storage.get("deputyVersion"), 0, "the old owner's namings count for nothing now");
