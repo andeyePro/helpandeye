@@ -406,16 +406,24 @@ final class HelpBoxTests: XCTestCase {
         let next = start.nextMemberNumber(by: 1)!
         func fits(_ x: GroupState) -> Bool { x.settingsFrame(as: 1, identity: coordinator.identity) != nil }
         func withHome(_ x: GroupState) -> GroupState { var y = x; y.policy.boxHome[next] = home; return y }
-        // The settings filled a letter at a time, up to where one more home no longer fits.
+        // The settings filled a letter at a time, up to where one more home no longer fits. The
+        // letters are compressed, so one that does not fit is swapped for another; the same
+        // made-up sequence every run, so the test never depends on chance.
         let letters = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        var seed: UInt32 = 12345
+        func nextLetter() -> Character { seed = seed &* 1_103_515_245 &+ 12345; return letters[Int(seed >> 16) % letters.count] }
         var g = start
         var p = Profile(id: 2, name: "p")
         while fits(withHome(g)) {
-            p.okWords.append(letters.randomElement()!)
-            var bigger = start
-            bigger.policy.profiles.append(p)
-            guard fits(bigger) else { break }
-            g = bigger
+            var grown = false
+            for _ in 0..<letters.count {
+                var q = p
+                q.okWords.append(nextLetter())
+                var bigger = start
+                bigger.policy.profiles.append(q)
+                if fits(bigger) { p = q; g = bigger; grown = true; break }
+            }
+            guard grown else { break }
         }
         XCTAssertTrue(fits(g)); XCTAssertFalse(fits(withHome(g)), "one more home tips the settings over")
         coordinator.engine.updateGroup { $0.policy = g.policy }
