@@ -109,7 +109,8 @@ The relay takes it with proof: the owner's naming of them as deputy (signed over
 the ID, the deputy's key and the version, little-endian), a second coordinator's signature, or no
 request from the owner for seven days (counted from the first takeover tried, for a group the relay
 began watching only then). Only the new owner's own list brings a takeover; anyone else's waits
-with 425 until it has.
+with 425 until it has. The new owner's namings of a deputy count from 0 again, as on the phones:
+the lost owner's, signed with the lost owner's key, can prove nothing now.
 
 Each message is its own storage key, its sealed text at most
 4,096 characters, kept for seven days, 2,000 at most. The group's alarm deletes expired messages

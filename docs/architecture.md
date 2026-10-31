@@ -186,7 +186,8 @@ wrote.
   bytes (sent to them as 0x27), or nothing more, which each phone accepts only once it has itself
   heard nothing signed by the first coordinator for seven days. Every phone checks it against its
   own member list, removes the lost phone and follows the new first coordinator; the new first
-  coordinator's phone makes new keys as after any removal. The takeover is repeated with the
+  coordinator's phone makes new keys as after any removal, and their namings of a deputy count
+  from version 0 again, on every phone and the relay. The takeover is repeated with the
   member list during the changeover and travels inside each update code, so a phone that missed it
   catches up from either. Signing over keys rather than member numbers lets the relay check the
   same bytes.

@@ -301,13 +301,16 @@ public struct GroupState: Codable, Equatable, Sendable {
     }
 
     /// Applies a takeover this phone accepts: the lost phone is out, as if removed, and the new
-    /// first coordinator names their own deputy.
+    /// first coordinator names their own deputy, counting afresh from 0 as the relay does: the
+    /// lost phone's namings, which this phone may have heard more of than the new first
+    /// coordinator did, are checked against its key, so none of them can come back.
     public mutating func apply(takeover t: Takeover, at now: Date) {
         var t = t
         t.fromKey = member(t.from)?.signingKey ?? Data()
         apply(membership: .memberRemoved(member: t.from, version: t.version), at: now)
         takeover = t
         deputy = nil
+        deputyVersion = 0
         deputySignature = nil
     }
 
@@ -319,6 +322,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         remove(t.from, at: now)
         takeover = t
         deputy = nil
+        deputyVersion = 0
         deputySignature = nil
     }
 

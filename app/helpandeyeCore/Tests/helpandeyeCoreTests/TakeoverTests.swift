@@ -128,6 +128,37 @@ import XCTest
         XCTAssertEqual(third.engine.activity.log.entries.last?.text, "\(third.engine.name(ofMember: n2)) took over as first coordinator from Sam, after seven days without word from them")
     }
 
+    /// The new first coordinator's naming of a deputy counts on every phone and on the relay, even
+    /// those that heard more of the lost phone's namings than the new first coordinator did.
+    func testTheNewFirstCoordinatorsDeputyCountsWhereTheLostPhonesNamingsWentFurther() async {
+        coordinator.engine.nameDeputy(n3)
+        await air.run()
+        // The second coordinator is out of touch while the deputy is changed twice more.
+        second.mesh.isReady = false; second.relay.isConfigured = false
+        coordinator.engine.nameDeputy(nil)
+        await air.run()
+        coordinator.engine.nameDeputy(n3)
+        coordinator.engine.tick()
+        await air.run()
+        second.mesh.isReady = true; second.relay.isConfigured = true
+        XCTAssertEqual(second.engine.group?.deputyVersion, 1)
+        XCTAssertEqual(caller.engine.group?.deputyVersion, 3)
+        XCTAssertEqual(air.relay.deputyVersion, 3)
+        lose(coordinator)
+        await t.advance(8 * 86_400)
+        XCTAssertEqual(second.engine.takeoverPath, .silence)
+        XCTAssertTrue(second.engine.takeOver())
+        await air.run()
+        everyoneFollows(second)
+        second.engine.nameDeputy(n3)
+        second.engine.tick()
+        await air.run()
+        for p in [caller, responder, third] as [Phone] {
+            XCTAssertEqual(p.engine.group?.currentDeputy, n3, "\(p.engine.saved!.me) takes the new first coordinator's deputy")
+        }
+        XCTAssertEqual(air.relay.deputyVersion, second.engine.group?.deputyVersion, "and so does the relay")
+    }
+
     func testTheFirstCoordinatorBeingHeardKeepsTheSilencePathShut() async {
         // The first coordinator's daily member list is heard, so the seven days never run out.
         await t.advance(10 * 86_400)

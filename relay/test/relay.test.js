@@ -437,3 +437,23 @@ test("a group registered before the relay kept watch starts its seven days at th
   await relay.setMembers(second.key, list(second, { signatures: [mine] }), id);
   assert.equal(await relay.storage.get("owner"), second.key);
 });
+
+test("a new first coordinator's deputy counts afresh, whatever the lost phone's namings reached", async () => {
+  const { relay, owner, second, third, member, id, raw, sign, list, c, m } = await takeoverSetUp();
+  // The lost phone had named deputies up to version 5.
+  await relay.setMembers(owner.key, { generation: 2, members: [c(owner), c(second), c(third), m(member)], primary: owner.key, deputyVersion: 5 }, id);
+  takeoverSetUp.now += TAKEOVER_SILENCE_MS;
+  await relay.setMembers(second.key, { ...list(second, { signatures: [await sign(second)] }), generation: 3 }, id);
+  assert.equal(await relay.storage.get("owner"), second.key);
+  assert.equal(await relay.storage.get("deputyVersion"), 0, "the old owner's namings count for nothing now");
+  // The new owner names the third coordinator, their first naming, and loses their phone at once.
+  await relay.setMembers(second.key, { generation: 4, members: [c(second), c(third), m(member)], removed: [owner.key], primary: second.key, deputyVersion: 1,
+    takeover: { from: owner.key, to: second.key, signatures: [await sign(second)] } }, id);
+  assert.equal(await relay.storage.get("deputyVersion"), 1);
+  const named = new Uint8Array([...new TextEncoder().encode("HELPA-DEPUTY-1"), ...id, ...raw(third.key), 1, 0, 0, 0]);
+  const input = new Uint8Array([...new TextEncoder().encode("HELPA-TAKEOVER-1"), ...id, ...raw(second.key), ...raw(third.key)]);
+  const theirs = { key: third.key, signature: (await third.sign("", "", "", 0, input)).signature };
+  await relay.setMembers(third.key, { generation: 5, members: [c(third), m(member)], removed: [owner.key, second.key], primary: third.key,
+    takeover: { from: second.key, to: third.key, signatures: [theirs], deputy: { version: 1, signature: (await second.sign("", "", "", 0, named)).signature } } }, id);
+  assert.equal(await relay.storage.get("owner"), third.key, "the deputy takes over at once");
+});

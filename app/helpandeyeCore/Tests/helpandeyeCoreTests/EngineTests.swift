@@ -100,6 +100,7 @@ final class RelayModel {
         if Set(list.map(\.key)).count != list.count { return 400 }
         var owner = self.owner
         var seen = ownerSeenAt
+        var tookOver = false
         if !started {
             guard let primary, list.contains(where: { $0.key == primary && $0.role == "coordinator" }) else { return 400 }
             if let groupID, let key = Data(base64Encoded: primary), !GroupSecrets(groupID: groupID, channelSecret: Data(), groupKey: Data(), generation: 0).isOwned(by: key) { return 403 }
@@ -115,6 +116,7 @@ final class RelayModel {
                 if !named.contains(owner!) { return 400 }
                 owner = t.to
                 seen = now
+                tookOver = true
             }
             if let primary, primary != owner { return 409 }
         }
@@ -154,7 +156,7 @@ final class RelayModel {
         generation = max(generation, g)
         members = order.compactMap { k in roles[k].map { Entry(key: k, role: $0) } }
         ownerSeenAt = seen
-        if signer == owner, let v = deputyVersion { self.deputyVersion = max(self.deputyVersion, v) }
+        if tookOver { self.deputyVersion = deputyVersion ?? 0 } else if signer == owner, let v = deputyVersion { self.deputyVersion = max(self.deputyVersion, v) }
         return 200
     }
 

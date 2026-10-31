@@ -139,6 +139,7 @@ export class GroupRelay {
     const current = await this.members();
     let owner = await this.storage.get("owner");
     let ownerSeenAt;
+    let tookOver = false;
     if (!current) {
       if (!list.members.some((m) => m.key === list.primary && m.role === "coordinator")) throw new RelayError(400, "the list must name its first coordinator");
       if (groupId && !(await ownsGroup(groupId, list.primary))) throw new RelayError(403, "not this group's first coordinator");
@@ -157,6 +158,7 @@ export class GroupRelay {
         if (!named.includes(owner)) throw new RelayError(400, "a takeover removes the first coordinator");
         owner = list.takeover.to;
         ownerSeenAt = this.now();
+        tookOver = true;
       }
       if (list.primary !== undefined && list.primary !== owner) throw new RelayError(409, "this group has another first coordinator");
     }
@@ -203,7 +205,10 @@ export class GroupRelay {
       ...(ownerFresh ? { ownerGeneration: list.generation } : {}),
       ...(ownerSeenAt !== undefined ? { ownerSeenAt } : {}),
       // The owner's newest naming of a deputy, so a naming they have since replaced proves nothing.
-      ...(signer === owner && list.deputyVersion !== undefined ? { deputyVersion: Math.max(list.deputyVersion, (await this.storage.get("deputyVersion")) ?? 0) } : {}),
+      // A new owner counts afresh, as the phones do: the old owner's namings, checked against the
+      // old owner's key, can prove nothing now.
+      ...(tookOver ? { deputyVersion: list.deputyVersion ?? 0 }
+        : signer === owner && list.deputyVersion !== undefined ? { deputyVersion: Math.max(list.deputyVersion, (await this.storage.get("deputyVersion")) ?? 0) } : {}),
     });
     // Push tokens, rate and wake records of anyone no longer listed are deleted, not just ignored.
     const perMember = [];
