@@ -148,15 +148,16 @@ public enum HelpBox {
 
 extension GroupState {
     /// Adds a Help&I box as a member of its own: a caller with its own unit, its MeshCore identity
-    /// as its signing key and the sealing key from its info reply. Returns the box's member number,
-    /// or nil if a key is not one, the box is a member already, or this coordinator's numbers are
-    /// used up.
-    public mutating func addBox(key: Data, sealKey seal: Data, name: String, by coordinator: UInt16?) -> UInt16? {
-        guard key.count == 32, seal.count == 32, seal != Data(count: 32), boxMember(key: key) == nil,
+    /// as its signing key and the sealing key from its info reply, in the home of member `home`.
+    /// Returns the box's member number, or nil if a key is not one, `home` is not a member, the box
+    /// is a member already, or this coordinator's numbers are used up.
+    public mutating func addBox(key: Data, sealKey seal: Data, name: String, home: UInt16, by coordinator: UInt16?) -> UInt16? {
+        guard key.count == 32, seal.count == 32, seal != Data(count: 32), boxMember(key: key) == nil, member(home) != nil,
               let number = nextMemberNumber(by: coordinator) else { return nil }
         membershipVersion += 1
         highestMember = max(highestMember, number)
         members.append(Member(number: number, name: name, role: .caller, publicKey: seal, unit: nextUnit(by: coordinator), signingKey: key))
+        policy.boxHome[number] = home
         return number
     }
 
@@ -171,6 +172,12 @@ extension GroupState {
     /// them for it. Merely having set it up, or being connected to it, never makes it anyone's.
     public func box(_ box: Member, isHomeOf member: Member) -> Bool {
         (box.unit != nil && box.unit == member.unit) || policy.boxHome[box.number] == member.number
+    }
+
+    /// Whether this box is in anyone's home. One added before its home had to be chosen, or whose
+    /// person has left the group, is in no one's.
+    public func hasHome(_ box: Member) -> Bool {
+        members.contains { $0.number != box.number && self.box(box, isHomeOf: $0) }
     }
 
     /// Whether `member` is the caller on `unit` or the household of the Help&I box calling on it.

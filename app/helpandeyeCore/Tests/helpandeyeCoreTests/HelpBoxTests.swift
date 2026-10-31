@@ -210,15 +210,18 @@ final class HelpBoxTests: XCTestCase {
     func testACoordinatorAddsTheBoxAsAMemberOfItsOwn() throws {
         var g = firmwareGroup()
         g.members.removeAll { $0.number == 4 }
-        let number = try XCTUnwrap(g.addBox(key: hex(boxKey), sealKey: hex(boxSealKey), name: "Hall box", by: 1))
+        XCTAssertNil(g.addBox(key: hex(boxKey), sealKey: hex(boxSealKey), name: "Hall box", home: 9, by: 1), "never without a home, and 9 is no member")
+        let number = try XCTUnwrap(g.addBox(key: hex(boxKey), sealKey: hex(boxSealKey), name: "Hall box", home: 1, by: 1))
         let box = try XCTUnwrap(g.member(number))
         XCTAssertEqual(box.role, .caller); XCTAssertEqual(box.unit, 70001); XCTAssertEqual(box.name, "Hall box")
         XCTAssertEqual(box.signingKey, hex(boxKey)); XCTAssertEqual(box.publicKey, hex(boxSealKey), "the sealing key from its info reply")
         XCTAssertEqual(g.membershipVersion, 2)
         XCTAssertEqual(g.boxMember(key: hex(boxKey))?.number, number)
-        XCTAssertNil(g.addBox(key: hex(boxKey), sealKey: hex(boxSealKey), name: "Again", by: 1), "never twice")
-        XCTAssertNil(g.addBox(key: Data(count: 31), sealKey: hex(boxSealKey), name: "Bad", by: 1))
-        XCTAssertNil(g.addBox(key: Data(repeating: 3, count: 32), sealKey: Data(count: 32), name: "No key", by: 1),
+        XCTAssertEqual(g.policy.boxHome[number], 1, "in the home chosen with it")
+        XCTAssertTrue(g.hasHome(box))
+        XCTAssertNil(g.addBox(key: hex(boxKey), sealKey: hex(boxSealKey), name: "Again", home: 1, by: 1), "never twice")
+        XCTAssertNil(g.addBox(key: Data(count: 31), sealKey: hex(boxSealKey), name: "Bad", home: 1, by: 1))
+        XCTAssertNil(g.addBox(key: Data(repeating: 3, count: 32), sealKey: Data(count: 32), name: "No key", home: 1, by: 1),
                      "a box that could not read its own key cannot be sealed for")
         XCTAssertNotNil(g.addedFrame(number), "told to everyone like any member")
     }
@@ -229,13 +232,18 @@ final class HelpBoxTests: XCTestCase {
         let box = try XCTUnwrap(g.member(4)), pat = try XCTUnwrap(g.member(5)), sam = try XCTUnwrap(g.member(1))
         XCTAssertFalse(g.box(box, isHomeOf: pat))
         XCTAssertFalse(g.box(box, isHomeOf: sam), "nor the coordinator's, who added it")
+        XCTAssertFalse(g.hasHome(box))
         XCTAssertFalse(g.isHousehold(pat, ofUnit: 70004))
         g.policy.boxHome[4] = 5
         XCTAssertTrue(g.box(box, isHomeOf: pat))
         XCTAssertFalse(g.box(box, isHomeOf: sam))
+        XCTAssertTrue(g.hasHome(box))
         XCTAssertTrue(g.isHousehold(pat, ofUnit: 70004), "Pat's box's calls are Pat's household's")
         XCTAssertTrue(g.isHousehold(pat, ofUnit: 70005), "and so are Pat's own")
         XCTAssertFalse(g.isHousehold(sam, ofUnit: 70004))
+        g.members.removeAll { $0.number == 5 }
+        XCTAssertFalse(g.hasHome(box), "Pat has left the group")
+        g.members.append(pat)
         g.policy.boxHome = [:]
         g.members[1].unit = 70005
         XCTAssertTrue(g.box(try XCTUnwrap(g.member(4)), isHomeOf: pat), "a box calling under Pat's own unit")
@@ -356,7 +364,11 @@ final class HelpBoxTests: XCTestCase {
         coordinator.mesh.boxPublicKey = boxKey
         XCTAssertNil(coordinator.engine.householdBoxUnit, "connected to it, having added it, does not make it the coordinator's")
         XCTAssertEqual(coordinator.engine.activity.log.entries.last?.text, "You added the box Kitchen box")
-        XCTAssertNotNil(household.engine.addBox(key: boxKey, sealKey: boxIdentity.publicKey, name: "Again"), "only a coordinator adds, and never twice")
+        XCTAssertNotNil(household.engine.addBox(key: boxKey, sealKey: boxIdentity.publicKey, name: "Again", home: household.engine.saved!.me), "only a coordinator adds, and never twice")
+        let members = coordinator.engine.group!.members.count
+        XCTAssertEqual(coordinator.engine.addBox(key: Data(repeating: 7, count: 32), sealKey: boxIdentity.publicKey, name: "Hall box", home: 999),
+                       "Choose whose home the box is in")
+        XCTAssertEqual(coordinator.engine.group!.members.count, members, "no box enters the group without a home")
         let setup = try XCTUnwrap(HelpBox.setup(for: household.engine.group!, box: boxKey, at: clock.now))
         XCTAssertEqual(setup.member, boxMember); XCTAssertEqual(setup.unit, boxUnit)
         XCTAssertEqual(setup.group.suffix(2), Data([1, 0]), "the first coordinator")
@@ -423,6 +435,34 @@ final class HelpBoxTests: XCTestCase {
         try await check(2, order: [jo, sam], turns: [(responder, 0), (coordinator, 1)])
     }
 
+    /// A box in no one's home (added before a home had to be chosen, or whose person left): the
+    /// phone connected to it carries its call on its routes, as the radio alone may not reach
+    /// anyone, but alerts for it like any responder and keeps no record of it as its own.
+    func testAPhoneConnectedToABoxInNoOnesHomeCarriesItsCallsButIsAlerted() async throws {
+        coordinator.engine.updateGroup { $0.policy.boxHome = [:] }
+        await air.run()
+        air.groupSends = []
+        XCTAssertNil(household.engine.householdBoxUnit, "no longer Pat's")
+        let pat = household.engine.saved!.me
+        let pressed = clock.now
+        let took = await household.engine.receiveFromBox(boxCall(1))
+        XCTAssertEqual(took, true, "the internet took it, for the box's 0x74")
+        await air.run()
+        XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.heardOn, [.internet], "carried as before")
+        XCTAssertNotNil(responder.alerts.scheduled[key])
+        let r = try XCTUnwrap(household.engine.activity.inbox.requests[key], "heard, as from the radio")
+        let e = try XCTUnwrap(household.engine.escalation(for: r))
+        XCTAssertTrue(e.order.contains(pat), "Pat is a responder like any other here")
+        let turn = TimeInterval(try XCTUnwrap(e.order.firstIndex(of: pat)))
+        XCTAssertEqual(household.alerts.scheduled[key]?.times.first, pressed.addingTimeInterval(turn * e.interval), "alerted from their turn")
+        XCTAssertFalse(household.engine.activity.outgoing.contains { $0.fromBox }, "never treated as the phone's own")
+        XCTAssertTrue(air.groupSends.isEmpty, "the box sent on the radio itself")
+        let box = boxMember, jo = responder.engine.saved!.me
+        coordinator.engine.updateGroup { $0.policy.boxHome[box] = jo }
+        await air.run()
+        let other = await household.engine.receiveFromBox(boxCall(2))
+        XCTAssertNil(other, "with a home chosen, someone else's phone only hears it")
+    }
     func testTheBoxsCallIsCarriedOnThePhonesRoutesAndNeverAlertsTheHousehold() async throws {
         let took = await household.engine.receiveFromBox(boxCall(1))
         XCTAssertEqual(took, true, "the internet took it, for the box's 0x74")

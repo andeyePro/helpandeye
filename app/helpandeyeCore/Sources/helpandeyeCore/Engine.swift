@@ -946,18 +946,15 @@ public final class HelpEngine: ObservableObject {
 
     /// A coordinator adds the Help&I box with this MeshCore key and sealing key (from its info
     /// reply) as a member of its own, a caller with its own unit (decision 8), told to everyone
-    /// like any member, in the home of member `home` if one is chosen. Returns why it could not be,
-    /// if it could not.
+    /// like any member, in the home of member `home`. Returns why it could not be, if it could not.
     @discardableResult
-    public func addBox(key: Data, sealKey: Data, name: String, home: UInt16? = nil) -> String? {
+    public func addBox(key: Data, sealKey: Data, name: String, home: UInt16) -> String? {
         guard actsAsCoordinator, let g = group else { return "Only a coordinator can add a box to the group" }
         guard g.boxMember(key: key) == nil else { return "This box is already in the group" }
+        guard g.member(home) != nil else { return "Choose whose home the box is in" }
         let me = saved?.me
         var added: UInt16?
-        updateGroup {
-            added = $0.addBox(key: key, sealKey: sealKey, name: name, by: me)
-            if let added, let home { $0.policy.boxHome[added] = home }
-        }
+        updateGroup { added = $0.addBox(key: key, sealKey: sealKey, name: name, home: home, by: me) }
         guard added != nil else { return "This box could not be added" }
         log("You added the box \(name)")
         return nil
@@ -969,15 +966,31 @@ public final class HelpEngine: ObservableObject {
     /// is kept as the household's own, never alerted for here, and what comes back for it
     /// (acknowledgements, closes) reaches its record like the phone's own calls'. Any other phone
     /// connected to it, such as a coordinator's setting it up, only hears it, as on the radio, so
-    /// a responder there is alerted from their turn like everyone else. Returns whether any route
-    /// took a call, for the box (0x74); nil for anything else.
+    /// a responder there is alerted from their turn like everyone else; but a box in no one's home
+    /// would then be heard on the radio only, so that phone carries its calls on its other routes
+    /// too, still alerted for them. Returns whether any route took a call, for the box (0x74); nil
+    /// for anything else.
     public func receiveFromBox(_ frame: HelpFrame) async -> Bool? {
-        guard !companion, let g = group, g.boxMember(key: mesh.boxPublicKey) != nil else { return nil }
+        guard !companion, let g = group, let box = g.boxMember(key: mesh.boxPublicKey) else { return nil }
+        let gid = g.secrets.groupID
         guard let unit = householdBoxUnit else {
             receive(frame, via: .mesh)
-            return nil
+            guard !g.hasHome(box) else { return nil }
+            switch frame {
+            case let .call(u, _, _, _) where u == box.unit:
+                var took = false
+                for route in RoutePlan.firstAttempt(available: availableRoutes.subtracting([.mesh]), smsIsAutomatic: false) {
+                    let failure = route == .internet ? await sendOnInternet(frame, wake: .call, in: gid) : await send(frame, on: route, kind: .call, in: gid)
+                    if failure == nil { took = true }
+                }
+                return took
+            case .signed, .forResponders:
+                _ = await sendOffAir(frame, in: gid)
+                return nil
+            default:
+                return nil
+            }
         }
-        let gid = g.secrets.groupID
         switch frame {
         case let .call(u, number, colour, sentAt) where u == unit:
             let pressed = Date(timeIntervalSince1970: TimeInterval(sentAt))

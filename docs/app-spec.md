@@ -184,8 +184,9 @@ group in its own right, so it calls for help with no phone.
   MeshCore box.
 - A coordinator adds a Help&I box from their Box tab, while their phone is paired with it, giving
   it a name such as "Kitchen box at no. 4", and chooses whose home it is in (they can change it
-  there later). It joins as a caller with its own unit number. Anyone else paired with a box not
-  yet in the group is told to ask their coordinator to do this.
+  there later, but not to no one). It cannot be added until both are given. It joins as a caller
+  with its own unit number. Anyone else paired with a box not yet in the group is told to ask
+  their coordinator to do this.
 - Once added, the phone paired with the box keeps it set up with the group, its members and its
   settings, whenever they change. The Box tab shows its name, unit, whether it is set up, its
   power, and its calls as the box shows them.
@@ -193,6 +194,8 @@ group in its own right, so it calls for help with no phone.
   phone of the person whose home it is in, while it is paired with it. That phone never alerts
   for it, as for its own calls. Any other phone paired with it, a coordinator's included, alerts
   for it as usual. A call made while that phone was away goes from it when it next connects.
+  A box in no one's home (one added before a home had to be chosen, or whose person has left the
+  group) has its calls carried by whichever phone is paired with it, which still alerts for them.
 - A box whose member is removed is told to forget the group by the phone paired with it.
 - A coordinator chooses, on each member's page, whether their box tells responders about a power
   cut at their home (decisions 3 and 4). Off unless chosen. Responders get a calm notification

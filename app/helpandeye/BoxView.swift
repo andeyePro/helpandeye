@@ -93,7 +93,7 @@ struct HelpBoxSection: View {
                 LabeledContent("In the group as", value: member.name)
                 if let unit = member.unit { LabeledContent("Unit", value: String(unit)) }
                 if model.me?.role == .coordinator {
-                    BoxHomePicker(box: member.number, home: Binding(get: { model.group?.policy.boxHome[member.number] },
+                    BoxHomePicker(box: member.number, home: Binding(get: { model.group.flatMap { g in g.policy.boxHome[member.number].flatMap { g.member($0)?.number } } },
                                                                     set: { h in model.updateGroup { $0.policy.boxHome[member.number] = h } }))
                 } else if let h = model.group?.policy.boxHome[member.number], let who = model.group?.member(h) {
                     LabeledContent("In the home of", value: who.name)
@@ -113,10 +113,10 @@ struct HelpBoxSection: View {
                 LabeledField(label: "Its name in the group, such as Kitchen box at no. 4", text: $name)
                 BoxHomePicker(box: nil, home: $home)
                 Button("Add this box to the group") {
-                    problem = model.addBox(name: name.trimmingCharacters(in: .whitespacesAndNewlines), home: home)
+                    if let home { problem = model.addBox(name: name.trimmingCharacters(in: .whitespacesAndNewlines), home: home) }
                 }
                 .buttonStyle(.action)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || home == nil)
                 if let problem { Text(problem).foregroundStyle(Color.warning) }
             } else if let group = model.group {
                 Text("This box is not in \(group.name) yet, so its buttons cannot call for help. Ask your coordinator to pair their phone with it once, here on the Box screen, and add it to the group.")
@@ -158,7 +158,7 @@ struct BoxHomePicker: View {
 
     var body: some View {
         Picker("In the home of", selection: $home) {
-            Text("No one chosen").tag(UInt16?.none)
+            if home == nil { Text("Choose someone").tag(UInt16?.none) }
             ForEach(model.group?.members.filter { $0.number != box } ?? []) { m in
                 Text(m.name).tag(Optional(m.number))
             }
