@@ -370,11 +370,12 @@ final class ScreensTests: XCTestCase {
         XCTAssert(app.staticTexts["You are Alex's deputy."].waitForExistence(timeout: 5), "takeover: not told they are the deputy")
         look("takeover")
         reveal(app.buttons["Take over from Alex"]).tap()
-        let confirm = app.buttons["Take over"]
+        let confirm = app.buttons["Take over now"]
         XCTAssert(confirm.waitForExistence(timeout: 5), "takeover: no confirmation")
+        // Asked in the list, not in a system dialog, so the whole question shows at the largest text.
+        show(app.staticTexts.element(matching: NSPredicate(format: "label BEGINSWITH %@", "Only do this if Alex's phone")))
         look("takeover-confirm")
-        // An iPhone's action sheet has Cancel; an iPad's popover goes with a tap outside it.
-        if app.buttons["Cancel"].exists { app.buttons["Cancel"].tap() } else { app.otherElements["PopoverDismissRegion"].tap() }
+        reveal(app.buttons["Don't take over"]).tap()
         XCTAssert(confirm.waitForNonExistence(timeout: 5), "takeover: the confirmation did not go")
         reveal(app.buttons["Agree that Pat may take over"])
         look("takeover-agree")

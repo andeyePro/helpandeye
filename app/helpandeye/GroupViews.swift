@@ -497,7 +497,13 @@ struct TakeoverView: View {
                 if model.engine.askingRelayToTakeOver {
                     Text("Checking with the relay.")
                 } else if model.engine.takeoverPath != nil {
-                    Button("Take over from \(first)") { confirming = true }
+                    if confirming {
+                        Text("Only do this if \(first)'s phone is lost or broken. It is removed from the group, and you show everyone a new code.")
+                        Button("Take over now") { confirming = false; model.engine.takeOver() }
+                        Button("Don't take over") { confirming = false }
+                    } else {
+                        Button("Take over from \(first)") { confirming = true }
+                    }
                 }
                 if let problem = model.engine.takeoverProblem { Text(problem) }
             }
@@ -515,12 +521,6 @@ struct TakeoverView: View {
             }
         }
         .navigationTitle("If \(first)'s phone is lost")
-        .confirmationDialog("Take over from \(first)?", isPresented: $confirming, titleVisibility: .visible) {
-            Button("Take over") { model.engine.takeOver() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Only do this if \(first)'s phone is lost or broken. It is removed from the group, and you show everyone a new code.")
-        }
     }
 }
 

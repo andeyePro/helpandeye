@@ -611,8 +611,8 @@ caller, all with boxes and the internet route.
 
 1. On phone B, open Group, If your phone is lost, and choose phone C's person. On phone A, open
    Group.
-2. Turn phone B and its box off. On phone C, open Group, If B's phone is lost, and tap Take over,
-   then Take over again to confirm. Show phone A and phone D their update codes under New keys to
+2. Turn phone B and its box off. On phone C, open Group, If B's phone is lost, and tap Take over from B,
+   then Take over now to confirm. Show phone A and phone D their update codes under New keys to
    hand out, and scan them.
 3. Press Help on phone A and acknowledge on phone D. Then turn phone B and its box on again, and
    on phone B try to acknowledge the call and to remove phone D.
