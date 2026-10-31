@@ -368,6 +368,42 @@ import XCTest
                                                     current: responder.engine.group!, me: responder.identity))
     }
 
+    /// Open items: a phone away through two takeovers in a row catches up from the latest first
+    /// coordinator's update code, which carries the earlier takeover too, each checked in turn.
+    func testAPhoneThatMissedTwoTakeoversCatchesUpFromTheKeyUpdate() async throws {
+        coordinator.engine.nameDeputy(n2)
+        await air.run()
+        lose(coordinator)
+        air.keep = { _, _, to in to !== self.caller }
+        caller.relay.isConfigured = false
+        XCTAssertTrue(second.engine.takeOver())
+        await air.run()
+        second.engine.nameDeputy(n3)
+        await air.run()
+        lose(second)
+        XCTAssertTrue(third.engine.takeOver())
+        await air.run()
+        XCTAssertEqual(responder.engine.group?.primaryCoordinator, n3)
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1, "the caller was away for both")
+        let g = third.engine.group!
+        XCTAssertEqual(g.earlierTakeovers.map(\.from), [1])
+        let update = try Joining.update(g, for: g.member(caller.engine.saved!.me)!, coordinator: third.identity)
+        caller.engine.applyKeyUpdate(try Joining.openUpdate(update, current: caller.engine.group!, me: caller.identity))
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, n3)
+        XCTAssertNil(caller.engine.group?.member(1))
+        XCTAssertNil(caller.engine.group?.member(n2))
+        XCTAssertFalse(caller.engine.group!.needsKeyUpdate)
+        // Without the earlier takeover, or with it unproved, nothing opens.
+        var broken = g
+        broken.earlierTakeovers = []
+        let away = coordinator.engine.group!
+        XCTAssertThrowsError(try Joining.openUpdate(try Joining.update(broken, for: broken.member(caller.engine.saved!.me)!, coordinator: third.identity),
+                                                    current: away.copy(for: .caller), me: caller.identity))
+        broken.earlierTakeovers = [Takeover(from: 1, to: n2, version: g.earlierTakeovers[0].version, signatures: g.earlierTakeovers[0].signatures)]
+        XCTAssertThrowsError(try Joining.openUpdate(try Joining.update(broken, for: broken.member(caller.engine.saved!.me)!, coordinator: third.identity),
+                                                    current: away.copy(for: .caller), me: caller.identity), "no deputy naming, one signature, not silent")
+    }
+
     func testTheDailyRepeatCarriesTheTakeoverToAPhoneThatMissedIt() async {
         lose(coordinator)
         second.engine.agreeToTakeover(by: n3)

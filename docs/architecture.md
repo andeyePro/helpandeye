@@ -204,7 +204,9 @@ wrote.
   coordinator's phone makes new keys as after any removal, and their namings of a deputy count
   from version 0 again, on every phone and the relay. The takeover is repeated with the
   member list during the changeover and travels inside each update code, so a phone that missed it
-  catches up from either. Signing over keys rather than member numbers lets the relay check the
+  catches up from either. An update code also carries the two takeovers before it
+  (`earlierTakeovers`), so a phone away through more than one in a row checks each in turn, as if
+  it had heard them, and opens the latest first coordinator's code. Signing over keys rather than member numbers lets the relay check the
   same bytes.
 - Two coordinators can take over at once, each before hearing of the other (a deputy and an agreed
   pair, say). Every phone keeps the takeovers it hears and follows one by a rule all share

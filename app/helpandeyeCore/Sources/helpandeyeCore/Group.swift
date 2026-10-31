@@ -143,6 +143,9 @@ public struct GroupState: Codable, Equatable, Sendable {
     public var deputySignature: Data?
     /// How the first coordinator came to be, where it is not whoever started the group.
     public var takeover: Takeover?
+    /// The takeovers before it, oldest first, a few at most: an update code carries them, so a
+    /// phone that missed more than one in a row can check each in turn.
+    public var earlierTakeovers: [Takeover] = []
 
     public struct StoredPolicy: Codable, Equatable, Sendable {
         public var useDistance = false
@@ -239,7 +242,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case name, secrets, previousSecrets, previousUntil, members, removedUnits, removedMembers, removedKeys, removalsWithoutKeys, keysOutdatedSince, keysEndAt, highestMember, roleVersions
         case policy, relayURL, relayPass, membershipVersion, roleBlocksSeen, phoneVersions, settingsVersion, settingsSigner
-        case deputy, deputyVersion, deputySignature, takeover
+        case deputy, deputyVersion, deputySignature, takeover, earlierTakeovers
     }
 
     /// Fields added after the first release are optional when reading, so a group saved by an
@@ -271,6 +274,7 @@ public struct GroupState: Codable, Equatable, Sendable {
         deputyVersion = try c.decodeIfPresent(UInt32.self, forKey: .deputyVersion) ?? 0
         deputySignature = try c.decodeIfPresent(Data.self, forKey: .deputySignature)
         takeover = try c.decodeIfPresent(Takeover.self, forKey: .takeover)
+        earlierTakeovers = try c.decodeIfPresent([Takeover].self, forKey: .earlierTakeovers) ?? []
     }
 
     /// The group's first coordinator: the only one who removes people (which changes the keys) or
@@ -358,6 +362,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     public mutating func apply(takeover t: Takeover, at now: Date) {
         let t = recorded(t)
         apply(membership: .memberRemoved(member: t.from, version: t.version), at: now)
+        keepEarlierTakeover()
         takeover = t
         deputy = nil
         deputyVersion = 0
@@ -370,10 +375,29 @@ public struct GroupState: Codable, Equatable, Sendable {
         var t = recorded(t)
         remove(t.from, at: now)
         t.keysGeneration = secrets.generation
+        keepEarlierTakeover()
         takeover = t
         deputy = nil
         deputyVersion = 0
         deputySignature = nil
+    }
+
+    private mutating func keepEarlierTakeover() {
+        if let held = takeover { earlierTakeovers = Array((earlierTakeovers + [held]).suffix(2)) }
+    }
+
+    /// Whether this phone accepts `chain`, takeovers one after another, as if it had heard each in
+    /// turn: from the one of its own first coordinator on, each checked against the group the one
+    /// before left. Only the first can be proved by this phone's own silence, as it has heard
+    /// nothing from the later ones' lost phones either way.
+    public func accepts(chain: [Takeover], silent: Bool, relayOwner: Data?, at now: Date) -> Bool {
+        guard let start = chain.firstIndex(where: { $0.from == primaryCoordinator }) else { return false }
+        var g = self
+        for (i, t) in chain[start...].enumerated() {
+            guard g.accepts(t, silent: silent && i == 0, relayOwner: relayOwner) else { return false }
+            g.apply(takeover: t, at: now)
+        }
+        return true
     }
 
     private func recorded(_ t: Takeover) -> Takeover {
@@ -727,7 +751,8 @@ public enum Joining {
             g.policy = g.policy.keepingOwn(current.policy, besides: GroupState.StoredPolicy.fields(in: json(plain)))
             guard g.secrets.generation > current.secrets.generation else { throw Failure.cannotOpen }
             if c.number == current.primaryCoordinator { return g }
-            if let t = g.takeover, t.to == c.number, current.accepts(t, silent: primarySilent, relayOwner: relayOwner) { return g }
+            if let t = g.takeover, t.to == c.number,
+               current.accepts(chain: g.earlierTakeovers + [t], silent: primarySilent, relayOwner: relayOwner, at: Date()) { return g }
             // From the winner of two takeovers at once, where this phone followed the other.
             if let t = g.takeover, t.to == c.number, let held = current.takeover, current.acceptsRival(t, relayOwner: relayOwner),
                current.prefers(t, over: held, relayOwner: relayOwner) { return g }
