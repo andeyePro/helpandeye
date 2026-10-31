@@ -159,6 +159,17 @@ import XCTest
         XCTAssertEqual(air.relay.deputyVersion, second.engine.group?.deputyVersion, "and so does the relay")
     }
 
+    /// Phones pass on the acknowledgements they hold while a caller is still sending, so the lost
+    /// phone's old one can arrive days later: it is not word from them now.
+    func testAnOldAcknowledgementPassedOnDoesNotRestartTheSevenDays() async {
+        let ack = HelpFrame.signedAck(unit: 70001, request: 1, responder: 1, at: t.clock.now, identity: coordinator.identity, group: t.gid)
+        lose(coordinator)
+        await t.advance(8 * 86_400)
+        XCTAssertEqual(second.engine.takeoverPath, .silence)
+        second.engine.receive(ack, via: .mesh)
+        XCTAssertEqual(second.engine.takeoverPath, .silence, "an acknowledgement made eight days ago")
+    }
+
     func testTheFirstCoordinatorBeingHeardKeepsTheSilencePathShut() async {
         // The first coordinator's daily member list is heard, so the seven days never run out.
         await t.advance(10 * 86_400)

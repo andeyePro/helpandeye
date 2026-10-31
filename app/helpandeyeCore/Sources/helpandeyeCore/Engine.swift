@@ -1253,7 +1253,8 @@ public final class HelpEngine: ObservableObject {
         case let .ack(unit, request, who, at, _):
             // Only a current responder's own signature counts (decision 6, AGENTS.md).
             guard group?.acceptsAck(frame) == true else { return }
-            if who == group?.primaryCoordinator { heardPrimary() }
+            // Other phones pass on acknowledgements they hold, so one may be days old: it says when.
+            if who == group?.primaryCoordinator { heardPrimary(at: Date(timeIntervalSince1970: TimeInterval(at))) }
             let k = IncomingRequest.Key(unit: unit, request: request)
             let pressed = activity.inbox.requests[k]?.sentAt ?? activity.outgoing.first(where: { $0.unit == unit && $0.number == request })?.createdAt
             // Logged only when it will count: for a call heard, and made after it was pressed.
@@ -1660,9 +1661,11 @@ public final class HelpEngine: ObservableObject {
 
     // MARK: If the first coordinator's phone is lost (decision 20)
 
-    private func heardPrimary() {
-        guard var s = saved, now().timeIntervalSince(s.primaryHeardAt ?? .distantPast) > 60 else { return }
-        s.primaryHeardAt = now()
+    /// `at` is when the first coordinator's phone made what was heard, where it says.
+    private func heardPrimary(at made: Date? = nil) {
+        let at = min(made ?? now(), now())
+        guard var s = saved, at.timeIntervalSince(s.primaryHeardAt ?? .distantPast) > 60 else { return }
+        s.primaryHeardAt = at
         saved = s
         store.save(s)
     }
