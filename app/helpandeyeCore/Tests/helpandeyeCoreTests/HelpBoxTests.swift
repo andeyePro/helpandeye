@@ -229,9 +229,13 @@ final class HelpBoxTests: XCTestCase {
         let box = try XCTUnwrap(g.member(4)), pat = try XCTUnwrap(g.member(5)), sam = try XCTUnwrap(g.member(1))
         XCTAssertFalse(g.box(box, isHomeOf: pat))
         XCTAssertFalse(g.box(box, isHomeOf: sam), "nor the coordinator's, who added it")
+        XCTAssertFalse(g.isHousehold(pat, ofUnit: 70004))
         g.policy.boxHome[4] = 5
         XCTAssertTrue(g.box(box, isHomeOf: pat))
         XCTAssertFalse(g.box(box, isHomeOf: sam))
+        XCTAssertTrue(g.isHousehold(pat, ofUnit: 70004), "Pat's box's calls are Pat's household's")
+        XCTAssertTrue(g.isHousehold(pat, ofUnit: 70005), "and so are Pat's own")
+        XCTAssertFalse(g.isHousehold(sam, ofUnit: 70004))
         g.policy.boxHome = [:]
         g.members[1].unit = 70005
         XCTAssertTrue(g.box(try XCTUnwrap(g.member(4)), isHomeOf: pat), "a box calling under Pat's own unit")
@@ -363,8 +367,9 @@ final class HelpBoxTests: XCTestCase {
     /// up, hears its red press from the box itself and is alerted from their own turn, as if they
     /// had heard it on the radio. They do not carry it as their own.
     func testACoordinatorConnectedToSomeoneElsesBoxIsAlertedFromTheirTurn() async throws {
-        let sam = coordinator.engine.saved!.me, pat = household.engine.saved!.me, jo = responder.engine.saved!.me
-        // Sam answered last time, so comes last: Pat, Jo, then Sam.
+        let sam = coordinator.engine.saved!.me, jo = responder.engine.saved!.me
+        // Sam answered last time, so comes last: Jo, then Sam. Pat, whose home the box is in, is not
+        // in the order.
         household.engine.press(.red)
         await air.run()
         let patsCall = try XCTUnwrap(household.engine.current)
@@ -380,12 +385,42 @@ final class HelpBoxTests: XCTestCase {
         await air.run()
         let r = try XCTUnwrap(coordinator.engine.activity.inbox.requests[key], "heard, as on the radio")
         let e = try XCTUnwrap(coordinator.engine.escalation(for: r))
-        XCTAssertEqual(e.order, [pat, jo, sam])
+        XCTAssertEqual(e.order, [jo, sam])
         let alert = try XCTUnwrap(coordinator.alerts.scheduled[key], "the coordinator is alerted for someone else's box")
-        XCTAssertEqual(alert.times.first, pressed.addingTimeInterval(2 * e.interval), "from their turn, third")
+        XCTAssertEqual(alert.times.first, pressed.addingTimeInterval(e.interval), "from their turn, second")
         XCTAssertFalse(alert.calm)
         XCTAssertFalse(coordinator.engine.activity.outgoing.contains { $0.fromBox }, "not carried as the coordinator's own")
         XCTAssertNil(household.engine.activity.inbox.requests[key], "Pat's phone heard nothing: the box is not connected to it")
+    }
+
+    /// Pat's phone carries the call from the box in Pat's home and is never alerted for it, so Pat
+    /// is not in anyone's escalation order: the next responder is alerted at once, not a turn late.
+    func testTheBoxsHouseholdIsLeftOutOfTheEscalationOrderOnEveryPhone() async throws {
+        let sam = coordinator.engine.saved!.me, pat = household.engine.saved!.me, jo = responder.engine.saved!.me
+        XCTAssertEqual([sam, pat, jo].sorted(), [sam, pat, jo], "no one has answered yet, so by member number")
+        func check(_ call: UInt16, order: [UInt16], turns: [(Phone, Double)]) async throws {
+            let pressed = clock.now
+            let took = await household.engine.receiveFromBox(boxCall(call))
+            XCTAssertEqual(took, true)
+            await air.run()
+            let k = IncomingRequest.Key(unit: boxUnit, request: call)
+            let r = try XCTUnwrap(responder.engine.activity.inbox.requests[k])
+            for p in [coordinator, household, responder] {
+                XCTAssertEqual(p!.engine.escalation(for: r)?.order, order, "every phone works out the same order")
+            }
+            let interval = try XCTUnwrap(responder.engine.escalation(for: r)).interval
+            XCTAssertEqual(interval, 120, "two minutes for red")
+            for (p, turn) in turns {
+                XCTAssertEqual(try XCTUnwrap(p.alerts.scheduled[k]).times.first, pressed.addingTimeInterval(turn * interval))
+            }
+            XCTAssertNil(household.alerts.scheduled[k], "Pat's phone carries it and is never alerted")
+        }
+        // Without the fix Pat would be second, and Jo third, two turns late.
+        try await check(1, order: [sam, jo], turns: [(coordinator, 0), (responder, 1)])
+        coordinator.engine.acknowledge(key)
+        await air.run()
+        // Sam answered last, so Jo is first: alerted at the press.
+        try await check(2, order: [jo, sam], turns: [(responder, 0), (coordinator, 1)])
     }
 
     func testTheBoxsCallIsCarriedOnThePhonesRoutesAndNeverAlertsTheHousehold() async throws {

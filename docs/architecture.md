@@ -125,7 +125,9 @@ wrote.
   chose them for it (`HelpEngine.householdBoxUnit`). That phone is never alerted for them, as for
   its own, and carries them. Any other phone connected to it, such as a coordinator's adding or
   setting it up, only hears what it pushes, as if on the radio, so a coordinator who responds is
-  alerted from their turn like everyone else.
+  alerted from their turn like everyone else. Every phone leaves the member whose home the box is
+  in out of the escalation order for its calls (`GroupState.isHousehold`), so the next responder
+  is not reached a turn late.
 - **Setting it up.** The phone of the first group sends the group (0x71), the member list (0x72)
   and, if the group puts them on boxes, responders' first names (0x76): at pairing, at joining,
   and after any change of members or settings, sending only the parts that changed

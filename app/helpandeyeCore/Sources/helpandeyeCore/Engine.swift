@@ -1488,7 +1488,7 @@ public final class HelpEngine: ObservableObject {
     public func escalation(for r: IncomingRequest) -> Escalation? {
         guard let group else { return nil }
         let at = r.sentAt ?? r.firstHeardAt
-        let responders = group.members.filter { $0.canRespond && $0.unit != r.key.unit }.map {
+        let responders = group.members.filter { $0.canRespond && !group.isHousehold($0, ofUnit: r.key.unit) }.map {
             ResponderInfo(member: $0.number, availableNow: activity.rota.isAvailable($0.number, at: at), lastAnsweredAt: activity.lastAnswered[$0.number])
         }
         return Escalation(colour: r.colour ?? .red, responders: responders, policy: group.escalationPolicy(forUnit: r.key.unit))

@@ -172,4 +172,11 @@ extension GroupState {
     public func box(_ box: Member, isHomeOf member: Member) -> Bool {
         (box.unit != nil && box.unit == member.unit) || policy.boxHome[box.number] == member.number
     }
+
+    /// Whether `member` is the caller on `unit` or the household of the Help&I box calling on it.
+    /// Their own phone carries such a call and is never alerted for it, so every phone leaves them
+    /// out of its escalation order alike.
+    public func isHousehold(_ member: Member, ofUnit unit: UInt32) -> Bool {
+        member.unit == unit || self.member(unit: unit).map { box($0, isHomeOf: member) } == true
+    }
 }

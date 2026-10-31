@@ -58,7 +58,8 @@ Agreed with Martin, 2026-10-28.
 
 The app shares requests out fairly and prioritises the closest responder:
 
-1. Only responders who are available now are considered.
+1. Only responders who are available now are considered. The person whose home a Help&I box is
+   in is left out for that box's calls, as for their own: their phone carries them.
 2. If the group uses distance, the closest of them come first. Distance uses the caller's
    registered location, held on group members' phones and never sent on air.
 3. Among responders at a similar distance, the one who has answered least recently comes first,
