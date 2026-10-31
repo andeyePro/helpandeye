@@ -35,6 +35,9 @@ final class WatchModel: NSObject, ObservableObject {
     /// of, so each is given once.
     private var givenToPhone: Set<UInt16> = []
     private var ackedThroughPhone: Set<String> = []
+    /// Acknowledgements the phone confirmed it made, by `Open.id`: one this watch could not send
+    /// itself still went.
+    @Published private var phoneAcked: Set<String> = []
     /// The acknowledgement last made from the watch, and its group, so whether it went out can be
     /// shown.
     @Published private var lastAck: (group: String, key: IncomingRequest.Key)?
@@ -139,6 +142,9 @@ final class WatchModel: NSObject, ObservableObject {
     /// still keeps the watch's own call numbering, so no number is ever used twice.
     fileprivate func take(_ data: Data) {
         guard let handover = try? JSONDecoder().decode(WatchHandover.self, from: data), let identity = handover.identity else { return }
+        // The old group's calls, alerts and relay polling go with it, and its call numbers, which
+        // the new group's calls may use again.
+        if let engine, handover.startsAfresh(from: engine.saved) { engine.leave(); givenToPhone = [] }
         if engine?.take(handover) != true {
             // Other keys are another phone (or a phone set up afresh): what the old one's watch
             // heard and sent is not this one's.
@@ -217,6 +223,7 @@ final class WatchModel: NSObject, ObservableObject {
         // Leaving stops its relay polling for the group too.
         engine?.leave()
         engine = nil
+        givenToPhone = []
         bag = []
         Store.forgetHandedOver()
         objectWillChange.send()
@@ -241,13 +248,18 @@ final class WatchModel: NSObject, ObservableObject {
         var settled: [String: Set<IncomingRequest.Key>] = [:]
         for d in context["settled"] as? [[String: Any]] ?? [] {
             guard let u = (d["unit"] as? Int).flatMap(UInt32.init(exactly:)), let r = (d["request"] as? Int).flatMap(UInt16.init(exactly:)) else { continue }
-            let group = tag(d["group"] as? String ?? "")
-            settled[group, default: []].insert(IncomingRequest.Key(unit: u, request: r))
+            let group = tag(d["group"] as? String ?? ""), key = IncomingRequest.Key(unit: u, request: r)
+            let e = engine(forGroup: group)
             // The signed acknowledgements the phone holds, checked here as if heard on air, so
             // this watch's own copy of the group settles as the phone's did.
             for ack in d["acks"] as? [Data] ?? [] where acksTaken.insert(ack).inserted {
-                if let f = HelpFrame(ack) { engine(forGroup: group)?.receive(f, via: .internet) }
+                if let f = HelpFrame(ack) { e?.receive(f, via: .internet) }
             }
+            // Settled by a signature checked here, the engine takes it back itself if the person who
+            // acknowledged is removed. Only what it could not check (a close, or a member it does
+            // not know yet) is held settled on the phone's word: a word that goes stale once the
+            // phone is out of reach, so it must not silence a call the engine knows is open again.
+            if e?.activity.inbox.requests[key]?.isOpen != false { settled[group, default: []].insert(key) }
         }
         phoneSettled = settled
         settleAlerts()
@@ -295,7 +307,7 @@ final class WatchModel: NSObject, ObservableObject {
         WCSession.default.sendMessage(["ackUnit": Int(r.unit), "ackRequest": Int(r.request), "group": r.group], replyHandler: { reply in
             let ok = reply["ok"] as? Bool == true
             Task { @MainActor in
-                if ok { self.phoneOpen.removeAll { $0 == r } } else if !mine { self.problem = "Not acknowledged. Use your phone." }
+                if ok { self.phoneOpen.removeAll { $0 == r }; self.phoneAcked.insert(r.id) } else if !mine { self.problem = "Not acknowledged. Use your phone." }
             }
         }, errorHandler: { _ in
             Task { @MainActor in
@@ -352,6 +364,7 @@ final class WatchModel: NSObject, ObservableObject {
         if let warning { return (warning, false) }
         if let ack = lastAck, let s = engine(forGroup: ack.group)?.ackSendStatus(ack.key) {
             switch s {
+            case .notSent where phoneAcked.contains(Open.id(ack.group, ack.key)): return ("Acknowledged through your phone.", false)
             case .notSent where keysExpired: return ("Not acknowledged: the new code must be scanned on your phone first.", true)
             case .notSent: return ("Not acknowledged: this watch cannot reach the internet. Use your phone.", true)
             case .sending: return ("Sending your acknowledgement…", false)
@@ -446,6 +459,8 @@ final class WatchModel: NSObject, ObservableObject {
     /// keeps running with the wrist lowered, in an extended runtime session.
     func startCountdown() {
         guard countdown == nil, !cannotCall else { return }
+        // Someone who does not call in this group is told so now, not after a minute of counting.
+        if let me = engine?.me, !me.canCall { press(.red); return }
         let now = Date()
         countdown = HelpCountdown(startedAt: now)
         countdownCheckedAt = now

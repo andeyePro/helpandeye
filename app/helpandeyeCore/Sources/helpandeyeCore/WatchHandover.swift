@@ -64,13 +64,22 @@ public struct WatchHandover: Codable, Equatable, Sendable {
 
     public var identity: DeviceIdentity? { try? DeviceIdentity(rawRepresentation: keys) }
 
+    /// Whether this hands over another group, or another place in it, than the watch holds: the
+    /// phone left one and joined another. Its word that it left may never reach the watch (a
+    /// handover still waiting to go is replaced by the next), so this alone must start it afresh.
+    /// A key update keeps the group's ID and is not one.
+    public func startsAfresh(from current: SavedState?) -> Bool {
+        guard let current else { return false }
+        return current.me != me || current.group.secrets.groupID != group.secrets.groupID
+    }
+
     /// The watch's state after taking in a handover: the phone's group and place, with the watch's
     /// own call numbering kept so a repeated or newer handover never reuses a number.
     public func state(keeping current: SavedState?) -> SavedState {
         var s = SavedState(group: group, me: me)
         s.own = own
         s.ownChosen = ownChosen
-        if let current, current.me == me, current.group.secrets.groupID == group.secrets.groupID {
+        if let current, !startsAfresh(from: current) {
             s.lastRequest = current.lastRequest
         }
         if watchCallsAfter >= 0x8000 { s.lastRequest = max(s.lastRequest, watchCallsAfter) }

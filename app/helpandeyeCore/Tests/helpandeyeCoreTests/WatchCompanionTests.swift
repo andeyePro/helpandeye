@@ -209,6 +209,55 @@ import XCTest
         XCTAssertEqual(back.others.map(\.group.name), [coordinator.engine.group!.name])
     }
 
+    /// Watch review: the phone's word that it left a group may be replaced on its way by the next
+    /// handover, so a handover of another group, or another place in one, starts the watch afresh
+    /// by itself. A key update after a removal is the same group and does not.
+    func testAHandoverOfAnotherGroupStartsTheWatchAfresh() throws {
+        let held = watch.engine.saved!
+        XCTAssertFalse(WatchHandover(saved: caller.engine.saved!, identity: caller.identity).startsAfresh(from: held))
+        XCTAssertFalse(WatchHandover(saved: caller.engine.saved!, identity: caller.identity).startsAfresh(from: nil))
+        var rekeyed = caller.engine.saved!
+        rekeyed.group.secrets = rekeyed.group.secrets.rotated()
+        XCTAssertFalse(WatchHandover(saved: rekeyed, identity: caller.identity).startsAfresh(from: held), "new keys, same group")
+        let elsewhere = Phone(air: air, clock: clock)
+        elsewhere.engine.createGroup(name: "Station Road", myName: "Jo", call: true)
+        var moved = elsewhere.engine.saved!
+        moved.me = held.me
+        XCTAssertTrue(WatchHandover(saved: moved, identity: caller.identity).startsAfresh(from: held), "another group")
+        var renumbered = caller.engine.saved!
+        renumbered.me = held.me + 1
+        XCTAssertTrue(WatchHandover(saved: renumbered, identity: caller.identity).startsAfresh(from: held), "another place in it")
+        XCTAssertEqual(WatchHandover(saved: moved, identity: caller.identity).state(keeping: held).lastRequest, 0,
+                       "another group's numbering starts again")
+    }
+
+    /// Watch review: an acknowledgement the watch took from its phone is taken back on the watch,
+    /// with its alerts again, when the person who made it is removed: the watch settles a call on
+    /// a signature it checked, never on its phone's word alone, so a stale word cannot silence it.
+    func testAnAcknowledgementTakenFromThePhoneIsTakenBackOnARemoval() async {
+        let other = Phone(air: air, clock: clock)
+        join(other, call: false, respond: true)
+        other.relay.isConfigured = true
+        await air.run()
+        let rw = Phone(air: air, clock: clock, watchOf: responder)
+        rw.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity))
+        rw.mesh.isReady = false; rw.relay.isConfigured = true
+        caller.engine.press(.red)
+        await air.run()
+        let key = IncomingRequest.Key(unit: caller.request!.unit, request: caller.request!.number)
+        other.engine.acknowledge(key)
+        await air.run()
+        let ack = responder.engine.activity.inbox.requests[key]!.acks[other.engine.saved!.me]!
+        rw.engine.receive(ack, via: .internet)
+        XCTAssertEqual(rw.engine.activity.inbox.requests[key]?.isOpen, false)
+        XCTAssertNil(rw.alerts.scheduled[key])
+        coordinator.engine.updateGroup { $0.remove(other.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        rw.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity))
+        XCTAssertEqual(rw.engine.activity.inbox.requests[key]?.isOpen, true, "open again on the watch")
+        XCTAssertNotNil(rw.alerts.scheduled[key], "and alerting again")
+    }
+
     /// Watch review: a responder's phone that acknowledged, or heard an acknowledgement, over the
     /// radio alone gives its watch the signed acknowledgement it holds (in the application
     /// context), so the watch stops alerting at once instead of buzzing for a call already in hand.
