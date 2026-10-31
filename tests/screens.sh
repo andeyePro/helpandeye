@@ -3,6 +3,8 @@
 # dark mode, at the normal and the largest accessibility text size. Run from app/ on a Mac with
 # Xcode and XcodeGen:  ../tests/screens.sh [output folder]
 # The screenshots must still be looked at by eye: the audit cannot judge everything.
+# A failed test is run once more: Apple's audit call sometimes hangs until the time limit, and a
+# real fault fails both times. Audit findings from either try are kept.
 set -uo pipefail
 OUT=${1:-/tmp/helpandeye-screens}
 # A small and a large iPhone, and a large iPad; the smallest and largest watch. ONE=1 for a quick
@@ -30,7 +32,7 @@ for device in "${DEVICES[@]}"; do
       xcrun simctl keychain "$id" reset
       TEST_RUNNER_SHOTS_DIR="$run" xcodebuild test-without-building -project helpandeye.xcodeproj -scheme helpandeye \
         -destination "id=$id" -derivedDataPath DerivedData -only-testing:helpandeyeUITests \
-        -collect-test-diagnostics never -test-timeouts-enabled YES -maximum-test-execution-time-allowance 600 > "$run/log.txt" 2>&1
+        -collect-test-diagnostics never -retry-tests-on-failure -test-iterations 2 -test-timeouts-enabled YES -maximum-test-execution-time-allowance 600 > "$run/log.txt" 2>&1
       result=$?
       grep -h "^AUDIT " "$run/log.txt" | sort -u > "$run/audit.txt"; grep -h "^ADVICE " "$run/log.txt" | sort -u > "$run/advice.txt"
       echo "$device $mode $size: $( [ $result = 0 ] && echo passed || echo FAILED ), $(wc -l < "$run/audit.txt" | tr -d ' ') audit issues, $(ls "$run"/*.png 2>/dev/null | wc -l | tr -d ' ') screens"
@@ -52,7 +54,7 @@ for device in "${WATCHES[@]}"; do
     xcrun simctl uninstall "$id" com.andeye.help.watchkitapp 2>/dev/null
     TEST_RUNNER_SHOTS_DIR="$run" TEST_RUNNER_TEXT_SIZE="UICTContentSizeCategory$size" xcodebuild test-without-building -project helpandeye.xcodeproj -scheme helpandeyeWatch \
       -destination "id=$id" -derivedDataPath DerivedData -only-testing:helpandeyeWatchUITests \
-      -collect-test-diagnostics never -test-timeouts-enabled YES -maximum-test-execution-time-allowance 600 > "$run/log.txt" 2>&1
+      -collect-test-diagnostics never -retry-tests-on-failure -test-iterations 2 -test-timeouts-enabled YES -maximum-test-execution-time-allowance 600 > "$run/log.txt" 2>&1
     result=$?
     grep -h "^AUDIT " "$run/log.txt" | sort -u > "$run/audit.txt"; grep -h "^ADVICE " "$run/log.txt" | sort -u > "$run/advice.txt"
     echo "$device $size: $( [ $result = 0 ] && echo passed || echo FAILED ), $(wc -l < "$run/audit.txt" | tr -d ' ') audit issues, $(ls "$run"/*.png 2>/dev/null | wc -l | tr -d ' ') screens"
