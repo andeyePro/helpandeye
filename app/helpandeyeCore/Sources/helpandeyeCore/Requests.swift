@@ -212,9 +212,12 @@ public struct IncomingRequest: Equatable, Sendable, Identifiable, Codable {
     public let key: Key
     public internal(set) var colour: Colour?
     public internal(set) var firstHeardAt: Date
-    /// When the caller pressed, from the call itself. Escalation counts from this, so every phone
-    /// works out the same turns however late it heard.
+    /// When the caller pressed, from the call itself, by the caller's (or their box's) clock.
     public internal(set) var sentAt: Date?
+    /// What escalation counts from: the press, so every phone works out the same turns however
+    /// late it heard, but never later than this phone first heard the call, so a press time from a
+    /// clock running fast cannot postpone anyone's alerts.
+    public var escalatesFrom: Date { min(sentAt ?? firstHeardAt, firstHeardAt) }
     public internal(set) var categories: [UInt8: CallCategory] = [:]
     /// Parts the caller took back. A copy of the original heard late does not bring one back.
     public internal(set) var withdrawnParts: Set<UInt8> = []

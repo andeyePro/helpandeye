@@ -28,6 +28,8 @@ constexpr uint8_t kPushFrame = 0xA3;
 // MeshCore's own reply codes, which the app already reads.
 constexpr uint8_t kRespOK = 0;
 constexpr uint8_t kRespError = 1;
+// MeshCore's own codes: a save to flash failed, so the phone sends the command again.
+constexpr uint8_t kErrorFileIO = 5;
 constexpr uint8_t kErrorBadArgument = 6;
 
 constexpr uint8_t kHelpandiProtocol = 1;

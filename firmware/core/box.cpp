@@ -98,24 +98,38 @@ void BoxEngine::coldStart(uint64_t nowMs) {
 }
 
 BoxEngine::Retained BoxEngine::snapshot() const {
-    Retained r{kRetainedLayout, 0, budget_, monitor_, {}, callCount_, reportRequest_, reportAt_, reportParts_, reportAcknowledged_};
+    Retained r{kRetainedLayout, 0, 0, 0, 0, budget_, monitor_, {}, callCount_, reportRequest_, reportAt_, reportParts_,
+               reportAcknowledged_};
     for (size_t i = 0; i < callCount_; i++) r.slots[i] = slots_[i];
     return r;
 }
 
-void BoxEngine::retain(uint8_t* out) const {
+void BoxEngine::retain(uint8_t* out, uint64_t monoMs, int64_t wallUs) {
     static_assert(std::is_trivially_copyable<Retained>::value, "the copy is the struct's own bytes");
     Retained r = snapshot();
+    r.sequence = ++retainedSequence_;
+    r.monoMs = monoMs;
+    r.wallUs = wallUs;
     r.sum = checksum(&r, sizeof r);
-    std::memcpy(out, &r, sizeof r);
+    std::memcpy(out + r.sequence % 2 * sizeof r, &r, sizeof r);
 }
 
-bool BoxEngine::resume(const uint8_t* in) {
-    Retained r = snapshot();
-    std::memcpy(&r, in, sizeof r);
-    uint32_t sum = r.sum;
-    r.sum = 0;
-    if (r.version != kRetainedLayout || checksum(&r, sizeof r) != sum) return false;
+bool BoxEngine::resume(const uint8_t* in, uint64_t& monoMs, int64_t& wallUs) {
+    Retained r = snapshot(), copy = r;
+    bool found = false;
+    for (size_t i = 0; i < 2; i++) {
+        std::memcpy(&copy, in + i * sizeof copy, sizeof copy);
+        uint32_t sum = copy.sum;
+        copy.sum = 0;
+        if (copy.version != kRetainedLayout || checksum(&copy, sizeof copy) != sum) continue;
+        if (!found || int32_t(copy.sequence - r.sequence) > 0) r = copy;
+        found = true;
+    }
+    if (!found) return false;
+    // The next write goes over the other copy.
+    retainedSequence_ = r.sequence;
+    monoMs = r.monoMs;
+    wallUs = r.wallUs;
     budget_ = r.budget;
     budget_.setDutyCycle(radio_.band() ? radio_.band()->dutyCycle : 0);
     monitor_ = r.monitor;
@@ -149,6 +163,11 @@ bool BoxEngine::powerCap(int& setting) const {
     const Band* band = radio_.band();
     return band && maxRadioPowerSetting(*band, antennaGainDBi(group_.antenna), transmitter_.amplifierGainDB,
                                         transmitter_.minSetting, transmitter_.maxSetting, setting);
+}
+
+bool BoxEngine::antennaNotAllowed() const {
+    int setting;
+    return radio_.band() && !powerCap(setting);
 }
 
 void BoxEngine::sound(Sound s) {
@@ -313,7 +332,7 @@ uint32_t BoxEngine::onAck(const AckFrame& ack, uint32_t wallNow) {
     uint8_t input[64];
     size_t n = ackSignatureInput(ack, group_.groupID, kGroupIDBytes, input, sizeof input);
     if (!port_.verify(m->signingKey, ack.signature, input, n)) return 0;
-    uint32_t later = ack.ackedAt > wallNow ? ack.ackedAt : 0;
+    uint32_t later = raiseClock(ack.ackedAt, ack.responder, wallNow);
     if (!ours) return later;
     if (ack.request == reportRequest_ && !reportAcknowledged_ &&
         int64_t(ack.ackedAt) >= int64_t(reportAt_) - kClockAllowance) {
@@ -352,7 +371,23 @@ uint32_t BoxEngine::onSigned(const SignedFrame& s, uint32_t wallNow) {
             if (c.number == inner.callState.request) c.settle(inner.callState.state, s.signer, inner.callState.at);
         }
     }
-    return inner.callState.at > wallNow ? inner.callState.at : 0;
+    return raiseClock(inner.callState.at, s.signer, wallNow);
+}
+
+uint32_t BoxEngine::raiseClock(uint32_t at, uint16_t member, uint32_t wallNow) {
+    if (at <= wallNow) return 0;
+    if (at - wallNow <= kMaxClockStep) return at;
+    // Two members' phones a day or more ahead, and within a day of each other: the box's clock is
+    // the one that is wrong, as after a cold start with no phone. It takes the earlier of the two.
+    uint32_t gap = at > farAt_ ? at - farAt_ : farAt_ - at;
+    if (farAt_ && member != farMember_ && gap <= kMaxClockStep) {
+        uint32_t agreed = at < farAt_ ? at : farAt_;
+        farAt_ = 0;
+        return agreed > wallNow ? agreed : 0;
+    }
+    farAt_ = at;
+    farMember_ = member;
+    return 0;
 }
 
 uint32_t BoxEngine::heard(const uint8_t* data, size_t length, uint32_t wallNow) {
@@ -430,7 +465,7 @@ void BoxEngine::power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint1
 
 Screen BoxEngine::screen() const {
     Screen s{provisioned_, callCount_ > 0, Colour::red, CallerStatus::notSent, monitor_.mains(), monitor_.estimated(),
-             monitor_.hours()};
+             monitor_.hours(), antennaNotAllowed()};
     if (callCount_) {
         const OutgoingCall& c = slots_[callCount_ - 1].call;
         s.colour = c.colour;

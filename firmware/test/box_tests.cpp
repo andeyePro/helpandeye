@@ -198,6 +198,12 @@ struct World {
     }
 };
 
+bool resumeFrom(BoxEngine& box, const uint8_t* rtc) {
+    uint64_t monoMs;
+    int64_t wallUs;
+    return box.resume(rtc, monoMs, wallUs);
+}
+
 const uint8_t kFirstRed[] = {0x11, 0x74, 0x11, 0x01, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00};
 
 }  // namespace
@@ -510,6 +516,27 @@ TEST(aBoxThatMustNotSendSendsNothingAndShowsTheCross) {
     CHECK(w.port.sent.empty() && w.box.screen().status == CallerStatus::waitingForResponder);
 }
 
+TEST(aBoxWhoseAntennaIsNotAllowedSaysSoAndLetsNothingOnAir) {
+    // The board stops MeshCore's own packets too when this is true (UITask::applyRadio), so a
+    // phone's traffic through the box never goes out over the limit either.
+    World w;
+    CHECK(!w.box.antennaNotAllowed() && !w.box.screen().antennaNotAllowed);
+    w.group.antenna = Antenna(kAntennaByGain | 54);
+    w.box.provision(w.group, w.members);
+    CHECK(w.box.antennaNotAllowed() && w.box.screen().antennaNotAllowed);
+    // 14 dBi is allowed in the 10% band and not in the 1% band.
+    w.group.antenna = Antenna(kAntennaByGain | 28);
+    w.box.provision(w.group, w.members);
+    CHECK(!w.box.antennaNotAllowed());
+    w.box.setRadio(RadioSettings(868.3, 62.5, 8, 5));
+    CHECK(w.box.antennaNotAllowed());
+    // Outside the UK bands the antenna is not what stops the box (section 8).
+    w.box.setRadio(RadioSettings(915.0, 250, 10, 5));
+    CHECK(!w.box.antennaNotAllowed());
+    CHECK(std::strstr(kAntennaNotAllowedWords, "antenna is not allowed"));
+    CHECK(std::strstr(kNotSentAntennaWords, "antenna is not allowed") && std::strstr(kNotSentAntennaWords, "call 999"));
+}
+
 TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     World w;
     w.box.press(Colour::red, 0, 1000, false);
@@ -571,8 +598,8 @@ TEST(aReportsAcknowledgementIsNoOlderThanTheCut) {
     w.box.power(20000, 2020, false, 4200, false);
     w.box.power(30000, 2030, false, 4200, false);
     CHECK(w.box.reportRequest() == 1 && w.port.sent.size() == 1);
-    uint8_t rtc[BoxEngine::kRetainedBytes];
-    w.box.retain(rtc);
+    uint8_t rtc[BoxEngine::kRetainedBytes] = {};
+    w.box.retain(rtc, 0, 0);
     // An acknowledgement of an earlier request 1, made long before this cut, is not for it.
     auto old = w.ack(w.responder, 2, 1, 1600);
     w.box.heard(old.data(), old.size(), 2040);
@@ -582,7 +609,7 @@ TEST(aReportsAcknowledgementIsNoOlderThanTheCut) {
     CHECK(w.box.reportAcknowledged());
     // The cut's time survives a reset with the report.
     World after;
-    CHECK(after.box.resume(rtc));
+    CHECK(resumeFrom(after.box, rtc));
     old = after.ack(after.responder, 2, 1, 1600);
     after.box.heard(old.data(), old.size(), 2040);
     CHECK(!after.box.reportAcknowledged());
@@ -623,6 +650,30 @@ TEST(theClockIsRaisedOnlyFromTimesACurrentMemberSigned) {
     CHECK(w.box.heard(byCaller.data(), byCaller.size(), 5000) == 6000);
     auto misnamed = w.signedBy(w.caller, 2, inner, n);
     CHECK(w.box.heard(misnamed.data(), misnamed.size(), 5000) == 0);
+}
+
+TEST(aTimeMoreThanADayAheadNeedsASecondMemberToAgree) {
+    // A phone whose clock is set days ahead moves the box's clock only if another member's phone
+    // says much the same; within a day, one member's word is enough, as before (section 9).
+    World w;
+    const uint32_t now = 1000000, day = kMaxClockStep;
+    auto near = w.ackFor(70009, w.responder, 2, 5, now + day);
+    CHECK(w.box.heard(near.data(), near.size(), now) == now + day);
+    auto far = w.ackFor(70009, w.responder, 2, 5, now + 3 * day);
+    CHECK(w.box.heard(far.data(), far.size(), now) == 0);
+    auto again = w.ackFor(70009, w.responder, 2, 6, now + 3 * day + 60);
+    CHECK(w.box.heard(again.data(), again.size(), now) == 0);
+    // Another member a week ahead does not agree with three days.
+    CallStateFrame week{70009, 7, CallState::callerOK, now + 7 * day, 0, {}};
+    uint8_t inner[16];
+    size_t n = encode(week, inner, sizeof inner);
+    auto byCaller = w.signedBy(w.caller, 3, inner, n);
+    CHECK(w.box.heard(byCaller.data(), byCaller.size(), now) == 0);
+    // The coordinator's phone agrees with the caller's to within the day: the earlier of the two.
+    CallStateFrame close{70009, 7, CallState::callerOK, now + 7 * day + 600, 0, {}};
+    n = encode(close, inner, sizeof inner);
+    auto byCoordinator = w.signedBy(w.coordinator, 1, inner, n);
+    CHECK(w.box.heard(byCoordinator.data(), byCoordinator.size(), now) == now + 7 * day);
 }
 
 TEST(aPowerCutIsNotReportedWithoutOptInOrARespondersKey) {
@@ -733,11 +784,11 @@ TEST(theHoursAirtimeAndThePowerCutSurviveAResetThroughRTCMemory) {
     w.box.power(2000, 1002, false, 4200, false);
     w.box.power(12000, 1012, false, 4200, false);
     CHECK(w.port.sent.size() == 1 && w.port.phone.size() == 2);  // the power-cut report reached only the phone
-    uint8_t rtc[BoxEngine::kRetainedBytes];
-    w.box.retain(rtc);
+    uint8_t rtc[BoxEngine::kRetainedBytes] = {};
+    w.box.retain(rtc, 0, 0);
 
     World after(false);
-    CHECK(after.box.resume(rtc));
+    CHECK(resumeFrom(after.box, rtc));
     // The same call, still waiting.
     CHECK(after.box.callCount() == 1 && after.box.call(0).number == 1);
     CHECK(after.box.screen().status == CallerStatus::waitingForResponder);
@@ -762,10 +813,48 @@ TEST(theHoursAirtimeAndThePowerCutSurviveAResetThroughRTCMemory) {
     uint8_t broken[BoxEngine::kRetainedBytes];
     std::memcpy(broken, rtc, sizeof broken);
     broken[sizeof broken / 2] ^= 1;
-    CHECK(!cold.box.resume(broken));
+    CHECK(!resumeFrom(cold.box, broken));
     std::memset(broken, 0, sizeof broken);
-    CHECK(!cold.box.resume(broken));
+    CHECK(!resumeFrom(cold.box, broken));
     CHECK(cold.box.callCount() == 0 && cold.box.screen().mains == PowerMonitor::Mains::unknown);
+}
+
+TEST(aResetInTheMiddleOfAWriteResumesFromTheOtherCopy) {
+    World w(false);
+    uint8_t rtc[BoxEngine::kRetainedBytes] = {};
+    w.box.press(Colour::amber, 1000, 1001, false);
+    w.box.retain(rtc, 1000, 1001000000);
+    w.box.press(Colour::red, 2000, 1002, false);
+    w.box.retain(rtc, 2000, 1002000000);
+    uint8_t whole[sizeof rtc];
+    std::memcpy(whole, rtc, sizeof rtc);
+    // The next write, cut off a third of the way through the copy it was overwriting.
+    w.box.press(Colour::red, 3000, 1003, false);
+    w.box.retain(rtc, 3000, 1003000000);
+    const size_t half = sizeof rtc / 2;
+    size_t written = std::memcmp(rtc, whole, half) != 0 ? 0 : half, resumedFrom = half - written;
+    uint8_t torn[sizeof rtc];
+    std::memcpy(torn, whole, sizeof torn);
+    std::memcpy(torn + written, rtc + written, half / 3);
+
+    World after(false);
+    uint64_t monoMs = 0;
+    int64_t wallUs = 0;
+    CHECK(after.box.resume(torn, monoMs, wallUs));
+    // The copy before: both calls open, and the clocks it was taken at.
+    CHECK(after.box.callCount() == 2 && after.box.call(1).colour == Colour::red);
+    CHECK(monoMs == 2000 && wallUs == 1002000000);
+    // The next write goes over the torn copy, never the one just resumed from.
+    uint8_t kept[sizeof rtc];
+    std::memcpy(kept, torn, sizeof kept);
+    after.box.retain(torn, 4000, 1004000000);
+    CHECK(std::memcmp(torn + resumedFrom, kept + resumedFrom, half) == 0);
+    World later(false);
+    CHECK(later.box.resume(torn, monoMs, wallUs) && monoMs == 4000);
+
+    // With both copies whole, the newest.
+    World whole3(false);
+    CHECK(whole3.box.resume(rtc, monoMs, wallUs) && whole3.box.callCount() == 3 && monoMs == 3000);
 }
 
 TEST(aResetKeepsTheBandItStartsInNotTheOneInTheCopy) {
@@ -777,12 +866,12 @@ TEST(aResetKeepsTheBandItStartsInNotTheOneInTheCopy) {
     w.box.press(Colour::red, 0, 1000, false);
     w.box.press(Colour::red, 1000, 1001, false);
     CHECK(w.port.sent.size() == 2);
-    uint8_t rtc[BoxEngine::kRetainedBytes];
-    w.box.retain(rtc);
+    uint8_t rtc[BoxEngine::kRetainedBytes] = {};
+    w.box.retain(rtc, 0, 0);
     World after;
     after.port.airtime = 30000;
     after.box.setRadio(RadioSettings(868.3, 62.5, 8, 5));
-    CHECK(after.box.resume(rtc));
+    CHECK(resumeFrom(after.box, rtc));
     after.box.press(Colour::red, 2000, 1002, false);
     CHECK(after.port.sent.empty() && after.box.screen().status == CallerStatus::notSent);
 }
@@ -793,10 +882,10 @@ TEST(aCopyFromAnotherBuildRunsOnThisBuildsBattery) {
     World w;
     w.box.power(0, 1000, false, 4200, false);
     w.box.power(10000, 1010, false, 4200, false);
-    uint8_t rtc[BoxEngine::kRetainedBytes];
-    w.box.retain(rtc);
+    uint8_t rtc[BoxEngine::kRetainedBytes] = {};
+    w.box.retain(rtc, 0, 0);
     World after(true, true, BatteryModel{6000, 100, false});
-    CHECK(after.box.resume(rtc));
+    CHECK(resumeFrom(after.box, rtc));
     CHECK(after.box.screen().mains == Mains::off && after.box.screen().mainsEstimated);
     after.box.power(11000, 1011, false, 4200, false);
     CHECK(after.box.screen().hoursLeft == 60);

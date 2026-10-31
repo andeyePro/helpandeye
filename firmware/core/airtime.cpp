@@ -79,7 +79,7 @@ uint32_t AirtimeBudget::record(uint32_t ms, uint64_t nowMs) {
         count_--;
     }
     uint32_t id = nextId_++;
-    log_[count_++] = Entry{id, nowMs, ms};
+    log_[count_++] = Entry{nowMs, id, ms};
     return id;
 }
 

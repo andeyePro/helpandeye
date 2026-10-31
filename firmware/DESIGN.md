@@ -243,7 +243,11 @@ Forget (0x75) clears the names with the rest.
 **The commands.** Help&I's companion commands sit where MeshCore's protocol has nothing: app to
 box at 0x70 to 0x75, box to app at 0xA0 to 0xA3 (`core/provision.hpp`). Integers are
 little-endian; keys are raw bytes; the reply to a command is MeshCore's own `OK` (0) or `ERR`
-(1, then an error code: 6 for a bad argument), which the app already reads.
+(1, then an error code: 6 for a bad argument, 5 when the box could not save it to flash), which
+the app already reads. A set group, set members or set names the box could not save answers 5,
+so the phone sends it again rather than marking it sent: the box goes by the new members and
+names at once, but a restart would go back to the old ones, or, from a part-written members
+file, to none.
 
 | Byte 0 | Name | Body |
 |---|---|---|
@@ -393,8 +397,15 @@ the lowest setting over the limit (above about 26 dBi at 869.4 to 869.65 MHz, 13
 868.6 MHz) stops the box sending: `BoxEngine` then refuses every packet of its own, calls,
 resends, I'm OK, closes and reports alike, so a press shows the cross unless its phone carries
 the call, and the firmware pulls MeshCore's setting down to the lowest. That lowest setting is
-still over the limit for whatever MeshCore sends itself (a connected phone's own traffic through
-the box, its replies on the mesh), which the box cannot stop. The app shows the same cap (`GroupState.maxRadioSetting`), and
+still over the limit, so the firmware also stops whatever MeshCore sends itself (a connected
+phone's own traffic through the box, adverts, its replies on the mesh): `BoxEngine::antennaNotAllowed`
+tells the UI task, which turns the radio's transmit path off (`RadioLibWrapper::setTransmitAllowed`,
+the third hook in `meshcore.patch`, makes `startSendRaw` refuse every packet, which MeshCore's
+dispatcher drops as a failed send). The box still listens. Its screen says "This box cannot send:
+its antenna is not allowed. Ask your coordinator.", and a press shows the cross with "Not sent:
+this box's antenna is not allowed. If you need help now, call 999."; a phone connecting reads
+-128, must not send, as the power cap in the info reply (0x70). Outside the UK bands the antenna
+is not what stops the box, and MeshCore's own traffic is not stopped. The app shows the same cap (`GroupState.maxRadioSetting`), and
 both are tested against one table of gains. The V4's standard whip is assumed, at 2 dBi,
 until measured; with 12 dB of amplifier gain that is 15 at 869.4 to 869.65 MHz and 2 at 868.0 to
 868.6 MHz. The firmware applies the cap once a second (`UITask::applyRadio`), so a higher setting
@@ -421,6 +432,15 @@ unit's call) or signed call state when it is later than the box's clock, and the
 the clock to it; another unit's acknowledgement is checked only when its time is later. A member
 whose phone's clock runs fast moves the box's clock on with it, as the phone setting the time
 does.
+
+**A bound on that raise (2026-10-31).** One member's signed time may raise the clock by at most a
+day (`kMaxClockStep`). A time further ahead is held, not taken, until a different member's signed
+time agrees with it to within a day: then two phones say the box's clock is the one that is
+wrong, as after a cold start with no phone, and the box takes the earlier of the two. One phone
+with its clock set days ahead cannot move the box's on. A phone a few hours fast still can, as the
+phone that connects to the box can set its time directly; so the responders' phones count
+escalation from the earlier of the press time and when they first heard the call
+(`IncomingRequest.escalatesFrom`), and a call stamped ahead is alerted at once, not late.
 
 **The monotonic clock across sleep and resets.** The core's schedule and airtime run on a
 monotonic clock in milliseconds (section 7). On the board it is the 64-bit `monoMs()` (ESP-IDF's
@@ -497,13 +517,17 @@ its phone next sends the member list; until then a removed responder's acknowled
 still count on this box. That is the trade-off taken for the battery: the person's own call is
 what the box is for, and every one of them keeps it awake until a person settles it.
 
-**What survives** (`BoxEngine::retain`, `resume`; `kRetainedBytes`, about 5 KB). The hour's
-airtime log, the power monitor (so a wake is not a new power cut and the hour marks are not
-reported again), the eight calls, and the open report's number and part count, as the struct's
-own bytes with a checksum and a layout number, in RTC slow memory (`RTC_NOINIT_ATTR`, which a
-reset leaves alone and a power-on leaves as it was), written every second while awake and again
-before sleep. A copy the checksum and layout do not confirm is a cold start (decision 8): a
-power-on, or another build. What the copy cannot know stays as the start has it: the band's
+**What survives** (`BoxEngine::retain`, `resume`; `kRetainedBytes`, two copies of about 4 KB).
+The hour's airtime log, the power monitor (so a wake is not a new power cut and the hour marks
+are not reported again), the eight calls, the open report's number and part count, and the two
+clocks it was taken at (section 9), as the struct's own bytes with a checksum, a layout number
+and a sequence number, in RTC slow memory (`RTC_NOINIT_ATTR`, which a reset leaves alone and a
+power-on leaves as it was), written every second while awake and again before sleep. Each write
+goes over the older of two copies, so a reset in the middle of one leaves the other whole, a
+second older; a start resumes from the newest copy the checksum and layout confirm. With neither
+confirmed it is a cold start (decision 8): a power-on, or another build. The two copies take
+7936 of the ESP32-S3's 8192 bytes of RTC slow memory (the airtime log's entries are packed to 16
+bytes to fit), checked at compile time in `UITask.cpp`. What the copy cannot know stays as the start has it: the band's
 duty cycle (the radio's settings may have changed in the second before a reset) and the build's
 battery and mains wire (a firmware update keeps the copy when the layout is unchanged). A report's
 remaining repeats are not kept, so a reset during them loses the rest; the next mark makes the
@@ -580,11 +604,13 @@ section 6.
   own ChaCha20-Poly1305 (one implementation on the board and in the tests) over an X25519 secret
   from `Curve25519::eval`. `platformio.local.ini` adds two environments, `heltec_v4_helpandi`
   (the box: three buttons, buzzer, mains pin) and `heltec_v4_helpandi_dev` (a plain board,
-  section 7's PRG layout). `meshcore.patch` is the one change to MeshCore's own files, two
-  hooks: `Listener::onUnhandledCmdFrame`, so the UI task answers the Help&I companion commands,
-  and `AbstractUITask::allowsBluetooth`, asked in `main.cpp`'s setup before the Bluetooth
-  interface starts, so a box with no screen starts none (both section 6). Every other UI task
-  keeps MeshCore's behaviour: the hook's default is yes.
+  section 7's PRG layout). `meshcore.patch` is the one change to MeshCore's own files, three
+  hooks: `Listener::onUnhandledCmdFrame`, so the UI task answers the Help&I companion commands;
+  `AbstractUITask::allowsBluetooth`, asked in `main.cpp`'s setup before the Bluetooth
+  interface starts, so a box with no screen starts none (both section 6); and
+  `RadioLibWrapper::setTransmitAllowed`, so a box whose antenna is not allowed transmits nothing
+  at all (section 8). Every other UI task and firmware keeps MeshCore's behaviour: the hooks'
+  defaults are yes.
 - `firmware/build.sh` clones MeshCore at the commit named in the script, copies the overlay and
   the core in, applies the patch and runs `pio run`. One MeshCore tree, reused. `--release` then
   signs and encrypts the images (section 16).
@@ -643,13 +669,13 @@ Ed25519 library (no signature vectors here: none could be made from a phone).
 
 ## 13. Test plan
 
-**Host tests (built, run, passing).** 136 tests in `firmware/test`: the frames byte for byte
+**Host tests (built, run, passing).** 139 tests in `firmware/test`: the frames byte for byte
 against the Swift layout, malformed and stray input, what may go on the group channel, the
 signature inputs, too small a buffer; the resend times, acknowledgement rules, removal, settling,
 I'm OK settling only earlier calls, which share each resend uses, and close repeats; airtime
 against Semtech's figure, the default preamble and packet size against EscalationTests.swift,
 both bands, the budget's three shares, entries after a clock reset, reservations and a full log;
-the power cap, and a box that must not send sending nothing; debouncing, a button held at start-up, the button that woke the board, press and
+the power cap, and a box that must not send sending nothing and saying why; debouncing, a button held at start-up, the button that woke the board, press and
 long press, all three pressed at once, falling on red and green, I'm OK just after Help, the
 countdown's taps, warning and Help, a late wake, a 300-second countdown, and stopping it,
 including by a press that began just before the end; the sealing primitives against their RFC
@@ -666,7 +692,8 @@ cold start, the power cap, a power-cut report opened as a responder's phone open
 coordinator's close, the changeover, request numbers and forgetting; the retained copy through a
 fake RTC store (the hour's airtime, the power cut and its part numbers and the calls carried on,
 a corrupted or empty copy refused, the band and battery this start has kept over the copy's, the
-clock carried through sleep and never wrapped), when the box may sleep, and the hours left with the box
+clock carried through sleep and never wrapped, a write cut off part way resumed from the other
+copy), a time more than a day ahead taken only when a second member agrees, when the box may sleep, and the hours left with the box
 asleep between polls. Still to add: an acknowledgement signed by a real phone, checked on a
 board.
 

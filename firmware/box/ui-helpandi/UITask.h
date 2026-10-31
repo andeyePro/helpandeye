@@ -58,7 +58,8 @@ private:
   bool oldChannelLive(uint32_t wall) const;
   void dropOldChannels(uint32_t wall);
   bool saveFile(const char* path, const uint8_t* data, size_t length);
-  void saveNames();
+  bool saveMembers();
+  bool saveNames();
   void reply(uint8_t code);
   void applyRadio();
   void draw();

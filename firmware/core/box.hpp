@@ -48,6 +48,9 @@ struct Screen {
     // The mains state is the battery's trend, not the wire (section 10): the screen says "?".
     bool mainsEstimated;
     uint32_t hoursLeft;
+    // The antenna the coordinator set puts even the lowest setting over the band's limit: the box
+    // sends nothing at all, and says why (section 8).
+    bool antennaNotAllowed;
 };
 
 // What the box shows for each state. No "delivered", and never that help is on its way
@@ -55,6 +58,9 @@ struct Screen {
 const char* statusWords(CallerStatus s);
 constexpr const char* kNotSetUpWords = "Not set up yet. Add this box to a group in the Help&I app.";
 constexpr const char* kSupplementWords = "Help&I does not replace 999 or telecare.";
+// A box whose antenna is not allowed (section 8): with no call, and in place of "Not sent" for one.
+constexpr const char* kAntennaNotAllowedWords = "This box cannot send: its antenna is not allowed. Ask your coordinator.";
+constexpr const char* kNotSentAntennaWords = "Not sent: this box's antenna is not allowed. If you need help now, call 999.";
 
 // Bluetooth pairing, decided at every start (section 6). The phone pairs with the random code
 // MeshCore shows on the screen. Without a working screen MeshCore falls back to its fixed code
@@ -102,6 +108,9 @@ struct Transmitter {
 // the copy's, and a clock behind the copy's adds nothing rather than wrapping round.
 uint64_t resumedMonoMs(uint64_t retainedMonoMs, int64_t retainedWallUs, int64_t wallUsAtStart, bool slept);
 
+// The most a signed time may raise the box's clock in one step on one member's word (section 9).
+constexpr uint32_t kMaxClockStep = 86400;
+
 class BoxEngine {
 public:
     static constexpr size_t kMaxCalls = 8;
@@ -118,10 +127,14 @@ private:
         CloseRepeat repeat;
         bool repeating = false;
     };
-    // What survives a reset or deep sleep in the board's RTC memory (section 10).
+    // What survives a reset or deep sleep in the board's RTC memory (section 10), with the clocks
+    // it was taken at.
     struct Retained {
         uint32_t version;
         uint32_t sum;
+        uint32_t sequence;
+        uint64_t monoMs;
+        int64_t wallUs;
         AirtimeBudget budget;
         PowerMonitor monitor;
         Slot slots[kMaxCalls];
@@ -133,10 +146,11 @@ private:
     };
     // The layout's size and a number to raise whenever one of the types above changes without
     // changing the size, so a copy another build wrote is never read as this one's.
-    static constexpr uint32_t kRetainedLayout = uint32_t(sizeof(Retained)) << 8 | 2;
+    static constexpr uint32_t kRetainedLayout = uint32_t(sizeof(Retained)) << 8 | 3;
 
 public:
-    static constexpr size_t kRetainedBytes = sizeof(Retained);
+    // Two copies, written in turn.
+    static constexpr size_t kRetainedBytes = 2 * sizeof(Retained);
 
     BoxEngine(BoxPort& port, const RadioSettings& radio, const Transmitter& transmitter, const BatteryModel& battery,
               uint16_t nextRequest);
@@ -153,12 +167,14 @@ public:
     // airtime counts as used (section 8).
     void coldStart(uint64_t nowMs);
     // The copy that survives a reset or deep sleep: the hour's airtime, the mains and battery
-    // state, the calls and the open report. `retain` writes kRetainedBytes with a checksum;
-    // `resume` takes a copy back, and is false when it is not one this build wrote (a cold
+    // state, the calls and the open report, and the board's clocks as it was taken. `retain`
+    // writes it over the older of two copies in kRetainedBytes, with a checksum and a sequence
+    // number, so a reset in the middle of a write leaves the other copy whole. `resume` takes
+    // back the newest whole copy, and is false when neither is one this build wrote (a cold
     // start, with nothing or something else in the memory). What the copy cannot say stays as
     // this start has it: the band's limit and this build's battery.
-    void retain(uint8_t* out) const;
-    bool resume(const uint8_t* in);
+    void retain(uint8_t* out, uint64_t monoMs, int64_t wallUs);
+    bool resume(const uint8_t* in, uint64_t& monoMs, int64_t& wallUs);
     // Whether the box may deep-sleep now (section 10): on battery, with nothing to send again
     // (a call's resends, a close's or a report's repeats) and no phone using it as its radio.
     // A sleeping box hears nothing, which is why nothing may be waiting for an answer.
@@ -166,6 +182,9 @@ public:
     // The highest SX1262 setting the band allows with this box's antenna, or false when the box
     // must not send at all: then it sends nothing of its own, and shows the cross.
     bool powerCap(int& setting) const;
+    // In a UK band, but the antenna puts even the lowest setting over its limit: the board then
+    // lets nothing go on air, MeshCore's own packets included (section 8).
+    bool antennaNotAllowed() const;
 
     // A button. `phoneConnected` says whether a phone can be asked to carry the call too.
     void press(Colour colour, uint64_t nowMs, uint32_t wallNow, bool phoneConnected);
@@ -173,7 +192,8 @@ public:
     void tick(uint64_t nowMs, uint32_t wallNow);
     // A Help&I datagram heard on the group channel. Returns a wall-clock time later than
     // `wallNow` that a current member signed (an acknowledgement, a signed call state), for the
-    // board to raise its clock to, or 0 (section 9).
+    // board to raise its clock to, or 0 (section 9). A time more than kMaxClockStep ahead counts
+    // only once a second member's agrees with it to within kMaxClockStep.
     uint32_t heard(const uint8_t* data, size_t length, uint32_t wallNow);
     // The phone says whether its own routes took the call.
     void phoneRoute(uint16_t request, bool sent);
@@ -218,6 +238,7 @@ private:
     uint32_t onAck(const AckFrame& ack, uint32_t wallNow);
     uint32_t onSigned(const SignedFrame& s, uint32_t wallNow);
     void addReportPart(const uint8_t* inner, size_t innerLength, bool lastWarning, uint64_t nowMs, uint32_t wallNow);
+    uint32_t raiseClock(uint32_t at, uint16_t member, uint32_t wallNow);
 
     BoxPort& port_;
     RadioSettings radio_;
@@ -241,6 +262,11 @@ private:
     uint8_t reportParts_ = 0;
     bool reportAcknowledged_ = false;
     ReportPart parts_[kMaxReportParts];
+
+    uint32_t retainedSequence_ = 0;
+    // A time too far ahead to take on one member's word, and whose it was.
+    uint32_t farAt_ = 0;
+    uint16_t farMember_ = 0;
 
     static constexpr size_t kSounds = 4;
     Sound sounds_[kSounds] = {};

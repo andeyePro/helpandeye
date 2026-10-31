@@ -52,18 +52,15 @@ uint8_t wokenBy() {
   return woke;
 }
 
-// The core's copy of what survives deep sleep and a reset, with the clock it was taken at, in
-// RTC memory that a reset leaves alone and a power-on leaves as it was: the core's checksum
-// tells the two apart, and the clock is written with the copy. The system clock keeps running
-// through deep sleep, and nothing can set it meanwhile, so it measures the time asleep, read as
-// this start begins: MeshCore's setup then sets it to just after its newest contact.
-struct RetainedCopy {
-  uint64_t monoMs;
-  int64_t wallUs;
-  uint8_t state[BoxEngine::kRetainedBytes];
-};
-RTC_NOINIT_ATTR RetainedCopy retained;
-static_assert(sizeof retained <= 6144, "the ESP32-S3 has 8 KB of RTC slow memory, part of it ESP-IDF's");
+// The core's two copies of what survives deep sleep and a reset, each with the clocks it was
+// taken at, in RTC memory that a reset leaves alone and a power-on leaves as it was: the core's
+// checksums tell the two apart. The system clock keeps running through deep sleep, and nothing
+// can set it meanwhile, so it measures the time asleep, read as this start begins: MeshCore's
+// setup then sets it to just after its newest contact.
+RTC_NOINIT_ATTR uint8_t retained[BoxEngine::kRetainedBytes];
+// This build reserves none of the ESP32-S3's 8 KB of RTC slow memory for the ULP; the rest is
+// left for ESP-IDF's own RTC data.
+static_assert(sizeof retained <= 7936, "two copies in the ESP32-S3's 8 KB of RTC slow memory");
 
 int64_t wallUs() {
   struct timeval tv;
@@ -127,13 +124,17 @@ void UITask::begin(DisplayDriver* display, SensorManager*, NodePrefs* prefs) {
   // usually earlier than the clock that ran on through it: put back the time it had.
   uint32_t wallAtStart = uint32_t(_startWallUs / 1000000);
   if (slept && wallAtStart > rtc_clock.getCurrentTime()) rtc_clock.setCurrentTime(wallAtStart);
-  if (_engine.resume(retained.state)) {
-    _monoOffset = resumedMonoMs(retained.monoMs, retained.wallUs, _startWallUs, slept) - _startMonoMs;
+  uint64_t keptMono;
+  int64_t keptWall;
+  if (_engine.resume(retained, keptMono, keptWall)) {
+    _monoOffset = resumedMonoMs(keptMono, keptWall, _startWallUs, slept) - _startMonoMs;
   } else {
     // No record of the hour before this start survives a power cut (section 8).
     _engine.coldStart(now());
   }
   loadProvisioning();
+  // The antenna came with the group: cap the radio, or stop it sending, before MeshCore's loop.
+  applyRadio();
   // A wake to read the battery shows nothing: the box goes back to sleep in a moment.
   bool quiet = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER;
   _activeUntil = quiet ? now() : now() + kScreenOnMs;
@@ -202,10 +203,23 @@ bool UITask::saveFile(const char* path, const uint8_t* data, size_t length) {
   return ok;
 }
 
-void UITask::saveNames() {
+bool UITask::saveMembers() {
+  File f = SPIFFS.open(kMembersFile, "w");
+  if (!f) return false;
+  uint8_t chunk[7 + kMembersPerChunk * kMemberBytes];
+  bool ok = true;
+  for (size_t i = 0; ok && i < _members.count; i += kMembersPerChunk) {
+    size_t n = writeMembersChunk(_members, i, chunk, sizeof chunk);
+    ok = f.write(chunk, n) == n;
+  }
+  f.close();
+  return ok;
+}
+
+bool UITask::saveNames() {
   if (!_names.count) {
     _nvs.remove(kNamesKey);
-    return;
+    return !_nvs.isKey(kNamesKey);
   }
   uint8_t blob[kNamesBlobBytes];
   size_t n = 0;
@@ -214,7 +228,7 @@ void UITask::saveNames() {
     blob[n] = uint8_t(len);
     n += 1 + len;
   }
-  _nvs.putBytes(kNamesKey, blob, n);
+  return _nvs.putBytes(kNamesKey, blob, n) == n;
 }
 
 void UITask::loadProvisioning() {
@@ -349,8 +363,12 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
   }
   case kCmdSetGroup: {
     GroupSettings g{};
-    if (!parseSetGroup(frame, len, g) || !saveFile(kGroupFile, frame, len)) {
+    if (!parseSetGroup(frame, len, g)) {
       reply(kErrorBadArgument);
+      return true;
+    }
+    if (!saveFile(kGroupFile, frame, len)) {
+      reply(kErrorFileIO);
       return true;
     }
     _group = g;
@@ -365,17 +383,16 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
       reply(kErrorBadArgument);
       return true;
     }
+    // The box goes by the new list at once; a save that failed says ERR, so the phone sends the
+    // list again rather than a restart going back to the old one, or to none.
+    bool saved = true;
     if (complete) {
-      uint8_t chunk[7 + kMembersPerChunk * kMemberBytes];
-      File f = SPIFFS.open(kMembersFile, "w");
-      for (size_t i = 0; f && i < _building.count; i += kMembersPerChunk)
-        f.write(chunk, writeMembersChunk(_building, i, chunk, sizeof chunk));
-      if (f) f.close();
       _members = _building;
       _haveMembers = true;
+      saved = saveMembers();
       provisionIfReady();
     }
-    reply(kRespOK);
+    reply(saved ? kRespOK : kErrorFileIO);
     return true;
   }
   case kCmdSetNames: {
@@ -384,11 +401,12 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
       reply(kErrorBadArgument);
       return true;
     }
+    bool saved = true;
     if (complete) {
       _names = _buildingNames;
-      saveNames();
+      saved = saveNames();
     }
-    reply(kRespOK);
+    reply(saved ? kRespOK : kErrorFileIO);
     return true;
   }
   case kCmdGetCalls: {
@@ -475,8 +493,10 @@ void UITask::applyRadio() {
     _cr = _prefs->cr;
     _engine.setRadio(radioFrom(*_prefs));
   }
-  // A box that must not send sends nothing of its own (the core refuses it); what MeshCore sends
-  // itself goes at the lowest setting.
+  // A box whose antenna is not allowed sends nothing at all: the core refuses its own packets and
+  // the radio refuses MeshCore's (a connected phone's, replies on the mesh), which would be over
+  // the limit even at the lowest setting (section 8).
+  radio_driver.setTransmitAllowed(!_engine.antennaNotAllowed());
   int cap = kTransmitter.minSetting;
   _engine.powerCap(cap);
   if (_prefs->tx_power_dbm > cap) {
@@ -486,11 +506,7 @@ void UITask::applyRadio() {
   }
 }
 
-void UITask::keep(uint64_t now) {
-  retained.monoMs = now;
-  retained.wallUs = wallUs();
-  _engine.retain(retained.state);
-}
+void UITask::keep(uint64_t now) { _engine.retain(retained, now, wallUs()); }
 
 // Deep sleep until a button, the mains coming back or the next battery reading (section 10).
 // As ESP32Board::enterDeepSleep and HeltecV4Board::powerOff leave the board, with the wake
@@ -622,9 +638,12 @@ void UITask::draw() {
   } else if (!s.provisioned) {
     _display->setCursor(0, 14);
     _display->printWordWrap(kNotSetUpWords, w);
+  } else if (s.antennaNotAllowed && !s.hasCall) {
+    _display->setCursor(0, 14);
+    _display->printWordWrap(kAntennaNotAllowedWords, w);
   } else if (s.hasCall) {
     int textWidth = s.status == CallerStatus::notSent ? w - 30 : w;
-    const char* words = statusWords(s.status);
+    const char* words = s.antennaNotAllowed && s.status == CallerStatus::notSent ? kNotSentAntennaWords : statusWords(s.status);
     if (s.status == CallerStatus::seen) {
       // The first responder to see it, by name when the box holds one (section 6).
       const OutgoingCall& c = _engine.call(_engine.callCount() - 1);

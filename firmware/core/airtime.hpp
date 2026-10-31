@@ -85,9 +85,11 @@ public:
     void cancel(uint32_t id);
 
 private:
+    // 16 bytes, not 24: the log is most of the box's retained copy, two of which share the
+    // board's 8 KB of RTC memory (box.hpp).
     struct Entry {
-        uint32_t id;
         uint64_t atMs;
+        uint32_t id;
         uint32_t ms;
     };
     double dutyCycle_;

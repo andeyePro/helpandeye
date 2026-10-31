@@ -1543,7 +1543,7 @@ public final class HelpEngine: ObservableObject {
 
     public func escalation(for r: IncomingRequest) -> Escalation? {
         guard let group else { return nil }
-        let at = r.sentAt ?? r.firstHeardAt
+        let at = r.escalatesFrom
         let responders = group.members.filter { $0.canRespond && !group.isHousehold($0, ofUnit: r.key.unit) }.map {
             ResponderInfo(member: $0.number, availableNow: activity.rota.isAvailable($0.number, at: at), lastAnsweredAt: activity.lastAnswered[$0.number])
         }
@@ -1557,7 +1557,7 @@ public final class HelpEngine: ObservableObject {
         guard let r = activity.inbox.requests[key], r.isOpen, let e = escalation(for: r), let me = self.me?.number, self.me?.canRespond == true else { return }
         let calm = r.colour == .green || r.callerIsOK || r.isPowerReport
         let turn = TimeInterval(e.order.firstIndex(of: me) ?? e.order.count) * e.interval
-        let turnAt = (r.sentAt ?? r.firstHeardAt).addingTimeInterval(turn)
+        let turnAt = r.escalatesFrom.addingTimeInterval(turn)
         // "I'm OK" asks for no one: tell them once, calmly, and never again.
         if r.colour == .green {
             guard !activity.alertedGreens.contains(key) else { return }

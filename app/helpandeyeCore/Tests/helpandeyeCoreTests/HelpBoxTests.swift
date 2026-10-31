@@ -499,6 +499,24 @@ final class HelpBoxTests: XCTestCase {
         try await check(2, order: [jo, sam], turns: [(responder, 0), (coordinator, 1)])
     }
 
+    /// A box whose clock a phone running fast moved on stamps its call an hour ahead. Every phone
+    /// counts escalation from when it first heard the call instead, so the first responder is
+    /// alerted at once, not an hour late.
+    func testACallStampedAnHourAheadIsAlertedAtOnce() async throws {
+        let sam = coordinator.engine.saved!.me, jo = responder.engine.saved!.me
+        let ahead = HelpFrame.call(unit: boxUnit, request: 1, colour: .red, sentAt: UInt32(clock.now.timeIntervalSince1970 + 3600))
+        let took = await household.engine.receiveFromBox(ahead)
+        XCTAssertEqual(took, true)
+        await air.run()
+        let r = try XCTUnwrap(responder.engine.activity.inbox.requests[key])
+        XCTAssertEqual(responder.engine.escalation(for: r)?.order, [sam, jo])
+        let first = try XCTUnwrap(coordinator.alerts.scheduled[key]?.times.first)
+        XCTAssertLessThanOrEqual(first, clock.now, "the first responder, at once")
+        let heard = try XCTUnwrap(coordinator.engine.activity.inbox.requests[key]).firstHeardAt
+        XCTAssertEqual(first, heard)
+        XCTAssertEqual(responder.alerts.scheduled[key]?.times.first, r.firstHeardAt.addingTimeInterval(120), "the next, a turn on")
+    }
+
     /// A box in no one's home (added before a home had to be chosen, or whose person left): the
     /// phone connected to it carries its call on its routes, as the radio alone may not reach
     /// anyone, but alerts for it like any responder and keeps no record of it as its own.

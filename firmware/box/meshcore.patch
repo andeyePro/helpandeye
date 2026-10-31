@@ -57,3 +57,36 @@ index 839d495..603406b 100644
  #endif
  
  // add wifi interface
+diff --git a/src/helpers/radiolib/RadioLibWrappers.cpp b/src/helpers/radiolib/RadioLibWrappers.cpp
+index e4d2ba1..a529425 100644
+--- a/src/helpers/radiolib/RadioLibWrappers.cpp
++++ b/src/helpers/radiolib/RadioLibWrappers.cpp
+@@ -164,6 +164,7 @@ uint32_t RadioLibWrapper::getEstAirtimeFor(int len_bytes) {
+ }
+ 
+ bool RadioLibWrapper::startSendRaw(const uint8_t* bytes, int len) {
++  if (!_tx_allowed) return false;
+   _board->onBeforeTransmit();
+   int err = _radio->startTransmit((uint8_t *) bytes, len);
+   if (err == RADIOLIB_ERR_NONE) {
+diff --git a/src/helpers/radiolib/RadioLibWrappers.h b/src/helpers/radiolib/RadioLibWrappers.h
+index 77dd931..d23cfc1 100644
+--- a/src/helpers/radiolib/RadioLibWrappers.h
++++ b/src/helpers/radiolib/RadioLibWrappers.h
+@@ -21,6 +21,7 @@ protected:
+   uint16_t _num_floor_samples;
+   int32_t _floor_sample_sum;
+   uint8_t _preamble_sf;
++  bool _tx_allowed = true;
+ 
+   void idle();
+   void startRecv();
+@@ -50,6 +51,8 @@ public:
+   virtual void setParams(float freq, float bw, uint8_t sf, uint8_t cr) = 0;
+   uint32_t getRngSeed();
+   void setTxPower(int8_t dbm);
++  // False and startSendRaw refuses every packet, so nothing goes on air.
++  void setTransmitAllowed(bool allowed) { _tx_allowed = allowed; }
+ 
+   virtual float getCurrentRSSI() =0;
+   virtual uint8_t getSpreadingFactor() const { return LORA_SF; }
