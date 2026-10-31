@@ -173,9 +173,8 @@ struct WatchCallView: View {
             .background(colour.color, in: shape)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(counting ? "\(model.words(.red)) in \(model.secondsLeft) seconds. Press to call now."
-                            : colour == .green && model.countdown != nil ? "\(model.words(.green)). Press to stop the countdown: nothing is sent."
-                            : model.words(colour))
+        .accessibilityLabel(counting ? "\(model.words(.red)) in \(model.secondsLeft) seconds. Press to call now." : model.words(colour))
+        .accessibilityHint(colour == .green && model.countdown != nil ? "Stops the countdown. Nothing is sent." : "")
     }
 
     /// Words, a symbol, or both, as on the phone; the symbol is left out when both will not fit.
