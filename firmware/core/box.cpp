@@ -83,7 +83,7 @@ void BoxEngine::coldStart(uint64_t nowMs) {
 }
 
 BoxEngine::Retained BoxEngine::snapshot() const {
-    Retained r{kRetainedLayout, 0, budget_, monitor_, {}, callCount_, reportRequest_, reportParts_, reportAcknowledged_};
+    Retained r{kRetainedLayout, 0, budget_, monitor_, {}, callCount_, reportRequest_, reportAt_, reportParts_, reportAcknowledged_};
     for (size_t i = 0; i < callCount_; i++) r.slots[i] = slots_[i];
     return r;
 }
@@ -106,6 +106,7 @@ bool BoxEngine::resume(const uint8_t* in) {
     for (size_t i = 0; i < kMaxCalls; i++) slots_[i] = r.slots[i];
     callCount_ = r.callCount;
     reportRequest_ = r.reportRequest;
+    reportAt_ = r.reportAt;
     reportParts_ = r.reportParts;
     reportAcknowledged_ = r.reportAcknowledged;
     return true;
@@ -182,6 +183,8 @@ BoxEngine::Slot& BoxEngine::newSlot() {
 }
 
 size_t BoxEngine::signFrame(const uint8_t* inner, size_t innerLength, uint8_t* out, size_t cap) {
+    // A note may be longer than a signed frame holds.
+    if (innerLength > kMaxSignedInner) return 0;
     uint8_t input[kMaxSignedInner + 64];
     size_t n = signedSignatureInput(group_.member, inner, innerLength, group_.groupID, kGroupIDBytes, input, sizeof input);
     SignedFrame f;
@@ -282,17 +285,22 @@ void BoxEngine::phoneRoute(uint16_t request, bool sent) {
     }
 }
 
-void BoxEngine::onAck(const AckFrame& ack) {
-    if (ack.unit != group_.unit) return;
+uint32_t BoxEngine::onAck(const AckFrame& ack, uint32_t wallNow) {
+    bool ours = ack.unit == group_.unit;
+    // Another unit's acknowledgement is checked only for the time it carries.
+    if (!ours && ack.ackedAt <= wallNow) return 0;
     const Member* m = members_.find(ack.responder);
-    if (!m || !canRespond(m->role)) return;
+    if (!m || (ours && !canRespond(m->role))) return 0;
     uint8_t input[64];
     size_t n = ackSignatureInput(ack, group_.groupID, kGroupIDBytes, input, sizeof input);
-    if (!port_.verify(m->signingKey, ack.signature, input, n)) return;
-    if (ack.request == reportRequest_ && !reportAcknowledged_) {
+    if (!port_.verify(m->signingKey, ack.signature, input, n)) return 0;
+    uint32_t later = ack.ackedAt > wallNow ? ack.ackedAt : 0;
+    if (!ours) return later;
+    if (ack.request == reportRequest_ && !reportAcknowledged_ &&
+        int64_t(ack.ackedAt) >= int64_t(reportAt_) - kClockAllowance) {
         reportAcknowledged_ = true;
         monitor_.acknowledged();
-        return;
+        return later;
     }
     for (size_t i = 0; i < callCount_; i++) {
         OutgoingCall& c = slots_[i].call;
@@ -301,40 +309,45 @@ void BoxEngine::onAck(const AckFrame& ack) {
         c.receive(ack);
         if (!seen && c.status() == CallerStatus::seen) sound(Sound::seen);
     }
+    return later;
 }
 
-void BoxEngine::onSigned(const SignedFrame& s) {
+uint32_t BoxEngine::onSigned(const SignedFrame& s, uint32_t wallNow) {
     const Member* signer = members_.find(s.signer);
-    if (!signer) return;
+    if (!signer) return 0;
     uint8_t input[kMaxSignedInner + 64];
     size_t n = signedSignatureInput(s.signer, s.inner, s.innerLength, group_.groupID, kGroupIDBytes, input, sizeof input);
-    if (!port_.verify(signer->signingKey, s.signature, input, n)) return;
+    if (!port_.verify(signer->signingKey, s.signature, input, n)) return 0;
     Frame inner = decode(s.inner, s.innerLength);
     if (inner.kind == FrameKind::memberRemoved && s.signer == group_.firstCoordinator) {
         if (members_.remove(inner.memberRemoved.member, inner.memberRemoved.version)) revokeAcks();
-        return;
+        return 0;
     }
+    if (inner.kind != FrameKind::callState) return 0;
     // A coordinator closes with the caller's consent or a reason (decision 6); the caller's own
     // states come only from the caller's key, which is this box's.
-    if (inner.kind == FrameKind::callState && signer->role == Role::coordinator && inner.callState.unit == group_.unit &&
+    if (signer->role == Role::coordinator && inner.callState.unit == group_.unit &&
         (inner.callState.state == CallState::closedWithConsent || inner.callState.state == CallState::closedWithReason)) {
         for (size_t i = 0; i < callCount_; i++) {
             OutgoingCall& c = slots_[i].call;
             if (c.number == inner.callState.request) c.settle(inner.callState.state, s.signer, inner.callState.at);
         }
     }
+    return inner.callState.at > wallNow ? inner.callState.at : 0;
 }
 
-void BoxEngine::heard(const uint8_t* data, size_t length) {
-    if (!provisioned_) return;
+uint32_t BoxEngine::heard(const uint8_t* data, size_t length, uint32_t wallNow) {
+    if (!provisioned_) return 0;
     Frame f = decode(data, length);
-    if (f.kind == FrameKind::ack) onAck(f.ack);
-    if (f.kind == FrameKind::signedFrame) onSigned(f.signedFrame);
+    if (f.kind == FrameKind::ack) return onAck(f.ack, wallNow);
+    if (f.kind == FrameKind::signedFrame) return onSigned(f.signedFrame, wallNow);
+    return 0;
 }
 
 void BoxEngine::addReportPart(const uint8_t* inner, size_t innerLength, bool lastWarning, uint64_t nowMs, uint32_t wallNow) {
     uint8_t signedFrame[kMaxSignedInner + 68];
     size_t n = signFrame(inner, innerLength, signedFrame, sizeof signedFrame);
+    if (!n) return;
     ReportPart* slot = nullptr;
     for (ReportPart& p : parts_)
         if (!p.repeating) {
@@ -371,6 +384,7 @@ void BoxEngine::power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint1
     bool probably = monitor_.estimated();
     if (e.report == PowerMonitor::Report::mainsLost) {
         reportRequest_ = takeRequest();
+        reportAt_ = wallNow;
         reportParts_ = 0;
         reportAcknowledged_ = false;
         FollowUpFrame f{group_.unit, reportRequest_, 1, Category::powerCut};

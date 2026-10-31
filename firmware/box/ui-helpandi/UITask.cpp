@@ -161,8 +161,11 @@ bool UITask::sendGroup(const uint8_t secret[16], const uint8_t* payload, size_t 
   return the_mesh.sendGroupData(channel, nullptr, kFlood, kMeshDataType, payload, int(length));
 }
 
+// The radio's own figure for the packet, with the 4 bytes of transport codes MeshCore adds when a
+// flood scope is set, which the box cannot see, so the budget never under-counts; plus 1, as the
+// radio rounds down.
 uint32_t UITask::airtimeMs(size_t payloadLength) {
-  return radioFrom(*_prefs).airtimeMs(meshPacketBytes(int(payloadLength)));
+  return radio_driver.getEstAirtimeFor(meshPacketBytes(int(payloadLength)) + 4) + 1;
 }
 
 void UITask::toPhone(const uint8_t* frame, size_t length) {
@@ -255,11 +258,29 @@ void UITask::listenOn(const uint8_t secret[16]) {
   the_mesh.setChannel(idx, ch);
 }
 
-void UITask::provisionIfReady() {
-  if (_haveGroup) {
-    listenOn(_group.channelSecret);
-    if (_group.hasOldSecret()) listenOn(_group.oldChannelSecret);
+bool UITask::oldChannelLive(uint32_t wall) const {
+  return _haveGroup && _group.hasOldSecret() && wall < _group.oldSecretEndsAt;
+}
+
+// Any other Help&I channel in the table is one the box no longer uses: a changeover's old channel
+// after its end, or the group's channel before a new one or Forget. Emptied, not saved, as
+// listenOn's are not.
+void UITask::dropOldChannels(uint32_t wall) {
+  bool old = oldChannelLive(wall);
+  for (int i = 0; i < MAX_GROUP_CHANNELS; i++) {
+    ChannelDetails slot;
+    if (!the_mesh.getChannel(i, slot) || strcmp(slot.name, kChannelName) != 0) continue;
+    if (_haveGroup && memcmp(slot.channel.secret, _group.channelSecret, kChannelSecretBytes) == 0) continue;
+    if (old && memcmp(slot.channel.secret, _group.oldChannelSecret, kChannelSecretBytes) == 0) continue;
+    the_mesh.setChannel(i, ChannelDetails{});
   }
+}
+
+void UITask::provisionIfReady() {
+  uint32_t wall = rtc_clock.getCurrentTime();
+  dropOldChannels(wall);
+  if (_haveGroup) listenOn(_group.channelSecret);
+  if (oldChannelLive(wall)) listenOn(_group.oldChannelSecret);
   if (_haveGroup && _haveMembers) _engine.provision(_group, _members);
 }
 
@@ -389,6 +410,7 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     _names.count = 0;
     _haveGroup = _haveMembers = false;
     _engine.forget();
+    dropOldChannels(rtc_clock.getCurrentTime());
     reply(kRespOK);
     return true;
   default:
@@ -401,7 +423,10 @@ void UITask::onChannelDataRecv(mesh::Packet*, const mesh::GroupChannel& channel,
   if (data_type != kMeshDataType || !_engine.provisioned()) return;
   bool current = memcmp(channel.secret, _group.channelSecret, kChannelSecretBytes) == 0;
   bool old = _group.hasOldSecret() && memcmp(channel.secret, _group.oldChannelSecret, kChannelSecretBytes) == 0;
-  if (current || old) _engine.heard(data, data_len);
+  if (!current && !old) return;
+  // A time a current member signed raises the clock, never lowers it (section 9).
+  uint32_t later = _engine.heard(data, data_len, rtc_clock.getCurrentTime());
+  if (later) rtc_clock.setCurrentTime(later);
 }
 
 // The loop
@@ -513,6 +538,7 @@ void UITask::loop() {
     }
     _engine.power(now, wall, digitalRead(HI_PIN_MAINS) == HIGH, _millivolts, hasConnection());
     applyRadio();
+    dropOldChannels(wall);
     keep(now);
   }
 

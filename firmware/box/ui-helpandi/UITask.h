@@ -54,6 +54,8 @@ private:
   void loadProvisioning();
   void provisionIfReady();
   void listenOn(const uint8_t secret[16]);
+  bool oldChannelLive(uint32_t wall) const;
+  void dropOldChannels(uint32_t wall);
   bool saveFile(const char* path, const uint8_t* data, size_t length);
   void saveNames();
   void reply(uint8_t code);

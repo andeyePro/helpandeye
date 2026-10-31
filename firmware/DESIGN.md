@@ -238,7 +238,9 @@ The box keeps the set-group and set-members bytes in flash as they came (`/hi_gr
 `/hi_members` on SPIFFS), the names as 0x76 chunks in NVS, and its next request number in NVS, written before each use. It puts
 the group's channel (and the old one during a changeover) into MeshCore's own channel table
 itself, at provisioning and at every start, since MeshCore decrypts group datagrams only for
-channels it knows: the phone need not set the channel for the box to hear acknowledgements. A phone
+channels it knows: the phone need not set the channel for the box to hear acknowledgements. Each
+second it empties any other channel of its own in that table: the old one once the changeover
+ends, and the previous group's after a new group or Forget. A phone
 recognises a Help&I box from the firmware version MeshCore's device query returns
 (`v1.18.0-hi1`), then sends 0x70. The app side is not built (TODO.md).
 
@@ -344,8 +346,10 @@ new call, as the app does. The box keeps its last eight calls; the oldest makes 
   oldest entry is folded into the next one, which keeps it counted for longer, never shorter.
 - Packet size as MeshCore sends it: `sendGroupData` puts the data type and a length byte before
   the payload, so the encrypted part is 3 + payload bytes, as `meshPacketBytes` in Airtime.swift
-  now counts. On the board the firmware should use the real packet length
-  (`Packet::getRawLength`) rather than any estimate.
+  now counts. On the board the time is the radio's own (`radio_driver.getEstAirtimeFor`, with
+  the radio's real settings) for that packet plus the 4 bytes of transport codes MeshCore adds
+  when a flood scope is set, which the box cannot see, so it is never short; rounded up
+  (`UITask::airtimeMs`).
 - The preamble MeshCore sends: 32 symbols at spreading factor 8 and below, 16 above
   (`RadioLibWrapper::preambleLengthForSF`), the default in both `RadioSettings`. At the UK narrow
   preset (SF8, 62.5 kHz) a 21-byte packet is 378 ms on air. The board can pass its own.
@@ -386,6 +390,11 @@ A press time that is too early only makes responders' phones escalate sooner. On
 late would delay their alerts. So the box must never claim a later time than the true one: it uses
 the newest time it can justify, and only raises it from the phone, or from a frame signed by a
 current member (an acknowledgement, a membership repeat), never from unsigned traffic.
+`BoxEngine::heard` returns the time in a current member's validly signed acknowledgement (of any
+unit's call) or signed call state when it is later than the box's clock, and the firmware sets
+the clock to it; another unit's acknowledgement is checked only when its time is later. A member
+whose phone's clock runs fast moves the box's clock on with it, as the phone setting the time
+does.
 
 **The monotonic clock across sleep and resets.** The core's schedule and airtime run on a
 monotonic clock in milliseconds (section 7). On the board it is the 64-bit `monoMs()` (ESP-IDF's
@@ -407,7 +416,9 @@ choice (Martin, 2026-10-30). `core/power.hpp` and `BoxEngine::power`:
 - Battery: hours left from the cell's resting voltage (a piecewise-linear curve from 4.2 V to the
   board's 3.4 V shutdown) and the box's average draw on battery, reported as the estimate passes
   24, 12, 6, 3, 2 and 1 hours. A responder's acknowledgement of the report silences all but the
-  final warning. The draw (`batteryModel`) is the deep-sleep draw (`HI_DRAW_ASLEEP_UA`) plus the
+  final warning. It counts only if made no more than five minutes before the cut by the
+  sender's clock, as for a call (section 7), so an old acknowledgement of the same request number
+  does not; the cut's time is kept with the report across a reset. The draw (`batteryModel`) is the deep-sleep draw (`HI_DRAW_ASLEEP_UA`) plus the
   awake draw (`HI_DRAW_AWAKE_MA`) for the share of each ten minutes the box is up to read the
   battery (about three seconds, `kAwakePerWakeMs`), rounded up to a whole milliamp so the
   estimate never flatters the cell; `HI_BATTERY_MAH` and both draws are build flags until section

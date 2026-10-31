@@ -100,12 +100,13 @@ private:
         Slot slots[kMaxCalls];
         size_t callCount;
         uint16_t reportRequest;
+        uint32_t reportAt;
         uint8_t reportParts;
         bool reportAcknowledged;
     };
     // The layout's size and a number to raise whenever one of the types above changes without
     // changing the size, so a copy another build wrote is never read as this one's.
-    static constexpr uint32_t kRetainedLayout = uint32_t(sizeof(Retained)) << 8 | 1;
+    static constexpr uint32_t kRetainedLayout = uint32_t(sizeof(Retained)) << 8 | 2;
 
 public:
     static constexpr size_t kRetainedBytes = sizeof(Retained);
@@ -142,8 +143,10 @@ public:
     void press(Colour colour, uint64_t nowMs, uint32_t wallNow, bool phoneConnected);
     // Resends and repeats. Call it often.
     void tick(uint64_t nowMs, uint32_t wallNow);
-    // A Help&I datagram heard on the group channel.
-    void heard(const uint8_t* data, size_t length);
+    // A Help&I datagram heard on the group channel. Returns a wall-clock time later than
+    // `wallNow` that a current member signed (an acknowledgement, a signed call state), for the
+    // board to raise its clock to, or 0 (section 9).
+    uint32_t heard(const uint8_t* data, size_t length, uint32_t wallNow);
     // The phone says whether its own routes took the call.
     void phoneRoute(uint16_t request, bool sent);
     // The mains level and battery voltage, as often as the board reads them. `phoneConnected`
@@ -184,8 +187,8 @@ private:
     void settleSlot(Slot& s, CallState state, uint64_t nowMs, uint32_t wallNow);
     // Takes back acknowledgements from anyone no longer a member who can respond.
     void revokeAcks();
-    void onAck(const AckFrame& ack);
-    void onSigned(const SignedFrame& s);
+    uint32_t onAck(const AckFrame& ack, uint32_t wallNow);
+    uint32_t onSigned(const SignedFrame& s, uint32_t wallNow);
     void addReportPart(const uint8_t* inner, size_t innerLength, bool lastWarning, uint64_t nowMs, uint32_t wallNow);
 
     BoxPort& port_;
@@ -204,6 +207,8 @@ private:
     size_t callCount_ = 0;
 
     uint16_t reportRequest_ = 0;
+    // When the power cut was reported, by the box's clock: an acknowledgement must not be older.
+    uint32_t reportAt_ = 0;
     uint8_t reportParts_ = 0;
     bool reportAcknowledged_ = false;
     ReportPart parts_[kMaxReportParts];

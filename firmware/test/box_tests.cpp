@@ -131,7 +131,12 @@ struct World {
     }
 
     std::vector<uint8_t> ack(const Phone& who, uint16_t member, uint16_t request, uint32_t at, const uint8_t* gid = nullptr) {
-        AckFrame a{group.unit, request, member, at, {}};
+        return ackFor(group.unit, who, member, request, at, gid);
+    }
+
+    std::vector<uint8_t> ackFor(uint32_t unit, const Phone& who, uint16_t member, uint16_t request, uint32_t at,
+                                const uint8_t* gid = nullptr) {
+        AckFrame a{unit, request, member, at, {}};
         uint8_t input[64];
         size_t n = ackSignatureInput(a, gid ? gid : group.groupID, 16, input, sizeof input);
         who.sign(a.signature, input, n);
@@ -242,28 +247,28 @@ TEST(onlyACurrentRespondersValidAcknowledgementCounts) {
     World w;
     w.box.press(Colour::red, 0, 1000, false);
     auto bad = w.ack(w.caller, 3, 1, 1001);
-    w.box.heard(bad.data(), bad.size());
+    w.box.heard(bad.data(), bad.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::waitingForResponder);
     uint8_t otherGroup[16] = {9, 9, 9};
     auto wrongGroup = w.ack(w.responder, 2, 1, 1001, otherGroup);
-    w.box.heard(wrongGroup.data(), wrongGroup.size());
+    w.box.heard(wrongGroup.data(), wrongGroup.size(), 0);
     auto forged = w.ack(w.caller, 2, 1, 1001);
-    w.box.heard(forged.data(), forged.size());
+    w.box.heard(forged.data(), forged.size(), 0);
     auto unknown = w.ack(w.responder, 7, 1, 1001);
-    w.box.heard(unknown.data(), unknown.size());
+    w.box.heard(unknown.data(), unknown.size(), 0);
     auto otherCall = w.ack(w.responder, 2, 2, 1001);
-    w.box.heard(otherCall.data(), otherCall.size());
+    w.box.heard(otherCall.data(), otherCall.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::waitingForResponder);
     CHECK(w.box.takeSound() == Sound::press && w.box.takeSound() == Sound::none);
     auto good = w.ack(w.responder, 2, 1, 1001);
-    w.box.heard(good.data(), good.size());
+    w.box.heard(good.data(), good.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::seen);
     CHECK(w.box.takeSound() == Sound::seen);
     CHECK(std::strcmp(statusWords(CallerStatus::seen), "A responder has seen your call.") == 0);
     w.box.tick(30000, 1030);
     CHECK(w.port.sent.size() == 1);
     auto coordinatorsToo = w.ack(w.coordinator, 1, 1, 1002);
-    w.box.heard(coordinatorsToo.data(), coordinatorsToo.size());
+    w.box.heard(coordinatorsToo.data(), coordinatorsToo.size(), 0);
     CHECK(w.box.takeSound() == Sound::none);
 }
 
@@ -271,24 +276,24 @@ TEST(aRemovalSignedByTheFirstCoordinatorTakesBackTheAcknowledgement) {
     World w;
     w.box.press(Colour::red, 0, 1000, false);
     auto good = w.ack(w.responder, 2, 1, 1001);
-    w.box.heard(good.data(), good.size());
+    w.box.heard(good.data(), good.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::seen);
     uint8_t removed[8];
     size_t n = encode(MemberRemovedFrame{2, 2}, removed, sizeof removed);
     auto byResponder = w.signedBy(w.responder, 2, removed, n);
-    w.box.heard(byResponder.data(), byResponder.size());
+    w.box.heard(byResponder.data(), byResponder.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::seen);
     auto stale = w.signedBy(w.coordinator, 1, removed, n);
     w.members.version = 2;
     w.box.provision(w.group, w.members);
     w.box.press(Colour::red, 1000, 1001, false);
     auto second = w.ack(w.responder, 2, 2, 1002);
-    w.box.heard(second.data(), second.size());
-    w.box.heard(stale.data(), stale.size());
+    w.box.heard(second.data(), second.size(), 0);
+    w.box.heard(stale.data(), stale.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::seen);
     size_t m = encode(MemberRemovedFrame{2, 3}, removed, sizeof removed);
     auto real = w.signedBy(w.coordinator, 1, removed, m);
-    w.box.heard(real.data(), real.size());
+    w.box.heard(real.data(), real.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::waitingForResponder);
     CHECK(w.box.members().find(2) == nullptr);
     w.box.tick(30000, 1030);
@@ -301,7 +306,7 @@ TEST(aNewMemberListFromThePhoneTakesBackADroppedRespondersAcknowledgement) {
     World w;
     w.box.press(Colour::red, 0, 1000, false);
     auto good = w.ack(w.responder, 2, 1, 1001);
-    w.box.heard(good.data(), good.size());
+    w.box.heard(good.data(), good.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::seen);
     w.members.members[1].role = Role::caller;
     w.members.version = 2;
@@ -352,7 +357,7 @@ TEST(imOKThatOnlyStopsTheRepeatsGoesWithEachResend) {
     w.box.tick(35000, 1035);
     CHECK(w.port.sent.size() == 6);  // the green's own resend
     auto good = w.ack(w.responder, 2, 1, 1040);
-    w.box.heard(good.data(), good.size());
+    w.box.heard(good.data(), good.size(), 0);
     w.box.tick(95000, 1095);
     CHECK(w.port.sent.size() == 7);  // the green only; the amber is seen
 }
@@ -511,7 +516,7 @@ TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     w.box.tick(60000, 1060);
     CHECK(w.port.sent.size() == 5);  // both parts
     auto seen = w.ack(w.responder, 2, 2, 1061);
-    w.box.heard(seen.data(), seen.size());
+    w.box.heard(seen.data(), seen.size(), 0);
     CHECK(w.box.reportAcknowledged());
     w.box.tick(90000, 1090);
     CHECK(w.port.sent.size() == 6);  // the red's resend only
@@ -531,6 +536,67 @@ TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     CHECK(back.kind == FrameKind::note && back.note.part == 4);
     CHECK(std::memcmp(back.note.text, "Power is back.", 14) == 0);
     CHECK(w.box.screen().mains == PowerMonitor::Mains::on);
+}
+
+TEST(aReportsAcknowledgementIsNoOlderThanTheCut) {
+    World w;
+    w.box.power(0, 2000, true, 4200, false);
+    w.box.power(10000, 2010, true, 4200, false);
+    w.box.power(20000, 2020, false, 4200, false);
+    w.box.power(30000, 2030, false, 4200, false);
+    CHECK(w.box.reportRequest() == 1 && w.port.sent.size() == 1);
+    uint8_t rtc[BoxEngine::kRetainedBytes];
+    w.box.retain(rtc);
+    // An acknowledgement of an earlier request 1, made long before this cut, is not for it.
+    auto old = w.ack(w.responder, 2, 1, 1600);
+    w.box.heard(old.data(), old.size(), 2040);
+    CHECK(!w.box.reportAcknowledged());
+    auto fresh = w.ack(w.responder, 2, 1, 2025);
+    w.box.heard(fresh.data(), fresh.size(), 2040);
+    CHECK(w.box.reportAcknowledged());
+    // The cut's time survives a reset with the report.
+    World after;
+    CHECK(after.box.resume(rtc));
+    old = after.ack(after.responder, 2, 1, 1600);
+    after.box.heard(old.data(), old.size(), 2040);
+    CHECK(!after.box.reportAcknowledged());
+    fresh = after.ack(after.responder, 2, 1, 2025);
+    after.box.heard(fresh.data(), fresh.size(), 2040);
+    CHECK(after.box.reportAcknowledged());
+}
+
+TEST(theClockIsRaisedOnlyFromTimesACurrentMemberSigned) {
+    World w;
+    w.box.press(Colour::red, 0, 1000, false);
+    // Unsigned traffic carries no weight, however late its time.
+    CallFrame call{70009, 5, Colour::red, 5000};
+    uint8_t frame[kCallBytes];
+    encode(call, frame, sizeof frame);
+    CHECK(w.box.heard(frame, sizeof frame, 1000) == 0);
+    auto forged = w.ackFor(70009, w.caller, 2, 5, 5000);
+    CHECK(w.box.heard(forged.data(), forged.size(), 1000) == 0);
+    auto stranger = w.ackFor(70009, w.responder, 7, 5, 5000);
+    CHECK(w.box.heard(stranger.data(), stranger.size(), 1000) == 0);
+    uint8_t otherGroup[16] = {9, 9, 9};
+    auto elsewhere = w.ackFor(70009, w.responder, 2, 5, 5000, otherGroup);
+    CHECK(w.box.heard(elsewhere.data(), elsewhere.size(), 1000) == 0);
+    // A responder's acknowledgement of another unit's call: its time, only if it is later.
+    auto other = w.ackFor(70009, w.responder, 2, 5, 5000);
+    CHECK(w.box.heard(other.data(), other.size(), 1000) == 5000);
+    CHECK(w.box.heard(other.data(), other.size(), 5000) == 0);
+    CHECK(w.box.screen().status == CallerStatus::waitingForResponder);
+    // An acknowledgement of this box's call counts as before, and never lowers the clock.
+    auto mine = w.ack(w.responder, 2, 1, 900);
+    CHECK(w.box.heard(mine.data(), mine.size(), 1000) == 0);
+    CHECK(w.box.screen().status == CallerStatus::seen);
+    // A signed call state, from any current member.
+    CallStateFrame ok{70009, 5, CallState::callerOK, 6000, 0, {}};
+    uint8_t inner[16];
+    size_t n = encode(ok, inner, sizeof inner);
+    auto byCaller = w.signedBy(w.caller, 3, inner, n);
+    CHECK(w.box.heard(byCaller.data(), byCaller.size(), 5000) == 6000);
+    auto misnamed = w.signedBy(w.caller, 2, inner, n);
+    CHECK(w.box.heard(misnamed.data(), misnamed.size(), 5000) == 0);
 }
 
 TEST(aPowerCutIsNotReportedWithoutOptInOrARespondersKey) {
@@ -554,10 +620,10 @@ TEST(aCoordinatorsSignedCloseClosesTheCall) {
     uint8_t inner[16];
     size_t n = encode(close, inner, sizeof inner);
     auto byResponder = w.signedBy(w.responder, 2, inner, n);
-    w.box.heard(byResponder.data(), byResponder.size());
+    w.box.heard(byResponder.data(), byResponder.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::waitingForResponder);
     auto byCoordinator = w.signedBy(w.coordinator, 1, inner, n);
-    w.box.heard(byCoordinator.data(), byCoordinator.size());
+    w.box.heard(byCoordinator.data(), byCoordinator.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::closed);
     w.box.tick(30000, 1030);
     CHECK(w.port.sent.size() == 1);
@@ -572,17 +638,17 @@ TEST(aCoordinatorCannotSpeakForTheCaller) {
     CallStateFrame byCaller{70004, 1, CallState::closedByCaller, 1100, 0, {}};
     size_t n = encode(byCaller, inner, sizeof inner);
     auto fake = w.signedBy(w.coordinator, 1, inner, n);
-    w.box.heard(fake.data(), fake.size());
+    w.box.heard(fake.data(), fake.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::waitingForResponder && !w.box.call(0).settled);
     CallStateFrame ok{70004, 1, CallState::callerOK, 1100, 0, {}};
     n = encode(ok, inner, sizeof inner);
     auto fakeOK = w.signedBy(w.coordinator, 1, inner, n);
-    w.box.heard(fakeOK.data(), fakeOK.size());
+    w.box.heard(fakeOK.data(), fakeOK.size(), 0);
     CHECK(!w.box.call(0).settled);
     CallStateFrame consent{70004, 1, CallState::closedWithConsent, 1100, 0, {}};
     n = encode(consent, inner, sizeof inner);
     auto real = w.signedBy(w.coordinator, 1, inner, n);
-    w.box.heard(real.data(), real.size());
+    w.box.heard(real.data(), real.size(), 0);
     CHECK(w.box.screen().status == CallerStatus::closed && w.box.call(0).settledBy == 1);
 }
 
@@ -693,7 +759,7 @@ TEST(theBoxSleepsOnlyOnBatteryWithNothingToSendAgainAndNoPhone) {
     w.box.press(Colour::red, 510000, 1510, false);
     CHECK(!w.box.canSleep(false));  // an open call is resent until a person settles it
     auto seen = w.ack(w.responder, 2, 2, 1511);  // request 1 was the power-cut report
-    w.box.heard(seen.data(), seen.size());
+    w.box.heard(seen.data(), seen.size(), 0);
     CHECK(w.box.canSleep(false));
 
     w.box.press(Colour::green, 520000, 1520, false);
@@ -777,7 +843,7 @@ TEST(theHoursAreCountedAtTheAwakeDrawWhileACallOrAPhoneKeepsTheBoxUp) {
     CHECK(w.box.screen().hoursLeft == 30);
     uint16_t request = w.box.call(w.box.callCount() - 1).number;
     auto seen = w.ack(w.responder, 2, request, 1016);
-    w.box.heard(seen.data(), seen.size());
+    w.box.heard(seen.data(), seen.size(), 0);
     w.box.power(17000, 1017, false, 4200, false);
     CHECK(w.box.screen().hoursLeft == 3000);
 }
