@@ -445,7 +445,7 @@ Pass: in step 2 the internet route says the relay needs a pass for this group an
 
 ## Help&I firmware on the box
 
-Sections 46 to 58 need boxes running Help&I's own firmware (`firmware/build.sh`, environment `heltec_v4_helpandi` on a Heltec WiFi LoRa 32 V4 with the buttons, buzzer and mains divider of `firmware/DESIGN.md` section 5, or `heltec_v4_helpandi_dev` for a plain board). Nothing in them has been run: the firmware has only been compiled. The app side (adding a box to a group over Bluetooth, commands 0x71 and 0x72 in DESIGN.md section 6) is not built, so until it is, provision with a test tool that sends those bytes over the companion link, and say so in the run. "Box A" is a Help&I box in the group as its own member; phone B is a responder with its own stock box. Keep phone A off unless a step says otherwise.
+Sections 46 to 58 need boxes running Help&I's own firmware (`firmware/build.sh`, environment `heltec_v4_helpandi` on a Heltec WiFi LoRa 32 V4 with the buttons, buzzer and mains divider of `firmware/DESIGN.md` section 5, or `heltec_v4_helpandi_dev` for a plain board). Nothing in them has been run: the firmware has only been compiled. Provision with the app (section 60), or with a test tool that sends DESIGN.md section 6's bytes over the companion link, and say which in the run. "Box A" is a Help&I box in the group as its own member; phone B is a responder with its own stock box. Keep phone A off unless a step says otherwise.
 
 ## 46. The box's buttons with no phone
 
@@ -539,7 +539,7 @@ Pass: output is within the band's ERP limit with the antenna's gain. In step 2 t
 
 1. With phone A connected to box A and the internet on, press red on the box.
 
-Pass: phone A is told of the call (push 0xA3) and carries it on its own routes once the app side exists; phone B hears the call once, whether by the mesh or the internet, and box A shows "seen" after B acknowledges, by either route.
+Pass: phone A is told of the call (push 0xA3) and carries it on its own routes; phone B hears the call once, whether by the mesh or the internet, and box A shows "seen" after B acknowledges, by either route.
 
 ## 57. Provisioning over Bluetooth
 
@@ -576,7 +576,28 @@ Needs a Heltec V4 nobody needs afterwards: the eFuses are one-way. Keys as in `f
 
 Pass: step 2 boots to the pairing code, provisions and sends the call like any box. In step 3 the summary shows SECURE_BOOT_EN, SPI_BOOT_CRYPT_CNT 7 and the two keys, and the read is refused. Step 4 does not boot (a plain image on an encrypted box); step 5 boots again. Say in the run which esptool version was used.
 
-## 60. A coordinator takes over from a lost phone
+## 60. Adding a Help&I box with the app
+
+Needs box A unprovisioned, phone A in the group as a caller (not a coordinator), phone B as the group's first coordinator, and a third board logging the channel. Internet on for both phones.
+
+1. On phone A, pair with box A in the Box tab.
+2. On phone B, pair with box A instead of its own box. In the Box tab, give it a name and tap Add this box to the group.
+3. On phone B, open the box's member page, turn on Tell responders about a power cut at their home, and pair phone B with its own box again.
+4. On phone A, pair with box A again and open the Box tab. Press red on box A with phone A's Bluetooth on, then with it off.
+5. On phone B, acknowledge each call. Then, in Advanced settings, turn on Responders' first names on boxes, press red on box A and acknowledge on phone B. Turn it off again, and press and acknowledge once more.
+6. On phone B, set box A's antenna to an external antenna in its member page.
+7. Pair phone A with a box on MeshCore's stock firmware.
+
+Pass: in step 1 the Box tab says Firmware: Help&I box and asks phone A's person to ask their coordinator, and box A still shows "Not set up yet". In step 2 the box appears in the member list on both phones as a caller with its own unit, and box A shows it is set up within a minute. In step 4 the Box tab shows the box's name, unit, Set up, On mains and the call with its status as the box shows it; phone A shows no alert for the box's call and phone B hears it once (by both the radio and the internet when phone A's Bluetooth is on, by the radio only when off). With Bluetooth on, box A shows "seen" after phone B acknowledges even when phone B's acknowledgement goes only by the internet (phone B's box off). In step 5 box A says "Sam has seen your call." (phone B's person's first name) with names on, and "A responder has seen your call." again once they are off; the third board hears no name on air. In step 6 the box's power cap in its info changes without pairing again. In step 7 the Box tab says Firmware: MeshCore box and nothing else changes.
+
+## 61. A power cut, as the phones show it
+
+1. Section 53, steps 1 to 3 (or, without the mains wire, step 6), with box A added as in section 60 and its power-cut report on, and phone A connected to it.
+2. Repeat with box A's report off on its member page.
+3. Pair phone A with a stock MeshCore box on its mains adapter, keep the app open on the Help tab for an hour, then switch the adapter off and keep the app open for another hour.
+
+Pass: in step 1 phone B shows a calm notification, "<box name>: power cut at home" ("probably a power cut" without the wire), not a call for help, and the Respond tab shows "Power cut at their home. Their box is on its battery." with the battery notes, until someone acknowledges; phone A shows no alert, and its Box tab shows the power cut and the hours left. In step 2 nothing reaches phone B. In step 3 nothing shows for the first hour; within about half an hour of the adapter going off, the Help tab says the box is running on its battery and offers Tell my responders, and tapping it sends a Need a hand that phone B sees with the note "Power probably cut: the battery is falling.". The offer never shows with box A, which reports for itself.
+## 62. A coordinator takes over from a lost phone
 
 Needs phone B as the first coordinator, phones C and D as coordinators (section 23) and phone A as a
 caller, all with boxes and the internet route.

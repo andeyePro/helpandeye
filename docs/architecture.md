@@ -12,7 +12,7 @@ For contributors. What each part does and where its code is. The rules it follow
 | Home Wi-Fi listener | `app/helpandeyeLocalPush` | A local push extension iOS runs on the named home Wi-Fi with the phone locked: it joins the first group's phones as the app does and alerts for a call (decision 19). It confirms only the calls it alerts for, so anything else sent to it goes on by the sender's other routes. Needs a signed build. |
 | Watch app | `app/helpandeyeWatch` | Three buttons and a Help complication. In reach of its phone it sends through the phone. Out of reach it runs its own `HelpEngine` for each of the phone's groups, as the same member, and calls and responds over its own internet connection (`WatchHandover`); its calls are numbered 32768 and up, apart from the phone's. Back in reach it gives the phone the calls it is still sending and the acknowledgements it made, and the phone's application context gives it the calls a person settled there, with their signed acknowledgements, so neither alerts for a call the other's owner has answered. |
 | Box (prototype) | any Heltec LoRa board | MeshCore's standard companion firmware, unchanged. The app writes the group's private channel into it. |
-| Box firmware | `firmware/` | Help&I's own build of MeshCore's companion firmware for the Heltec WiFi LoRa 32 V4 (option A, `firmware/DESIGN.md`): red, amber and green buttons, a buzzer, the screen, resends, acknowledgement checking, I'm OK, the duty-cycle budget and power cap, and a sealed power-cut and battery report, with the box as its own group member. The logic is a portable C++ core (`firmware/core`) with host tests (`make test`); `firmware/box` is the overlay on a pinned MeshCore commit and `firmware/build.sh` builds it. Compiles; not yet run on a board. |
+| Box firmware | `firmware/` | Help&I's own build of MeshCore's companion firmware for the Heltec WiFi LoRa 32 V4 (option A, `firmware/DESIGN.md`): red, amber and green buttons, a buzzer, the screen, resends, acknowledgement checking, I'm OK, the duty-cycle budget and power cap, and a sealed power-cut and battery report, with the box as its own group member. The logic is a portable C++ core (`firmware/core`) with host tests (`make test`); `firmware/box` is the overlay on a pinned MeshCore commit and `firmware/build.sh` builds it. Compiles; not yet run on a board. The app recognises it and sets it up (below). |
 | Relay | `relay/` | Cloudflare Worker. Stores and forwards sealed messages for the internet route. |
 
 ## A red press
@@ -106,6 +106,47 @@ for only some members (a change request, for the coordinators) counts only if on
 it in. A connection is dropped when who is in the group changes. A missing or late receipt does
 not prove nobody heard, so the cross says "Not sent. Nobody may know you need help.", not that
 nobody has been told.
+
+## A Help&I box and its phone
+
+`BoardLink` asks every box for MeshCore's device info; a version ending `-hi1` (or any `-hiN`) is
+a box on Help&I's firmware, and the Box tab says "Help&I box" against "MeshCore box". A stock box
+gets none of what follows. The bytes are those of `firmware/DESIGN.md` section 6; `HelpBox.swift`
+builds and reads them, and its tests pin them to DESIGN.md's tables and to bytes the firmware core
+wrote.
+
+- **The box as its own member.** It joins as a caller with its own unit. A coordinator pairs
+  their phone with it once and taps Add this box: the phone takes the box's signing key (its
+  MeshCore public key) and its sealing key (from the info reply, 0xA0), and adds it with the usual
+  signed member add, so every phone knows it. Anyone else's phone says to ask the coordinator.
+  While a phone is paired with a box, that box's calls count as its household's own: the phone
+  is never alerted for them, as for its own (`HelpEngine.pairedBoxUnit`), which also holds for a
+  coordinator who has paired with someone's box to add it.
+- **Setting it up.** The phone of the first group sends the group (0x71), the member list (0x72)
+  and, if the group puts them on boxes, responders' first names (0x76): at pairing, at joining,
+  and after any change of members or settings, sending only the parts that changed
+  (`HelpBox.Sync`), and all of them again when the info reply says the box holds nothing. Names
+  are off unless a coordinator turns them on (Advanced settings); with them off nothing is sent,
+  except an empty list to a box that still holds some. The power-cut report is a coordinator's
+  choice for each unit (its member page), and the antenna sets the box's power cap, both in 0x71.
+- **The box's own frames.** The box sends its call on the radio itself, and pushes it (0xA3) to
+  its phone, which keeps it as an `OutgoingRequest` marked `fromBox`, sends it on its other routes
+  (internet, home Wi-Fi), resends it there like its own, and answers the box with 0x74: whether a
+  route took it. Its signed I'm OK or close, and a sealed report, are taken in as if heard on the
+  radio and carried the same way. The phone's own buttons, notes and I'm OK never touch the box's
+  calls. An acknowledgement or a coordinator's close of the box's call that reached the phone
+  another way goes on the radio, so the box, which hears only the radio, can show it.
+- **A power cut.** The box's report is a request of its own with a Power cut follow-up and notes,
+  sealed for responders. A responder's phone shows it calmly ("power cut at home", a calm
+  notification, reminders every half hour and then every two hours) until a person acknowledges.
+  A box without the mains wire adds the note "Power probably cut: the battery is falling.", and
+  the phone then says "probably".
+- **A stock box's battery.** A stock box tells the phone only its battery voltage. While the app
+  runs, `BatteryWatch` reads it once a minute and decides on the mains exactly as the firmware's
+  `MainsEstimate` does without the wire, so a full cell resting or a charger finishing never looks
+  like a cut. If it judges the power gone, the caller is offered to tell responders: a Need a hand
+  with the same "probably" note. The app is not running when iOS has suspended it, so this is a
+  help, not a promise.
 
 ## Keys
 

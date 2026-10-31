@@ -9,7 +9,8 @@ lists what is still open. Items marked **Proposed** are not yet agreed.
 - iOS phone app and watchOS app. Android follows.
 - One app with two roles: a person can be a caller, a responder, or both.
 - Routes: internet (mobile data or Wi-Fi), SMS, and the MeshCore mesh through a Heltec board on
-  MeshCore's standard companion firmware, over Bluetooth.
+  MeshCore's standard companion firmware, or Help&I's own build of it (a Help&I box), over
+  Bluetooth.
 
 ## Groups and roles
 
@@ -172,6 +173,34 @@ Agreed with Martin, 2026-10-28 ([decision 6](design-decisions.md#d6)).
   over its own internet, numbering its calls apart from the phone's. Back in reach the two
   reconcile: the phone takes the watch's calls and acknowledgements, and the watch takes the
   calls settled on the phone. The watch shows when outdated keys stop, as the phone does.
+
+## A Help&I box
+
+A box on Help&I's own firmware (firmware/DESIGN.md) has its own buttons and is a member of the
+group in its own right, so it calls for help with no phone.
+
+- The Box tab says whether the paired box is a Help&I box or a MeshCore box. Nothing changes for a
+  MeshCore box.
+- A coordinator adds a Help&I box from their Box tab, while their phone is paired with it, giving
+  it a name such as "Kitchen box at no. 4". It joins as a caller with its own unit number. Anyone
+  else paired with a box not yet in the group is told to ask their coordinator to do this.
+- Once added, the phone paired with the box keeps it set up with the group, its members and its
+  settings, whenever they change. The Box tab shows its name, unit, whether it is set up, its
+  power, and its calls as the box shows them.
+- A call from the box goes on the radio from the box, and on the internet and home Wi-Fi from the
+  phone paired with it. That phone never alerts for it, as for its own calls.
+- A coordinator chooses, on each member's page, whether their box tells responders about a power
+  cut at their home (decisions 3 and 4). Off unless chosen. Responders get a calm notification
+  ("power cut at home", or "probably a power cut at home" from a box without the mains wire) and
+  battery notes, until one of them acknowledges.
+- Responders' first names on boxes, so a box can say "Pat has seen your call.": a group setting
+  under Advanced settings, off unless a coordinator turns it on, as Martin may still decide against
+  names on boxes (firmware/DESIGN.md, section 14). Not for boxes in homes until their flash
+  protects the names (DESIGN.md, section 16).
+- With a MeshCore box, which cannot sense the mains, the app watches the box's battery while it
+  is open. When it falls as it does in a power cut, the Help tab offers to tell responders, as a
+  Need a hand with the note "Power probably cut: the battery is falling.". The caller chooses;
+  nothing is sent on its own.
 
 ## Keys and setting up a group
 
