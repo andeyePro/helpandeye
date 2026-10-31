@@ -114,6 +114,7 @@ final class ScreensTests: XCTestCase {
         // A row of a long list is not in the hierarchy until it is scrolled near the screen.
         let choice = reveal(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Make Hill Road my first group")).firstMatch)
         XCTAssert(choice.exists, "leave-first: no choice of the next first group")
+        still(choice)
         look("leave-first-choice")
         // The audit relays the screen out at other text sizes, which can scroll a row off it.
         reveal(choice).tap()
@@ -242,6 +243,17 @@ final class ScreensTests: XCTestCase {
         for _ in 0..<15 where !hittable(e) { app.swipeUp(velocity: .fast) }
         for _ in 0..<30 where !hittable(e) { app.swipeDown(velocity: .slow) }
         return e
+    }
+
+    /// Waits until the list stops scrolling a row into place: the audit reads where it was.
+    private func still(_ e: XCUIElement) {
+        var last = e.frame
+        for _ in 0..<10 {
+            Thread.sleep(forTimeInterval: 0.5)
+            let now = e.frame
+            if now == last { return }
+            last = now
+        }
     }
 
     /// A row a list is still rebuilding has no usable frame for a moment, and asking whether it can
