@@ -198,12 +198,12 @@ public struct GroupState: Codable, Equatable, Sendable {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(useDistance, forKey: .useDistance)
             try c.encode(profiles, forKey: .profiles)
-            try c.encode(profileOf, forKey: .profileOf)
+            try c.encodeInOrder(profileOf, forKey: .profileOf)
             try c.encode(keepsLog, forKey: .keepsLog)
-            try c.encode(antennaOf, forKey: .antennaOf)
+            try c.encodeInOrder(antennaOf, forKey: .antennaOf)
             try c.encode(reportsPowerCut.sorted(), forKey: .reportsPowerCut)
             try c.encode(namesOnBox, forKey: .namesOnBox)
-            try c.encode(boxHome, forKey: .boxHome)
+            try c.encodeInOrder(boxHome, forKey: .boxHome)
         }
 
         /// The fields of the policy in a group's or its settings' JSON, as another phone wrote it.
@@ -839,5 +839,14 @@ func randomNonZero(_ n: Int) -> Data {
     while true {
         let d = randomBytes(n)
         if d.contains(where: { $0 != 0 }) { return d }
+    }
+}
+
+extension KeyedEncodingContainer {
+    /// A dictionary keyed by member number, written as JSON writes one (key, value, key, value)
+    /// but in member order, so the same settings always make the same bytes and the same size.
+    mutating func encodeInOrder<V: Encodable>(_ d: [UInt16: V], forKey key: Key) throws {
+        var u = nestedUnkeyedContainer(forKey: key)
+        for k in d.keys.sorted() { try u.encode(k); try u.encode(d[k]!) }
     }
 }

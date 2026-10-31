@@ -17,9 +17,12 @@ extension GroupState {
 
     public var settings: GroupSettings { GroupSettings(policy: policy, relayURL: relayURL, relayPass: relayPass) }
 
+    /// Keys in order, so the same settings always compress to the same size.
+    private static let settingsEncoder: JSONEncoder = { let e = JSONEncoder(); e.outputFormatting = .sortedKeys; return e }()
+
     /// The settings as a signed frame from coordinator `signer`.
     public func settingsFrame(as signer: UInt16, identity: DeviceIdentity) -> HelpFrame? {
-        guard let json = try? JSONEncoder().encode(settings), let data = try? (json as NSData).compressed(using: .zlib) as Data,
+        guard let json = try? Self.settingsEncoder.encode(settings), let data = try? (json as NSData).compressed(using: .zlib) as Data,
               data.count <= HelpFrame.maxSettingsBytes else { return nil }
         let input = Self.settingsInput(group: secrets.groupID, signer: signer, version: settingsVersion, settings: data)
         guard let sig = try? identity.signingKey.signature(for: input) else { return nil }

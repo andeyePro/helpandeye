@@ -2,6 +2,20 @@ import XCTest
 @testable import helpandeyeCore
 
 final class ProfileTests: XCTestCase {
+    /// The same settings always make the same bytes, whatever order they were set in, so whether
+    /// they fit the radio never depends on chance.
+    func testTheSameSettingsAlwaysMakeTheSameBytes() throws {
+        var a = GroupState.StoredPolicy(), b = GroupState.StoredPolicy()
+        for m in UInt16(1)...40 { a.boxHome[m] = m + 100; a.profileOf[m] = UInt8(m % 3) }
+        for m in (UInt16(1)...40).reversed() { b.profileOf[m] = UInt8(m % 3); b.boxHome[m] = m + 100 }
+        let e = JSONEncoder()
+        let ea = try e.encode(a), eb = try e.encode(b)
+        XCTAssertEqual(ea, eb)
+        let back = try JSONDecoder().decode(GroupState.StoredPolicy.self, from: e.encode(a))
+        XCTAssertEqual(back.boxHome, a.boxHome)
+        XCTAssertEqual(back.profileOf, a.profileOf)
+    }
+
     func testTheStandardProfile() {
         let p = Profile.standard
         XCTAssertEqual(p.face, .wordsAndSymbol, "words and a symbol together by default")
