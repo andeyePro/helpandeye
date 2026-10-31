@@ -14,28 +14,33 @@ import UserNotifications
 /// extension does) and the local push entitlement.
 final class LocalPushProvider: NEAppPushProvider {
     private var home: HomeWiFi?
-    private var recheck: Timer?
+    private var recheck: Task<Void, Never>?
 
     override func start() {
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
             let home = HomeWiFi()
             home.keeps = { frame in
                 guard case let .call(unit, _, colour, _) = frame, colour != .green, let me = Self.current()?.me else { return false }
                 return me.canRespond && unit != me.unit
             }
-            home.onFrame = { [weak self] frame in
+            home.onFrame = { frame in
                 if let saved = SharedStore.saved() { self?.alert(for: frame, saved: saved) }
                 self?.follow()
             }
-            self.home = home
-            follow()
-            recheck = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.follow() } }
+            self?.home = home
+            self?.follow()
+            self?.recheck = Task { @MainActor in
+                while !Task.isCancelled, self != nil {
+                    try? await Task.sleep(for: .seconds(60))
+                    self?.follow()
+                }
+            }
         }
     }
 
     override func stop(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         Task { @MainActor in
-            recheck?.invalidate()
+            recheck?.cancel()
             recheck = nil
             if let identity = SharedStore.identity() { self.home?.configure(group: nil, me: nil, identity: identity) }
             self.home = nil
