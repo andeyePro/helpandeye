@@ -152,7 +152,7 @@ extension GroupState {
     /// Returns the box's member number, or nil if a key is not one, `home` is not a member, the box
     /// is a member already, or this coordinator's numbers are used up.
     public mutating func addBox(key: Data, sealKey seal: Data, name: String, home: UInt16, by coordinator: UInt16?) -> UInt16? {
-        guard key.count == 32, seal.count == 32, seal != Data(count: 32), boxMember(key: key) == nil, member(home) != nil,
+        guard key.count == 32, seal.count == 32, seal != Data(count: 32), boxMember(key: key) == nil, let person = member(home), !isBox(person),
               let number = nextMemberNumber(by: coordinator) else { return nil }
         membershipVersion += 1
         highestMember = max(highestMember, number)
@@ -169,10 +169,14 @@ extension GroupState {
     }
 
     /// Whether this box is in `member`'s home: it calls under their unit, or a coordinator chose
-    /// them for it. Merely having set it up, or being connected to it, never makes it anyone's.
+    /// them for it. Merely having set it up, or being connected to it, never makes it anyone's,
+    /// and another box is no one's home, whatever an older phone chose.
     public func box(_ box: Member, isHomeOf member: Member) -> Bool {
-        (box.unit != nil && box.unit == member.unit) || policy.boxHome[box.number] == member.number
+        (box.unit != nil && box.unit == member.unit) || (policy.boxHome[box.number] == member.number && !isBox(member))
     }
+
+    /// Whether this member is a Help&I box: every box added is given a home. Only people are homes.
+    public func isBox(_ member: Member) -> Bool { policy.boxHome[member.number] != nil }
 
     /// Whether this box is in anyone's home. One added before its home had to be chosen, or whose
     /// person has left the group, is in no one's.

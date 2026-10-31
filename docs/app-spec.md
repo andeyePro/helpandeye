@@ -184,7 +184,8 @@ group in its own right, so it calls for help with no phone.
   MeshCore box.
 - A coordinator adds a Help&I box from their Box tab, while their phone is paired with it, giving
   it a name such as "Kitchen box at no. 4", and chooses whose home it is in (they can change it
-  there later, but not to no one). It cannot be added until both are given. It joins as a caller
+  there later, but not to no one). Only people are offered as a box's home, never another box.
+  It cannot be added until both are given. It joins as a caller
   with its own unit number. Anyone else paired with a box not yet in the group is told to ask
   their coordinator to do this.
 - Once added, the phone paired with the box keeps it set up with the group, its members and its
@@ -192,11 +193,13 @@ group in its own right, so it calls for help with no phone.
   power, and its calls as the box shows them.
 - A call from the box goes on the radio from the box, and on the internet and home Wi-Fi from the
   phone of the person whose home it is in, while it is paired with it. That phone never alerts
-  for it, as for its own calls. Any other phone paired with it, a coordinator's included, alerts
+  for it, as for its own calls, and nor does their watch. Any other phone paired with it, a coordinator's included, alerts
   for it as usual. A call made while that phone was away goes from it when it next connects.
   A box in no one's home (one added before a home had to be chosen, or whose person has left the
   group) has its calls carried by whichever phone is paired with it, which still alerts for them.
-- A box whose member is removed is told to forget the group by the phone paired with it.
+- A box whose member is removed is told to forget the group by the phone paired with it. So is
+  the box in someone's home when they leave their first group for another of theirs that does not
+  have the box; one the new group has is set up for it instead.
 - A coordinator chooses, on each member's page, whether their box tells responders about a power
   cut at their home (decisions 3 and 4). Off unless chosen. Responders get a calm notification
   ("power cut at home", or "probably a power cut at home" from a box without the mains wire) and

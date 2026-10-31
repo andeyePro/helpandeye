@@ -94,7 +94,7 @@ struct HelpBoxSection: View {
                 if let unit = member.unit { LabeledContent("Unit", value: String(unit)) }
                 if model.me?.role == .coordinator {
                     BoxHomePicker(box: member.number, home: Binding(get: { model.group.flatMap { g in g.policy.boxHome[member.number].flatMap { g.member($0)?.number } } },
-                                                                    set: { h in model.updateGroup { $0.policy.boxHome[member.number] = h } }))
+                                                                    set: { h in if let h { model.setHome(ofBox: member.number, to: h) } }))
                 } else if let h = model.group?.policy.boxHome[member.number], let who = model.group?.member(h) {
                     LabeledContent("In the home of", value: who.name)
                 }
@@ -159,7 +159,7 @@ struct BoxHomePicker: View {
     var body: some View {
         Picker("In the home of", selection: $home) {
             if home == nil { Text("Choose someone").tag(UInt16?.none) }
-            ForEach(model.group?.members.filter { $0.number != box } ?? []) { m in
+            ForEach(model.group.map { g in g.members.filter { $0.number != box && !g.isBox($0) } } ?? []) { m in
                 Text(m.name).tag(Optional(m.number))
             }
         }

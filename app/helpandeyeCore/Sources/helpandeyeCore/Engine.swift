@@ -174,6 +174,9 @@ public struct Activity: Codable, Sendable {
     /// The coordinator whose takeover was followed in place of this phone's own, until this phone
     /// has their update code.
     public var tookOverFirst: UInt16?
+    /// The household's Help&I box when this phone left the group it is set up for, told to
+    /// forget that group once this phone is in another that does not have it.
+    public var leftGroupBox: Data?
 
     public init() {}
 }
@@ -270,7 +273,12 @@ public final class HelpEngine: ObservableObject {
         guard let g = group, let me, let box = g.boxMember(key: mesh.boxPublicKey), g.box(box, isHomeOf: me) else { return nil }
         return box.unit
     }
-    private func isHousehold(_ unit: UInt32) -> Bool { unit == me?.unit || unit == householdBoxUnit }
+    private func isHousehold(_ unit: UInt32) -> Bool {
+        guard let me else { return false }
+        // A watch is never connected to the box: its owner's phone carries the box's calls, and
+        // the escalation order leaves them out, so the watch goes by the group alone.
+        return unit == me.unit || unit == householdBoxUnit || (companion && group?.isHousehold(me, ofUnit: unit) == true)
+    }
 
     /// Runs `work` and remembers it, so tests can wait for every send to finish.
     private func spawn(_ work: @escaping @MainActor () async -> Void) {
@@ -406,11 +414,19 @@ public final class HelpEngine: ObservableObject {
     }
 
     public func leave() {
+        let box = householdBoxUnit != nil ? mesh.boxPublicKey : activity.leftGroupBox
         setState(nil)
         // The radio's record of the last hour belongs to the box, not the group: keep it.
         var fresh = Activity()
         fresh.airtime = activity.airtime
+        fresh.leftGroupBox = box
         activity = fresh
+        // What this phone remembers of the group's boxes, member lists and acknowledgements is by
+        // member number and call, which mean other people in the next group.
+        answeredBoxes = []; boxesToAnswer = []; lastBoxAnswer = nil; previousBlocks = [:]; forgottenBox = nil
+        publishedList = nil; publishedAt = nil; refusedList = nil; refusedPass = nil; lastPublishTry = nil; publishBackoff = 60
+        lastReAck = [:]; lastTopUp = [:]; ackAttempt = [:]; ackSends = [:]
+        settingsProblem = nil; takeoverProblem = nil
         alerts.cancelAll()
     }
 
@@ -419,8 +435,10 @@ public final class HelpEngine: ObservableObject {
     /// acknowledgements, rota and log, and this engine's alerts take over from the other's.
     public func adopt(_ s: SavedState, activity a: Activity) {
         var a = a
-        // The radio's record of the last hour belongs to the box, not the group.
+        // The radio's record of the last hour, and the box set up for the group left, belong to
+        // the box, not the group.
         a.airtime = activity.airtime
+        a.leftGroupBox = activity.leftGroupBox
         activity = a
         setState(s)
         for r in activity.inbox.requests.values where r.isOpen { scheduleAlerts(for: r.key) }
@@ -965,7 +983,7 @@ public final class HelpEngine: ObservableObject {
     public func addBox(key: Data, sealKey: Data, name: String, home: UInt16) -> String? {
         guard actsAsCoordinator, let g = group else { return "Only a coordinator can add a box to the group" }
         guard g.boxMember(key: key) == nil else { return "This box is already in the group" }
-        guard g.member(home) != nil else { return "Choose whose home the box is in" }
+        guard let person = g.member(home), !g.isBox(person) else { return "Choose whose home the box is in" }
         let me = saved?.me
         var added: UInt16?
         updateGroup { added = $0.addBox(key: key, sealKey: sealKey, name: name, home: home, by: me) }
@@ -974,6 +992,16 @@ public final class HelpEngine: ObservableObject {
         guard group?.boxMember(key: key) != nil else { return settingsProblem ?? "This box could not be added" }
         log("You added the box \(name)")
         return nil
+    }
+
+    /// A coordinator chooses whose home a Help&I box is in: a person's, never another box's.
+    /// Returns why it could not be, if it could not.
+    @discardableResult
+    public func setHome(ofBox box: UInt16, to home: UInt16) -> String? {
+        guard actsAsCoordinator, let g = group else { return "Only a coordinator can choose a box's home" }
+        guard g.member(box) != nil, home != box, let person = g.member(home), !g.isBox(person) else { return "Choose whose home the box is in" }
+        updateGroup { $0.policy.boxHome[box] = home }
+        return group?.policy.boxHome[box] == home ? nil : settingsProblem
     }
 
     /// A frame the connected Help&I box made (push 0xA3): its call, its signed I'm OK or close, or
@@ -1066,10 +1094,12 @@ public final class HelpEngine: ObservableObject {
 
     /// A Help&I box taken out of the group is told to forget it (0x75) by the phone connected to
     /// it, when it is removed and whenever that phone connects to it again, so it stops calling
-    /// on the group's channel as a member the others no longer accept.
+    /// on the group's channel as a member the others no longer accept. So is the household's box
+    /// once its phone has left the group for one that does not have it; one the new group has is
+    /// set up for it instead.
     private func forgetRemovedBox() {
-        guard let key = mesh.boxPublicKey, mesh.isReady, let g = group, g.removedKeys.contains(key), g.boxMember(key: key) == nil,
-              forgottenBox != key else { return }
+        guard let key = mesh.boxPublicKey, mesh.isReady, let g = group, g.boxMember(key: key) == nil,
+              g.removedKeys.contains(key) || activity.leftGroupBox == key, forgottenBox != key else { return }
         forgottenBox = key
         spawn { await self.mesh.tellBoxToForget() }
     }

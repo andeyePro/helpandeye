@@ -665,6 +665,72 @@ final class HelpBoxTests: XCTestCase {
         XCTAssertEqual(household.mesh.forgets, 0)
     }
 
+    /// Pat's watch is never connected to the box, so it went by the connection and alerted Pat for
+    /// the box's call after everyone else's turn. The call is the household's own, which Pat's
+    /// phone carries: the watch leaves it alone too.
+    func testTheHouseholdsWatchLeavesTheBoxsCallToThePhone() async throws {
+        let watch = Phone(air: air, clock: clock, watchOf: household)
+        XCTAssertTrue(watch.engine.take(WatchHandover(saved: household.engine.saved!, identity: household.identity)))
+        watch.mesh.isReady = false
+        watch.relay.isConfigured = true
+        _ = await household.engine.receiveFromBox(boxCall(1))
+        await air.run()
+        XCTAssertNotNil(responder.alerts.scheduled[key], "a responder is alerted")
+        XCTAssertNil(watch.alerts.scheduled[key], "Pat's watch is not")
+        XCTAssertNil(watch.engine.activity.inbox.requests[key])
+        XCTAssertFalse(watch.engine.takes(boxCall(1)))
+        let jo = Phone(air: air, clock: clock, watchOf: responder)
+        XCTAssertTrue(jo.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity)))
+        XCTAssertTrue(jo.engine.takes(boxCall(1)), "anyone else's watch responds to it")
+    }
+
+    /// Pat leaves Mill Lane for Hill Road, where they also respond. The box in Pat's home is set up
+    /// for Mill Lane and Hill Road does not have it: it is told to forget Mill Lane. And Pat's phone
+    /// forgets which of Mill Lane's boxes it had answered: member 1 is Sam there, Ann here.
+    func testLeavingTheFirstGroupForAnotherForgetsItsBoxAndWhatItKnewOfIt() async throws {
+        let hill = Phone(air: air, clock: clock)
+        hill.engine.createGroup(name: "Hill Road", myName: "Ann", call: false)
+        let invite = Joining.invitation(for: hill.engine.group!, coordinator: hill.identity)
+        let request = Joining.request(invite, name: "Pat", call: false, respond: true, me: household.identity)
+        var welcome: Joining.Welcome?
+        hill.engine.updateGroup { g in welcome = try! Joining.admit(request, to: &g, invite: invite, coordinator: hill.identity) }
+        let pat = try XCTUnwrap(welcome).memberNumber
+        let joined = try Joining.open(welcome!, invite: invite, me: household.identity)
+        await hill.engine.boxReady()
+        await air.run()
+        XCTAssertEqual(household.mesh.forgets, 0)
+        air.groupSends = []
+        household.engine.leave()
+        household.engine.adopt(SavedState(group: joined, me: pat), activity: Activity())
+        await air.run()
+        XCTAssertEqual(household.mesh.forgets, 1, "0x75: the box no longer calls Mill Lane as Pat's")
+        let boards = air.groupSends.filter { if case let .board(m, _, _) = $0 { m == pat } else { false } }
+        XCTAssertEqual(boards.count, 2, "Pat's box announced, then the answer to Ann's box")
+        await household.engine.boxReady()
+        await air.run()
+        XCTAssertEqual(household.mesh.forgets, 2, "again on connecting, in case the first was lost")
+    }
+
+    func testOnlyAPersonMayBeABoxsHome() throws {
+        let box = boxMember, pat = household.engine.saved!.me, jo = responder.engine.saved!.me
+        let hall = DeviceIdentity()
+        XCTAssertEqual(coordinator.engine.addBox(key: hall.signingPublicKey, sealKey: hall.publicKey, name: "Hall box", home: box),
+                       "Choose whose home the box is in")
+        XCTAssertNil(coordinator.engine.group!.boxMember(key: hall.signingPublicKey))
+        XCTAssertNil(coordinator.engine.addBox(key: hall.signingPublicKey, sealKey: hall.publicKey, name: "Hall box", home: pat))
+        let second = try XCTUnwrap(coordinator.engine.group!.boxMember(key: hall.signingPublicKey)).number
+        XCTAssertEqual(coordinator.engine.setHome(ofBox: second, to: box), "Choose whose home the box is in")
+        XCTAssertEqual(coordinator.engine.setHome(ofBox: second, to: second), "Choose whose home the box is in")
+        XCTAssertEqual(coordinator.engine.group!.policy.boxHome[second], pat)
+        XCTAssertNil(coordinator.engine.setHome(ofBox: second, to: jo))
+        XCTAssertEqual(coordinator.engine.group!.policy.boxHome[second], jo)
+        XCTAssertNotNil(household.engine.setHome(ofBox: second, to: pat), "only a coordinator chooses")
+        // Chosen by an older phone, another box is still no one's home.
+        var g = coordinator.engine.group!
+        g.policy.boxHome[second] = box
+        XCTAssertFalse(g.hasHome(try XCTUnwrap(g.member(second))))
+    }
+
     /// The box's calls as its 0x73 reply gives them (firmware/DESIGN.md, section 6: request u16,
     /// colour u8, pressed at u32, status u8, acknowledgements u8; then 0xA2), pressed ten minutes
     /// ago while Pat's phone was away, and one the phone already carries, pressed now.

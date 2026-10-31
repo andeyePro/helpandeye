@@ -125,18 +125,22 @@ wrote.
   phone with it once and taps Add this box: the phone takes the box's signing key (its MeshCore
   public key) and its sealing key (from the info reply, 0xA0), and adds it with the usual signed
   member add, so every phone knows it, with whose home it is in (the group setting `boxHome`, which
-  the coordinator can change later): no box is added without one. Anyone else's phone says to ask
+  the coordinator can change later): no box is added without one, and only a person, never another
+  box, is a box's home (`GroupState.isBox`). Anyone else's phone says to ask
   the coordinator. A box's calls count as a phone's own household's only while that phone is
   connected to it and it is in that member's home: it calls under their unit, or the coordinator
   chose them for it (`HelpEngine.householdBoxUnit`). That phone is never alerted for them, as for
-  its own, and carries them. Any other phone connected to it, such as a coordinator's adding or
+  its own, and carries them; nor is that member's watch, which is never connected to a box and
+  goes by the group alone. Any other phone connected to it, such as a coordinator's adding or
   setting it up, only hears what it pushes, as if on the radio, so a coordinator who responds is
   alerted from their turn like everyone else. Every phone leaves the member whose home the box is in
   out of the escalation order for its calls (`GroupState.isHousehold`), so the next responder is not
   reached a turn late. A box in no one's home (`GroupState.hasHome`: added before a home had to be
   chosen, or its person has left) would be heard on the radio only, so the phone connected to it
   also carries its calls and signed or sealed frames on its other routes, keeping no record of them
-  as its own and alerting for them from its turn.
+  as its own and alerting for them from its turn. A phone that leaves the group for another of
+  its groups, which becomes its first, tells the box in its home to forget the group left (0x75)
+  unless the new group has it, when it sets the box up for that one instead (`Activity.leftGroupBox`).
 - **Setting it up.** The phone of the first group sends the group (0x71), the member list (0x72)
   and, if the group puts them on boxes, responders' first names (0x76): at pairing, at joining,
   and after any change of members or settings, sending only the parts that changed

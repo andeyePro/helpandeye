@@ -165,6 +165,7 @@ final class AppModel: ObservableObject {
         return engine.addBox(key: key, sealKey: info.sealKey, name: name, home: home)
     }
 
+    func setHome(ofBox box: UInt16, to home: UInt16) { engine.setHome(ofBox: box, to: home) }
     func tellRespondersOfProbablePowerCut() -> String? { engine.tellRespondersOfProbablePowerCut() }
 
     /// Before profiles, a caller's sounds and sharing where they are were switches kept on this
