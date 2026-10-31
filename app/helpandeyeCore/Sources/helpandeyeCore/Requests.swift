@@ -63,6 +63,9 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     private var categoryParts: [CallCategory: UInt8] = [:]
     public private(set) var notes: [String] = []
     public private(set) var acknowledgedBy: [UInt16] = []
+    /// The signed acknowledgements behind `acknowledgedBy`, so the phone can give its watch the
+    /// ones for the watch's calls to check for itself where it cannot hear them.
+    public private(set) var acks: [UInt16: HelpFrame] = [:]
     public private(set) var settled: Settled?
     /// Made on the household's Help&I box, not this phone: the box sends it on the radio and
     /// settles it, and the phone carries it on its other routes (firmware/DESIGN.md, section 4).
@@ -81,6 +84,7 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     /// before this phone learned it had been removed must not go on reassuring the caller.
     public mutating func revoke(keeping members: Set<UInt16>) {
         acknowledgedBy.removeAll { !members.contains($0) }
+        acks = acks.filter { members.contains($0.key) }
     }
 
     /// Follow-ups, notes and positions share one numbering, so each part is distinct.
@@ -178,6 +182,7 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
         guard case let .ack(u, r, who, at, _) = frame, u == unit, r == number,
               TimeInterval(at) >= createdAt.timeIntervalSince1970 - Self.clockAllowance else { return }
         if !acknowledgedBy.contains(who) { acknowledgedBy.append(who) }
+        if acks[who] == nil { acks[who] = frame }
     }
 
     public var status: CallerStatus {
@@ -448,6 +453,7 @@ extension OutgoingRequest {
         categoryParts = try c.value(.categoryParts, or: [:])
         notes = try c.value(.notes, or: [])
         acknowledgedBy = try c.value(.acknowledgedBy, or: [])
+        acks = try c.value(.acks, or: [:])
         settled = try c.decodeIfPresent(Settled.self, forKey: .settled)
         parts = try c.value(.parts, or: 0)
         resends = try c.value(.resends, or: 0)

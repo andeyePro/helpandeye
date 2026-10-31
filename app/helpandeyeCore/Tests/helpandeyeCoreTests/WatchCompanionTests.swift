@@ -106,6 +106,31 @@ import XCTest
         XCTAssertFalse(caller.engine.adopt(.call(unit: key.unit, request: 5, colour: .red, sentAt: 0)), "only watch-numbered calls")
     }
 
+    /// Open items: the watch's call acknowledged over the box alone. The phone keeps the signed
+    /// acknowledgement and gives it to the watch, which checks it and stops resending.
+    func testTheWatchsCallSeenWhereOnlyThePhoneHearsStopsResendingOnTheWatch() async {
+        watch.engine.press(.red)
+        XCTAssertTrue(caller.engine.adopt(watch.request!.callFrame))
+        await air.run()
+        let key = IncomingRequest.Key(unit: watch.request!.unit, request: watch.request!.number)
+        responder.relay.isConfigured = false
+        responder.engine.acknowledge(key)
+        await air.run()
+        XCTAssertEqual(caller.request?.status, .seen(responder: responder.engine.saved!.me))
+        XCTAssertEqual(watch.request?.status, .waitingForResponder, "the watch did not hear it")
+        let held = caller.engine.activity.outgoing.first { $0.number == key.request }!
+        XCTAssertEqual(Array(held.acks.keys), [responder.engine.saved!.me])
+        let decoded = try! JSONDecoder().decode(OutgoingRequest.self, from: JSONEncoder().encode(held))
+        XCTAssertEqual(decoded.acks, held.acks, "kept across a relaunch")
+        let forged = HelpFrame.signedAck(unit: key.unit, request: key.request, responder: responder.engine.saved!.me, at: clock.now,
+                                         identity: DeviceIdentity(), group: caller.engine.group!.secrets.groupID)
+        watch.engine.receive(forged, via: .internet)
+        XCTAssertEqual(watch.request?.status, .waitingForResponder, "only a signature the watch can check counts")
+        for ack in held.acks.values { watch.engine.receive(HelpFrame(ack.encoded())!, via: .internet) }
+        XCTAssertEqual(watch.request?.status, .seen(responder: responder.engine.saved!.me))
+        XCTAssertNil(watch.request?.nextResend, "and it stops resending")
+    }
+
     /// Codex NR2: the watch's I'm OK, reaching the phone after Help was pressed there, leaves that
     /// Help open and urgent, even where I'm OK closes calls.
     func testAWatchImOKArrivingLateNeverSettlesAHelpPressedOnThePhoneSinceIt() async {

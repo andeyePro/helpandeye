@@ -245,6 +245,14 @@ final class WatchModel: NSObject, ObservableObject {
                   let c = (d["colour"] as? Int).flatMap({ Colour(rawValue: UInt8($0)) }), let w = d["who"] as? String else { return nil }
             return Open(unit: u, request: r, colour: c, who: w, group: tag(d["group"] as? String ?? ""))
         }
+        // The acknowledgements of this watch's own calls that the phone holds, checked here too,
+        // so a call seen over the box alone stops being resent from the wrist.
+        for d in context["mine"] as? [[String: Any]] ?? [] {
+            let e = engine(forGroup: tag(d["group"] as? String ?? ""))
+            for ack in d["acks"] as? [Data] ?? [] where acksTaken.insert(ack).inserted {
+                if let f = HelpFrame(ack) { e?.receive(f, via: .internet) }
+            }
+        }
         var settled: [String: Set<IncomingRequest.Key>] = [:]
         for d in context["settled"] as? [[String: Any]] ?? [] {
             guard let u = (d["unit"] as? Int).flatMap(UInt32.init(exactly:)), let r = (d["request"] as? Int).flatMap(UInt16.init(exactly:)) else { continue }

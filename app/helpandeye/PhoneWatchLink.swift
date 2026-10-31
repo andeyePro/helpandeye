@@ -32,6 +32,14 @@ final class PhoneWatchLink: NSObject, ObservableObject {
             context["status"] = words.headline
             context["failed"] = words.cross
         }
+        // The signed acknowledgements of the watch's own calls, for the watch to check as if heard
+        // on air: one that came over the box alone otherwise leaves the watch resending, and
+        // saying "waiting" once out of reach, for a call already seen.
+        context["mine"] = model.engines.flatMap { e in
+            e.activity.outgoing.filter { $0.number >= 0x8000 && !$0.acks.isEmpty }.suffix(5).map { r -> [String: Any] in
+                ["group": e.group?.tag ?? "", "acks": r.acks.values.map { $0.encoded() }]
+            }
+        }
         // Open requests this person can acknowledge from the wrist, most urgent first. Names stay on
         // the paired watch, which is this person's own device.
         if model.engines.contains(where: { $0.me?.canRespond == true }) {
