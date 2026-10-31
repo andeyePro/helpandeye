@@ -50,6 +50,9 @@ final class BoardLink: NSObject, ObservableObject {
     /// A frame a Help&I box made (push 0xA3), for the engine, which says whether the phone's
     /// routes took a call; the box is told (0x74).
     var onBoxFrame: ((HelpFrame) async -> Bool?)?
+    /// The box's own list of its calls, read at reconnecting, for the engine to carry any made while
+    /// the phone was away; each one it carried, with whether a route took it, goes back (0x74).
+    var onBoxCalls: (([MeshCore.BoxCall]) async -> [(request: UInt16, sent: Bool)])?
     /// Whether the box is a member of the first group, the one it is set up for: another group's
     /// engine, which knows it only as removed, must not make it forget that one.
     var isGroupBox: (() -> Bool)?
@@ -225,6 +228,7 @@ final class BoardLink: NSObject, ObservableObject {
             await queryBox()
             await provision()
             await refreshBoxCalls()
+            await adoptBoxCalls()
         }
     }
 
@@ -282,6 +286,15 @@ final class BoardLink: NSObject, ObservableObject {
         callsArriving = []
         guard case .boxEndOfCalls? = await run(.boxGetCalls, expect: { if case .boxEndOfCalls = $0 { return true }; return false }) else { return }
         boxCalls = callsArriving
+    }
+
+    /// Calls the box made while this phone was away, which the engine now carries on the phone's
+    /// routes; the box is told what they did with each (0x74).
+    private func adoptBoxCalls() async {
+        guard let onBoxCalls else { return }
+        let adopted = await onBoxCalls(boxCalls)
+        for a in adopted { _ = await run(.boxRouteResult(request: a.request, sent: a.sent), expect: okOrError) }
+        if !adopted.isEmpty { await refreshBoxCalls() }
     }
 
     /// A Help&I box taken out of the group leaves it and clears what it holds (0x75), if it still

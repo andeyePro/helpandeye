@@ -536,4 +536,52 @@ final class HelpBoxTests: XCTestCase {
         await household.engine.boxReady()
         XCTAssertEqual(household.mesh.forgets, 0)
     }
+
+    /// The box's calls as its 0x73 reply gives them (firmware/DESIGN.md, section 6: request u16,
+    /// colour u8, pressed at u32, status u8, acknowledgements u8; then 0xA2), pressed ten minutes
+    /// ago while Pat's phone was away, and one the phone already carries, pressed now.
+    let boxCallList = [
+        "a1 0100 01 e8ffde6a 02 01", // seen: a responder knows
+        "a1 0200 02 e8ffde6a 04 00", // closed
+        "a1 0300 01 e8ffde6a 01 00", // waiting for a responder
+        "a1 0400 02 e8ffde6a 03 00", // not sent: the box's radio got nothing out
+        "a1 0500 01 4002df6a 01 00", // already carried
+        "a2",
+    ]
+
+    func testACallMadeWhileThePhoneWasAwayIsCarriedOnReconnecting() async throws {
+        _ = await household.engine.receiveFromBox(boxCall(5))
+        await air.run()
+        var calls: [MeshCore.BoxCall] = []
+        for reply in boxCallList {
+            switch MeshCore.Response(hex(reply)) {
+            case let .boxCall(c)?: calls.append(c)
+            case .boxEndOfCalls?: break
+            default: XCTFail(reply)
+            }
+        }
+        XCTAssertEqual(calls.count, 5)
+        XCTAssertEqual(calls[2], MeshCore.BoxCall(request: 3, colour: .red, pressedAt: 1_792_999_400, status: .waitingForResponder, acknowledgements: 0))
+        XCTAssertNil(responder.alerts.scheduled[IncomingRequest.Key(unit: boxUnit, request: 3)], "the responder never heard it")
+        let adopted = await household.engine.adoptBoxCalls(calls)
+        XCTAssertEqual(adopted.map(\.request), [3, 4], "only the open calls the phone did not know")
+        XCTAssertEqual(adopted.map(\.sent), [true, true], "for the box's 0x74")
+        await air.run()
+        for (n, colour) in [(UInt16(3), Colour.red), (4, .amber)] {
+            let k = IncomingRequest.Key(unit: boxUnit, request: n)
+            let r = try XCTUnwrap(household.engine.activity.outgoing.first { $0.fromBox && $0.number == n })
+            XCTAssertEqual(r.colour, colour); XCTAssertEqual(r.createdAt.timeIntervalSince1970, 1_792_999_400, "when it was pressed on the box")
+            XCTAssertEqual(r.routes[.internet], .sent)
+            XCTAssertNotNil(responder.alerts.scheduled[k], "the responder is alerted now")
+            XCTAssertNil(household.alerts.scheduled[k], "the household is not")
+        }
+        XCTAssertNil(responder.engine.activity.inbox.requests[IncomingRequest.Key(unit: boxUnit, request: 1)], "a seen call is left to the radio")
+        XCTAssertNil(responder.engine.activity.inbox.requests[IncomingRequest.Key(unit: boxUnit, request: 2)])
+        XCTAssertEqual(household.engine.activity.outgoing.filter { $0.fromBox && $0.number == 5 }.count, 1)
+        let again = await household.engine.adoptBoxCalls(calls)
+        XCTAssertTrue(again.isEmpty, "read again, nothing is sent twice")
+        coordinator.mesh.boxPublicKey = boxKey
+        let notTheirs = await coordinator.engine.adoptBoxCalls(calls)
+        XCTAssertTrue(notTheirs.isEmpty, "only the phone of the box's home carries its calls")
+    }
 }

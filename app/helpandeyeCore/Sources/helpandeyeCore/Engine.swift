@@ -1014,6 +1014,27 @@ public final class HelpEngine: ObservableObject {
         }
     }
 
+    /// The household's box's own list of its calls (0x73), read when the phone connects to it
+    /// again: a call made while the phone was away and still waiting for a responder is carried
+    /// now on the phone's routes, as if the box had pushed it then. Calls the phone already has,
+    /// and those seen or closed, are left alone. Returns each call taken on with whether a route
+    /// took it, for the box (0x74).
+    public func adoptBoxCalls(_ calls: [MeshCore.BoxCall]) async -> [(request: UInt16, sent: Bool)] {
+        guard let unit = householdBoxUnit else { return [] }
+        var adopted: [(request: UInt16, sent: Bool)] = []
+        for c in calls {
+            if case .seen = c.status { continue }
+            if case .closed = c.status { continue }
+            let pressed = Date(timeIntervalSince1970: TimeInterval(c.pressedAt))
+            if activity.outgoing.contains(where: { $0.unit == unit && $0.number == c.request
+                && abs($0.createdAt.timeIntervalSince(pressed)) <= OutgoingRequest.clockAllowance }) { continue }
+            if let took = await receiveFromBox(.call(unit: unit, request: c.request, colour: c.colour, sentAt: c.pressedAt)) {
+                adopted.append((c.request, took))
+            }
+        }
+        return adopted
+    }
+
     /// A Help&I box taken out of the group is told to forget it (0x75) by the phone connected to
     /// it, when it is removed and whenever that phone connects to it again, so it stops calling
     /// on the group's channel as a member the others no longer accept.

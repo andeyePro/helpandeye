@@ -140,6 +140,10 @@ wrote.
   radio and carried the same way. The phone's own buttons, notes and I'm OK never touch the box's
   calls. An acknowledgement or a coordinator's close of the box's call that reached the phone
   another way goes on the radio, so the box, which hears only the radio, can show it.
+- **Calls made while the phone was away.** On connecting again the phone reads the box's list of
+  its calls (0x73, answered 0xA1 for each and then 0xA2) and carries any still waiting for a
+  responder, or not sent, that it does not already have, on its routes as if pushed at the time,
+  answering each with 0x74 (`HelpEngine.adoptBoxCalls`). Calls seen or closed are left.
 - **A removed box.** When a box's member is removed, the phone connected to it tells it to forget
   the group (0x75), at the removal and again whenever it connects to it, so it stops calling as a
   member the others no longer accept. A box still in the phone's first group is never told to

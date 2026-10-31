@@ -191,7 +191,7 @@ group in its own right, so it calls for help with no phone.
 - A call from the box goes on the radio from the box, and on the internet and home Wi-Fi from the
   phone of the person whose home it is in, while it is paired with it. That phone never alerts
   for it, as for its own calls. Any other phone paired with it, a coordinator's included, alerts
-  for it as usual.
+  for it as usual. A call made while that phone was away goes from it when it next connects.
 - A box whose member is removed is told to forget the group by the phone paired with it.
 - A coordinator chooses, on each member's page, whether their box tells responders about a power
   cut at their home (decisions 3 and 4). Off unless chosen. Responders get a calm notification

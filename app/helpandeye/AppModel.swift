@@ -68,6 +68,7 @@ final class AppModel: ObservableObject {
         board.onFrame = { [weak self] in self?.hub.received($0, on: $1) }
         board.onText = { [weak self] in self?.hub.receivedText(from: $0, $1) }
         board.onBoxFrame = { [weak self] frame in await self?.engine.receiveFromBox(frame) ?? nil }
+        board.onBoxCalls = { [weak self] calls in await self?.engine.adoptBoxCalls(calls) ?? [] }
         board.isGroupBox = { [weak self] in self?.boxMember != nil }
         relay.onFrame = { [weak self] in self?.engine.receive($0, via: .internet) }
         relay.onAllowanceLow = { [weak self] in self?.engine.raise(.allowanceLow) }
