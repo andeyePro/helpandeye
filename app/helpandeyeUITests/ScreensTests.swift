@@ -46,6 +46,12 @@ final class ScreensTests: XCTestCase {
 
     func testEveryScreen() throws {
         launch()
+        // A second try (screens.sh retries a failed test) finds the first try's group: leave it.
+        if !app.buttons["Start a group"].waitForExistence(timeout: 5) {
+            tab("Group")
+            reveal(app.buttons["Leave this group"]).tap()
+            XCTAssert(app.buttons["Start a group"].waitForExistence(timeout: 5), "every-screen: the earlier group was not left")
+        }
         startGroup(shooting: true)
         look("help")
         reveal(app.buttons["Need a hand"]).tap()
