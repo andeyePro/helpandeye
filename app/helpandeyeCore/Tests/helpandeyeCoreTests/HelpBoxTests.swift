@@ -375,6 +375,39 @@ final class HelpBoxTests: XCTestCase {
         XCTAssertEqual(setup.members[0][5], 4, "every member, the box included")
     }
 
+    /// A box's home is one of the group's settings, so a box whose home would take them past what
+    /// can be sent to everyone is not added, and the coordinator is told so, not that it was.
+    func testABoxWhoseHomeMakesTheSettingsTooBigToSendIsNotAdded() {
+        let start = coordinator.engine.group!
+        let home = household.engine.saved!.me
+        let next = start.nextMemberNumber(by: 1)!
+        func fits(_ x: GroupState) -> Bool { x.settingsFrame(as: 1, identity: coordinator.identity) != nil }
+        func withHome(_ x: GroupState) -> GroupState { var y = x; y.policy.boxHome[next] = home; return y }
+        // The settings filled a letter at a time, up to where one more home no longer fits.
+        let letters = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+        var g = start
+        var p = Profile(id: 2, name: "p")
+        while fits(withHome(g)) {
+            p.okWords.append(letters.randomElement()!)
+            var bigger = start
+            bigger.policy.profiles.append(p)
+            guard fits(bigger) else { break }
+            g = bigger
+        }
+        XCTAssertTrue(fits(g)); XCTAssertFalse(fits(withHome(g)), "one more home tips the settings over")
+        coordinator.engine.updateGroup { $0.policy = g.policy }
+        XCTAssertNil(coordinator.engine.settingsProblem)
+        let members = coordinator.engine.group!.members.count
+        let entries = coordinator.engine.activity.log.entries.count
+        let hall = DeviceIdentity()
+        let problem = coordinator.engine.addBox(key: hall.signingPublicKey, sealKey: hall.publicKey, name: "Hall box", home: household.engine.saved!.me)
+        XCTAssertNotNil(problem, "the coordinator is told it was not added")
+        XCTAssertEqual(problem, coordinator.engine.settingsProblem)
+        XCTAssertNil(coordinator.engine.group?.boxMember(key: hall.signingPublicKey))
+        XCTAssertEqual(coordinator.engine.group!.members.count, members)
+        XCTAssertEqual(coordinator.engine.activity.log.entries.count, entries, "nor is it logged as added")
+    }
+
     /// The safety fix: a coordinator who responds, connected to someone else's box to add or set it
     /// up, hears its red press from the box itself and is alerted from their own turn, as if they
     /// had heard it on the radio. They do not carry it as their own.

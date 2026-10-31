@@ -956,6 +956,8 @@ public final class HelpEngine: ObservableObject {
         var added: UInt16?
         updateGroup { added = $0.addBox(key: key, sealKey: sealKey, name: name, home: home, by: me) }
         guard added != nil else { return "This box could not be added" }
+        // Its home is a setting: settings too big to send to everyone are not kept, nor the box.
+        guard group?.boxMember(key: key) != nil else { return settingsProblem ?? "This box could not be added" }
         log("You added the box \(name)")
         return nil
     }
