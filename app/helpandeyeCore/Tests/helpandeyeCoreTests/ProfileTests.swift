@@ -9,6 +9,7 @@ final class ProfileTests: XCTestCase {
         for m in UInt16(1)...40 { a.boxHome[m] = m + 100; a.profileOf[m] = UInt8(m % 3) }
         for m in (UInt16(1)...40).reversed() { b.profileOf[m] = UInt8(m % 3); b.boxHome[m] = m + 100 }
         let e = JSONEncoder()
+        e.outputFormatting = .sortedKeys
         let ea = try e.encode(a), eb = try e.encode(b)
         XCTAssertEqual(ea, eb)
         let back = try JSONDecoder().decode(GroupState.StoredPolicy.self, from: e.encode(a))
