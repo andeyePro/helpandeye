@@ -204,6 +204,7 @@ final class HelpBoxTests: XCTestCase {
         XCTAssertEqual(try MeshCore.Command.boxInfo.encoded(), hex("70"))
         XCTAssertEqual(try MeshCore.Command.boxRouteResult(request: 258, sent: true).encoded(), hex("74 0201 01"))
         XCTAssertEqual(try MeshCore.Command.boxGetCalls.encoded(), hex("73"))
+        XCTAssertEqual(try MeshCore.Command.boxForget.encoded(), hex("75"))
     }
 
     func testACoordinatorAddsTheBoxAsAMemberOfItsOwn() throws {
@@ -510,5 +511,29 @@ final class HelpBoxTests: XCTestCase {
         let other2 = await responder.engine.receiveFromBox(boxCall(1))
         XCTAssertNil(other2, "a phone not paired with the box carries nothing for it")
         XCTAssertTrue(responder.engine.activity.outgoing.isEmpty)
+    }
+
+    func testARemovedBoxIsToldToForgetByThePhoneConnectedToIt() async {
+        let box = boxMember, now = clock.now
+        coordinator.engine.updateGroup { $0.remove(box, at: now) }
+        await air.run()
+        XCTAssertEqual(household.mesh.forgets, 1, "Pat's phone, connected to it, sent 0x75")
+        XCTAssertEqual(responder.mesh.forgets, 0, "a phone connected to another box sends nothing")
+        XCTAssertEqual(coordinator.mesh.forgets, 0)
+        XCTAssertNil(household.engine.householdBoxUnit)
+        coordinator.engine.updateGroup { $0.policy.namesOnBox = true }
+        await air.run()
+        XCTAssertEqual(household.mesh.forgets, 1, "not again at every change")
+        await household.engine.boxReady()
+        await air.run()
+        XCTAssertEqual(household.mesh.forgets, 2, "again on connecting to it, in case the first was lost")
+    }
+
+    func testABoxStillInTheGroupIsNeverToldToForget() async {
+        let jo = responder.engine.saved!.me, now = clock.now
+        coordinator.engine.updateGroup { $0.remove(jo, at: now) }
+        await air.run()
+        await household.engine.boxReady()
+        XCTAssertEqual(household.mesh.forgets, 0)
     }
 }

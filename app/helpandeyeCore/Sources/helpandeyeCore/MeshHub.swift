@@ -16,6 +16,7 @@ import Foundation
     func send(_ frame: HelpFrame, urgent: Bool, on secrets: [Data]) async -> MeshSendResult
     func sendText(_ text: String, to key: Data) async -> MeshSendResult
     func addContact(_ key: Data, name: String) async
+    func tellBoxToForget() async
 }
 
 /// Shared between every group's engine on one box, so together they stay inside the band's
@@ -94,4 +95,5 @@ import Foundation
 
     public func sendText(_ text: String, to key: Data) async -> MeshSendResult { await hub.box.sendText(text, to: key) }
     public func addContact(_ key: Data, name: String) async { await hub.box.addContact(key, name: name) }
+    public func tellBoxToForget() async { await hub.box.tellBoxToForget() }
 }

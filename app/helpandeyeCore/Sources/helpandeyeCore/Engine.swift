@@ -31,10 +31,13 @@ public enum MeshSendResult: Equatable, Sendable {
     func addContact(_ key: Data, name: String) async
     /// Set when one box serves several groups (MeshHub): their sends share one hour's allowance.
     var sharedAirtime: AirtimeLedger? { get }
+    /// Tells a Help&I box taken out of the group to leave it and clear what it holds (0x75).
+    func tellBoxToForget() async
 }
 
 extension MeshLink {
     public var sharedAirtime: AirtimeLedger? { nil }
+    public func tellBoxToForget() async {}
 }
 
 public enum RelayWake: String, Sendable { case call, quiet }
@@ -204,6 +207,9 @@ public final class HelpEngine: ObservableObject {
         set { activity.lastMembershipRepeat = newValue }
     }
     private var answeredBoxes: Set<UInt16> = []
+    /// The removed Help&I box this phone last told to forget the group, so a group change does not
+    /// tell it again; connecting to it again does.
+    private var forgottenBox: Data?
     private var boxesToAnswer: Set<UInt16> = []
     /// Number blocks of coordinators just removed, to re-list the people they added.
     private var previousBlocks: [UInt16: UInt16] = [:]
@@ -458,6 +464,8 @@ public final class HelpEngine: ObservableObject {
         // reconnect, so direct messages work both ways.
         if mesh.isReady, let me = saved?.me, let key = mesh.boxPublicKey, activity.boardKeys[me] != key {
             spawn { await self.boxReady() }
+        } else {
+            forgetRemovedBox()
         }
         relay.configure(group: group, identity: identity)
         homeWiFi.configure(group: group, me: saved?.me, identity: identity)
@@ -1006,6 +1014,16 @@ public final class HelpEngine: ObservableObject {
         }
     }
 
+    /// A Help&I box taken out of the group is told to forget it (0x75) by the phone connected to
+    /// it, when it is removed and whenever that phone connects to it again, so it stops calling
+    /// on the group's channel as a member the others no longer accept.
+    private func forgetRemovedBox() {
+        guard let key = mesh.boxPublicKey, mesh.isReady, let g = group, g.removedKeys.contains(key), g.boxMember(key: key) == nil,
+              forgottenBox != key else { return }
+        forgottenBox = key
+        spawn { await self.mesh.tellBoxToForget() }
+    }
+
     /// A stock box's battery suggests a power cut (`BatteryWatch`) and the caller chose to tell
     /// responders: as a note on their open call, or on a new Need a hand. Returns why it could not
     /// go, if it could not.
@@ -1019,6 +1037,8 @@ public final class HelpEngine: ObservableObject {
 
     /// Tells the group which box is this phone's, and adds the other members' boxes as contacts.
     public func boxReady() async {
+        forgottenBox = nil
+        forgetRemovedBox()
         guard let myNumber = saved?.me, let key = mesh.boxPublicKey else { return }
         activity.boardKeys[myNumber] = key
         for (member, k) in activity.boardKeys where member != myNumber { await mesh.addContact(k, name: "Help&I \(member)") }

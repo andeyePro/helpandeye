@@ -29,13 +29,15 @@ public enum MeshCore {
         case setPin(UInt32)
         /// Help&I's own commands, answered only by a box on Help&I's firmware (firmware/DESIGN.md,
         /// section 6): what the box holds, the group, its members and responders' first names
-        /// (`HelpBox.Setup`), its calls, and what the phone's routes did with one.
+        /// (`HelpBox.Setup`), its calls, what the phone's routes did with one, and forgetting the
+        /// group once the box is taken out of it.
         case boxInfo
         case boxSetGroup(body: Data)
         case boxSetMembers(page: Data)
         case boxSetNames(page: Data)
         case boxGetCalls
         case boxRouteResult(request: UInt16, sent: Bool)
+        case boxForget
 
         public func encoded() throws -> Data {
             var w = ByteWriter()
@@ -85,6 +87,7 @@ public enum MeshCore {
                 w.u8(0x76); w.bytes(page)
             case .boxGetCalls: w.u8(0x73)
             case let .boxRouteResult(request, sent): w.u8(0x74); w.u16(request); w.u8(sent ? 1 : 0)
+            case .boxForget: w.u8(0x75)
             }
             return w.data
         }

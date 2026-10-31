@@ -50,6 +50,9 @@ final class BoardLink: NSObject, ObservableObject {
     /// A frame a Help&I box made (push 0xA3), for the engine, which says whether the phone's
     /// routes took a call; the box is told (0x74).
     var onBoxFrame: ((HelpFrame) async -> Bool?)?
+    /// Whether the box is a member of the first group, the one it is set up for: another group's
+    /// engine, which knows it only as removed, must not make it forget that one.
+    var isGroupBox: (() -> Bool)?
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -279,6 +282,16 @@ final class BoardLink: NSObject, ObservableObject {
         callsArriving = []
         guard case .boxEndOfCalls? = await run(.boxGetCalls, expect: { if case .boxEndOfCalls = $0 { return true }; return false }) else { return }
         boxCalls = callsArriving
+    }
+
+    /// A Help&I box taken out of the group leaves it and clears what it holds (0x75), if it still
+    /// holds a group; then it is set up afresh only if it is added again.
+    func tellBoxToForget() async {
+        guard isHelpBox, isGroupBox?() != true else { return }
+        if boxInfo == nil { await queryBox() }
+        guard boxInfo?.provisioned == true, case .ok? = await run(.boxForget, expect: okOrError) else { return }
+        sync.boxHoldsNothing()
+        await queryBox()
     }
 
     /// A frame the box made: the engine takes it in and carries it; a call's box is told what

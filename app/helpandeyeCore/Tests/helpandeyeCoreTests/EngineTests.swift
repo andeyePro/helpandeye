@@ -61,6 +61,10 @@ import XCTest
     }
 
     func addContact(_ key: Data, name: String) async {}
+
+    /// Each forget (0x75) this phone sent to the box it is connected to.
+    var forgets = 0
+    func tellBoxToForget() async { forgets += 1 }
 }
 
 /// The relay's membership rules (relay/src/relay.js, `setMembers` and `requireMember`), so the

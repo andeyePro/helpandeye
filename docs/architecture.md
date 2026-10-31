@@ -140,6 +140,10 @@ wrote.
   radio and carried the same way. The phone's own buttons, notes and I'm OK never touch the box's
   calls. An acknowledgement or a coordinator's close of the box's call that reached the phone
   another way goes on the radio, so the box, which hears only the radio, can show it.
+- **A removed box.** When a box's member is removed, the phone connected to it tells it to forget
+  the group (0x75), at the removal and again whenever it connects to it, so it stops calling as a
+  member the others no longer accept. A box still in the phone's first group is never told to
+  forget, whatever another group's list says.
 - **A power cut.** The box's report is a request of its own with a Power cut follow-up and notes,
   sealed for responders. A responder's phone shows it calmly ("power cut at home", a calm
   notification, reminders every half hour and then every two hours) until a person acknowledges.
