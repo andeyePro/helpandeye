@@ -190,7 +190,12 @@ wrote.
   signed by the coordinator taking over, over the group ID, the lost phone's signing key and their
   own, and carries its proof: the deputy naming, a second coordinator's signature over the same
   bytes (sent to them as 0x27), or nothing more, which each phone accepts only once it has itself
-  heard nothing signed by the first coordinator for seven days. Every phone checks it against its
+  heard nothing signed by the first coordinator for seven days. A coordinator taking over alone
+  in this way sends the takeover to the relay first (`publish`) and makes it only once the relay
+  has taken it: the relay hears every request the first coordinator's phone makes, so a phone
+  that alone heard nothing for a week (abroad, say) is told "<name>'s phone has been in touch in
+  the last week, so it cannot be taken over yet." and changes nothing. With no relay, one
+  coordinator alone cannot take over: a second must agree. Every phone checks it against its
   own member list, removes the lost phone and follows the new first coordinator; the new first
   coordinator's phone makes new keys as after any removal, and their namings of a deputy count
   from version 0 again, on every phone and the relay. The takeover is repeated with the

@@ -39,11 +39,17 @@ final class Relay: ObservableObject, RelayLink {
 
     /// Sends the member list. Only a coordinator's list is accepted by the relay.
     func publishMembers() async -> PublishResult {
-        guard let group, let body = try? JSONEncoder().encode(RelayProtocol.memberList(group)) else { return .refused }
+        guard let group else { return .refused }
+        return await publish(RelayProtocol.memberList(group))
+    }
+
+    func publish(_ list: RelayProtocol.MemberList) async -> PublishResult {
+        guard let group, let body = try? JSONEncoder().encode(list) else { return .refused }
         switch await request("PUT", RelayProtocol.path(for: group.secrets, "members"), body: body) {
         case .some((200, _)): return .accepted
         case let .some((status, _)) where status >= 500 || status == 429: return .unreachable
-        // Another coordinator's list, before the first coordinator has registered the group.
+        // Another coordinator's list, before the first coordinator has registered the group; or a
+        // takeover after a week's silence, when the relay has heard from the first coordinator.
         case .some((425, _)): return .notYet
         case let .some((402, data)): lastProblem = Self.passProblem(data); return .refused
         case let .some((status, _)): lastProblem = "The relay did not take the member list (\(status))."; return .refused

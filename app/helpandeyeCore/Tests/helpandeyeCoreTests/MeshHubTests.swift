@@ -22,6 +22,7 @@ import XCTest
     let lastProblem: String? = nil
     func configure(group: GroupState?, identity: DeviceIdentity) {}
     func publishMembers() async -> PublishResult { .unreachable }
+    func publish(_ list: RelayProtocol.MemberList) async -> PublishResult { .unreachable }
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String? { "No internet" }
 }
 

@@ -204,10 +204,14 @@ final class RelayModel {
 
     var publishes = 0
     func publishMembers() async -> PublishResult {
+        guard let group else { return .unreachable }
+        return await publish(RelayProtocol.memberList(group))
+    }
+
+    func publish(_ list: RelayProtocol.MemberList) async -> PublishResult {
         guard isConfigured, let air, let group, let key else { return .unreachable }
         publishes += 1
         if requiresPass, group.pass == nil { lastProblem = Self.needsPass; return .refused }
-        let list = RelayProtocol.memberList(group)
         air.relay.heard(key, at: phone?.engine.now() ?? Date())
         let status = air.relay.setMembers(signer: key, generation: list.generation, members: list.members.map { .init(key: $0.key, role: $0.role) },
                                           removed: list.removed, primary: list.primary, groupID: group.secrets.groupID,

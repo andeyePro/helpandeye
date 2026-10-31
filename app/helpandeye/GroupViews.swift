@@ -481,14 +481,21 @@ struct TakeoverView: View {
                 case let .agreed(by):
                     Text("\(model.name(ofMember: by)) agreed, so you can take over now.")
                 case .silence:
-                    Text("Nothing has been heard from \(first)'s phone for a week, so you can take over now.")
+                    Text("Nothing has been heard from \(first)'s phone for a week, so you can take over now, once the relay confirms it has not heard from it either.")
                 case nil:
-                    Text("You can take over once another coordinator agrees"
-                         + (model.engine.takeoverOpensAt.map { ", or on your own from \($0.formatted(date: .long, time: .shortened))." } ?? "."))
+                    if model.relay.isConfigured {
+                        Text("You can take over once another coordinator agrees"
+                             + (model.engine.takeoverOpensAt.map { ", or on your own from \($0.formatted(date: .long, time: .shortened))." } ?? "."))
+                    } else {
+                        Text("You can take over once another coordinator agrees. This group has no relay to confirm that \(first)'s phone has been silent, so you cannot do it on your own.")
+                    }
                 }
-                if model.engine.takeoverPath != nil {
+                if model.engine.askingRelayToTakeOver {
+                    Text("Checking with the relay.")
+                } else if model.engine.takeoverPath != nil {
                     Button("Take over from \(first)") { confirming = true }
                 }
+                if let problem = model.engine.takeoverProblem { Text(problem) }
             }
             if !others.isEmpty {
                 Section(header: Header("Agree to another coordinator taking over")) {

@@ -59,6 +59,9 @@ public enum PublishResult: Equatable, Sendable {
     var lastProblem: String? { get }
     func configure(group: GroupState?, identity: DeviceIdentity)
     func publishMembers() async -> PublishResult
+    /// Sends this member list in place of the group's own, as a coordinator taking over asks the
+    /// relay before they do (decision 20).
+    func publish(_ list: RelayProtocol.MemberList) async -> PublishResult
     func send(_ frame: HelpFrame, wake: RelayWake?) async -> String?
 }
 
@@ -189,6 +192,9 @@ public final class HelpEngine: ObservableObject {
     @Published public private(set) var ackSends: [IncomingRequest.Key: [Route: RouteState]] = [:]
     /// Why a coordinator's last change to the group's settings was not made.
     @Published public private(set) var settingsProblem: String?
+    /// While a coordinator taking over alone asks the relay first, and why it did not happen.
+    @Published public private(set) var askingRelayToTakeOver = false
+    @Published public private(set) var takeoverProblem: String?
 
     public let identity: DeviceIdentity
     public let mesh: MeshLink
@@ -1685,11 +1691,13 @@ public final class HelpEngine: ObservableObject {
 
     /// How this coordinator may take over now, if at all (decision 20): as the deputy the first
     /// coordinator named, with another coordinator's agreement, or alone after seven days' silence.
+    /// Alone only with a relay, which has the last word on the silence: without one, a phone that
+    /// alone heard nothing could not tell, so a second coordinator must agree.
     public var takeoverPath: TakeoverPath? {
         guard let g = group, let me = saved?.me, actsAsCoordinator, !isPrimaryCoordinator else { return nil }
         if g.currentDeputy == me, g.deputySignature != nil { return .deputy }
         if let by = activity.takeoverConsents.keys.sorted().first(where: { g.member($0)?.role == .coordinator }) { return .agreed(by: by) }
-        return primaryIsSilent ? .silence : nil
+        return primaryIsSilent && relay.isConfigured ? .silence : nil
     }
 
     /// The first coordinator names a coordinator to take over if their phone is lost, or no one.
@@ -1724,7 +1732,7 @@ public final class HelpEngine: ObservableObject {
 
     /// Takes over as first coordinator, by whichever path is open. The lost phone is removed and
     /// the group gets new keys, which this phone then hands out as after any removal. Returns
-    /// whether it happened.
+    /// whether it happened now; alone after seven days, it happens only once the relay agrees.
     @discardableResult
     public func takeOver() -> Bool {
         guard let g = group, let me = saved?.me, let path = takeoverPath, let from = g.primaryCoordinator, let fromKey = g.member(from)?.signingKey else { return false }
@@ -1736,14 +1744,46 @@ public final class HelpEngine: ObservableObject {
         case .silence: break
         }
         guard g.accepts(t, silent: primaryIsSilent) else { return false }
-        let words = "You took over as first coordinator from \(name(ofMember: from)), \(how(t))"
+        if path == .silence {
+            askRelay(toTakeOver: t)
+            return false
+        }
+        becomeFirstCoordinator(t)
+        return true
+    }
+
+    /// Only the relay hears every request the first coordinator's phone makes, so alone after
+    /// seven days the takeover goes to the relay first and is made only once it is taken: a
+    /// phone that alone heard nothing (abroad, say) does not split off with keys of its own.
+    private func askRelay(toTakeOver t: Takeover) {
+        guard let g = group, !askingRelayToTakeOver else { return }
+        var after = g
+        after.takeOver(t, at: now())
+        let list = RelayProtocol.memberList(after)
+        let first = name(ofMember: t.from)
+        askingRelayToTakeOver = true
+        takeoverProblem = nil
+        spawn {
+            let result = await self.relay.publish(list)
+            self.askingRelayToTakeOver = false
+            switch result {
+            case .accepted:
+                if self.group?.primaryCoordinator == t.from { self.becomeFirstCoordinator(t) }
+            case .notYet: self.takeoverProblem = "\(first)'s phone has been in touch in the last week, so it cannot be taken over yet."
+            case .refused: self.takeoverProblem = "The relay did not take it, so nothing has changed."
+            case .unreachable: self.takeoverProblem = "The relay could not be reached, so nothing has changed. Try again with internet."
+            }
+        }
+    }
+
+    private func becomeFirstCoordinator(_ t: Takeover) {
+        let words = "You took over as first coordinator from \(name(ofMember: t.from)), \(how(t))"
         updateGroup { $0.takeOver(t, at: self.now()) }
         activity.takeoverConsents = [:]
         activity.takeoverAgreed = []
         log(words)
         let gid = groupID
         spawn { await self.sendToAll(.takeover(t), in: gid) }
-        return true
     }
 
     /// The path a takeover came by, for the log; from the group before it is applied.

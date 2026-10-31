@@ -122,8 +122,10 @@ import XCTest
         await t.advance(86_400 + 60)
         XCTAssertEqual(second.engine.takeoverPath, .silence)
         XCTAssertEqual(second.engine.takeoverOpensAt!.timeIntervalSince(t.clock.now), -60, accuracy: 1)
-        XCTAssertTrue(second.engine.takeOver())
+        XCTAssertFalse(second.engine.takeOver(), "the relay is asked first")
+        XCTAssertNil(second.engine.group?.takeover)
         await air.run()
+        XCTAssertNil(second.engine.takeoverProblem)
         everyoneFollows(second)
         XCTAssertEqual(third.engine.activity.log.entries.last?.text, "\(third.engine.name(ofMember: n2)) took over as first coordinator from Sam, after seven days without word from them")
     }
@@ -147,7 +149,7 @@ import XCTest
         lose(coordinator)
         await t.advance(8 * 86_400)
         XCTAssertEqual(second.engine.takeoverPath, .silence)
-        XCTAssertTrue(second.engine.takeOver())
+        second.engine.takeOver()
         await air.run()
         everyoneFollows(second)
         second.engine.nameDeputy(n3)
@@ -157,6 +159,48 @@ import XCTest
             XCTAssertEqual(p.engine.group?.currentDeputy, n3, "\(p.engine.saved!.me) takes the new first coordinator's deputy")
         }
         XCTAssertEqual(air.relay.deputyVersion, second.engine.group?.deputyVersion, "and so does the relay")
+    }
+
+    /// A phone that alone heard nothing for a week (abroad, say) asks the relay, which has heard
+    /// from the first coordinator's phone: nothing changes, anywhere, and it says why.
+    func testTheRelayHavingHeardTheFirstCoordinatorWithinAWeekKeepsThem() async {
+        lose(coordinator)
+        for _ in 0..<8 {
+            await t.advance(86_400)
+            air.relay.heard(coordinator.relay.key!, at: t.clock.now)
+        }
+        XCTAssertEqual(second.engine.takeoverPath, .silence, "nothing heard on this phone for a week")
+        let sends = air.groupSends.count
+        XCTAssertFalse(second.engine.takeOver())
+        XCTAssertTrue(second.engine.askingRelayToTakeOver)
+        await air.run()
+        XCTAssertFalse(second.engine.askingRelayToTakeOver)
+        XCTAssertEqual(second.engine.takeoverProblem, "Sam's phone has been in touch in the last week, so it cannot be taken over yet.")
+        XCTAssertFalse(second.engine.isPrimaryCoordinator)
+        XCTAssertNil(second.engine.group?.previousSecrets, "no keys of its own")
+        XCTAssertNotNil(second.engine.group?.member(1))
+        for p in [caller, responder, third] as [Phone] { XCTAssertEqual(p.engine.group?.primaryCoordinator, 1) }
+        XCTAssertEqual(air.groupSends.count, sends, "no takeover sent")
+        XCTAssertEqual(air.relay.owner, coordinator.relay.key)
+    }
+
+    /// With no relay to confirm the silence, one coordinator alone cannot take over: a second
+    /// must agree.
+    func testWithoutARelayOneCoordinatorAloneNeedsASecond() async {
+        for p in air.phones { p.relay.isConfigured = false }
+        lose(coordinator)
+        await t.advance(8 * 86_400)
+        XCTAssertTrue(second.engine.primaryIsSilent)
+        XCTAssertNil(second.engine.takeoverPath)
+        XCTAssertFalse(second.engine.takeOver())
+        await air.run()
+        XCTAssertEqual(caller.engine.group?.primaryCoordinator, 1)
+        third.engine.agreeToTakeover(by: n2)
+        await air.run()
+        XCTAssertEqual(second.engine.takeoverPath, .agreed(by: n3))
+        XCTAssertTrue(second.engine.takeOver())
+        await air.run()
+        for p in [caller, responder, third] as [Phone] { XCTAssertEqual(p.engine.group?.primaryCoordinator, n2) }
     }
 
     /// Phones pass on the acknowledgements they hold while a caller is still sending, so the lost
