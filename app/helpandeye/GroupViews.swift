@@ -338,6 +338,12 @@ struct MemberView: View {
                         PowerLimits(unit: unit)
                         Text("The box keeps its radio under this limit once it is set up with Help&I's firmware. The antenna goes to every member with the group's settings.")
                     }
+                    Section(header: Header("Power cuts")) {
+                        Toggle("Tell responders about a power cut at their home", isOn: Binding(
+                            get: { model.group?.policy.reportsPowerCut.contains(number) == true },
+                            set: { on in model.updateGroup { if on { $0.policy.reportsPowerCut.insert(number) } else { $0.policy.reportsPowerCut.remove(number) } } }))
+                        Text("Only if they want it. A Help&I box then tells responders when its power goes, how long its battery will last, and when the power is back.")
+                    }
                 }
             }
         }
@@ -644,11 +650,18 @@ struct OtherGroupsSection: View {
     }
 }
 
-/// Settings most groups never change: the internet route.
+/// Settings most groups never change: the internet route, and first names on Help&I boxes.
 struct AdvancedSettingsView: View {
+    @EnvironmentObject var model: AppModel
+
     var body: some View {
         Form {
             RelaySection()
+            Section(header: Header("Help&I boxes")) {
+                Toggle("Responders' first names on boxes", isOn: Binding(get: { model.group?.policy.namesOnBox == true },
+                                                                         set: { on in model.updateGroup { $0.policy.namesOnBox = on } }))
+                Text("A box then says “Pat has seen your call.” rather than “A responder has seen your call.” The names stay on the box, where someone who takes it could read them.")
+            }
         }
         .navigationTitle("Advanced settings")
         .keyboardDismissable()

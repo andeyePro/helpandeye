@@ -2,7 +2,8 @@ import CoreBluetooth
 import helpandeyeCore
 import SwiftUI
 
-/// Pairing and checking the Help&I box: a Heltec board on MeshCore's companion firmware.
+/// Pairing and checking the Help&I box: a Heltec board on MeshCore's companion firmware, stock or
+/// Help&I's own build (firmware/DESIGN.md), which is a member of the group in its own right.
 struct BoxView: View {
     @EnvironmentObject var model: AppModel
 
@@ -16,6 +17,9 @@ struct BoxView: View {
                 }
                 Section(header: Header("Status")) {
                     Text(statusText)
+                    if let device = model.board.deviceInfo {
+                        LabeledContent("Firmware", value: device.isHelpBox ? "Help&I box" : "MeshCore box")
+                    }
                     if let info = model.board.selfInfo {
                         LabeledContent("Name", value: info.name)
                         LabeledContent("Frequency", value: String(format: "%.3f MHz", info.radio.frequencyMHz))
@@ -30,8 +34,10 @@ struct BoxView: View {
                         LabeledContent("Box battery", value: String(format: "%.2f V", Double(mv) / 1000))
                     }
                 }
-                if let me = model.me, let unit = me.unit {
-                    let antenna = model.group?.antenna(of: me.number) ?? .standardWhip
+                if model.board.isHelpBox { HelpBoxSection() }
+                // A Help&I box has its own unit and antenna; a stock box is the radio of this phone's.
+                if let m = model.boxMember ?? model.me, let unit = m.unit {
+                    let antenna = model.group?.antenna(of: m.number) ?? .standardWhip
                     Section(header: Header("Antenna")) {
                         LabeledContent("On this box", value: antenna.words + (antenna.isExternal ? ", \(gainWords(antenna.gainDBi))" : ""))
                         PowerLimits(unit: unit)
@@ -68,6 +74,69 @@ struct BoxView: View {
         case .connecting: "Connecting to your box…"
         case .ready: "Connected. Calls can go over the local radio."
         case let .failed(why): "Problem with the box: \(why)"
+        }
+    }
+}
+
+/// A box on Help&I's own firmware: whether it is in the group, its mains and battery, and its own
+/// calls as it shows them. A coordinator adds it as a member of its own here; anyone else is told
+/// what to ask their coordinator.
+struct HelpBoxSection: View {
+    @EnvironmentObject var model: AppModel
+    @State private var name = ""
+    @State private var problem: String?
+
+    var body: some View {
+        Section(header: Header("Help&I box")) {
+            if let member = model.boxMember {
+                LabeledContent("In the group as", value: member.name)
+                if let unit = member.unit { LabeledContent("Unit", value: String(unit)) }
+                if let info = model.board.boxInfo {
+                    Text(info.provisioned ? "Set up. Its buttons call for help with or without this phone." : "Setting up the box…")
+                    LabeledContent("Power", value: powerWords(info))
+                }
+                Text(model.group?.policy.reportsPowerCut.contains(member.number) == true
+                     ? "It tells your responders about a power cut at home. Your coordinator can change this."
+                     : "It does not tell your responders about a power cut. Your coordinator can change this.")
+                ForEach(model.board.boxCalls.reversed(), id: \.request) { call in
+                    Text("\(call.colour.label), \(Date(timeIntervalSince1970: TimeInterval(call.pressedAt)).formatted(date: .omitted, time: .shortened)): \(words(call.status))")
+                }
+            } else if let group = model.group, model.me?.role == .coordinator {
+                Text("This box is not in \(group.name) yet. Add it as a member of its own, so its buttons can call for help without a phone.")
+                LabeledField(label: "Its name in the group, such as Kitchen box at no. 4", text: $name)
+                Button("Add this box to the group") {
+                    problem = model.addBox(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+                }
+                .buttonStyle(.action)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if let problem { Text(problem).foregroundStyle(Color.warning) }
+            } else if let group = model.group {
+                Text("This box is not in \(group.name) yet, so its buttons cannot call for help. Ask your coordinator to pair their phone with it once, here on the Box screen, and add it to the group.")
+            } else {
+                Text("Join a group first. Then your coordinator can add this box to it.")
+            }
+        }
+    }
+
+    private func powerWords(_ info: MeshCore.BoxInfo) -> String {
+        let hours = info.hoursLeft == 0 ? "less than an hour of battery left" : "about \(info.hoursLeft) hours of battery left"
+        switch (info.mains, info.mainsEstimated) {
+        case (.on, false): return "On mains"
+        case (.on, true): return "Probably on mains"
+        case (.off, false): return "Power cut: on its battery, \(hours)"
+        case (.off, true): return "Probably a power cut: its battery is falling, \(hours)"
+        case (.unknown, _): return "Not known yet"
+        }
+    }
+
+    /// What the box itself shows for its call. It knows only that a responder has seen it, not who.
+    private func words(_ status: CallerStatus) -> String {
+        switch status {
+        case .sending: "Sending…"
+        case .waitingForResponder: "Sent. Waiting for a responder to see it."
+        case .seen: "A responder has seen it."
+        case .notSent: "Not sent."
+        case .closed: "Closed."
         }
     }
 }

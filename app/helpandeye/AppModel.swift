@@ -67,6 +67,7 @@ final class AppModel: ObservableObject {
         link.onText = { [weak self] in self?.engine.receiveText(from: $0, $1) }
         board.onFrame = { [weak self] in self?.hub.received($0, on: $1) }
         board.onText = { [weak self] in self?.hub.receivedText(from: $0, $1) }
+        board.onBoxFrame = { [weak self] frame in await self?.engine.receiveFromBox(frame) ?? nil }
         relay.onFrame = { [weak self] in self?.engine.receive($0, via: .internet) }
         relay.onAllowanceLow = { [weak self] in self?.engine.raise(.allowanceLow) }
         home.onFrame = { [weak self] in self?.engine.receive($0, via: .wifi) }
@@ -75,13 +76,14 @@ final class AppModel: ObservableObject {
             if state == .ready { Task { @MainActor in for e in self?.engines ?? [] { await e.boxReady() } } }
         }.store(in: &bag)
         board.$selfInfo.map { $0?.radio.band }.sink { [weak self] band in self?.engines.forEach { $0.bandChanged(band) } }.store(in: &bag)
+        board.$selfInfo.receive(on: RunLoop.main).sink { [weak self] _ in self?.updateBoxSetup() }.store(in: &bag)
         for publisher in [engine.objectWillChange.eraseToAnyPublisher(), board.objectWillChange.eraseToAnyPublisher(),
                           relay.objectWillChange.eraseToAnyPublisher(), home.objectWillChange.eraseToAnyPublisher()] {
             publisher.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         }
         carryOverOldChoices()
         voiceTracker = .init(engine.current)
-        engine.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.tellCaller() }.store(in: &bag)
+        engine.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.tellCaller(); self?.updateBoxSetup() }.store(in: &bag)
         for tag in Store.otherGroups { start(tag) }
         #if DEBUG && targetEnvironment(simulator)
         if Self.screensOtherGroupOnly || Self.screensOtherGroup {
@@ -92,6 +94,9 @@ final class AppModel: ObservableObject {
         ticker = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                self.updateBoxSetup()
+                // Bluetooth may be slow to answer: never ahead of the engines' resends.
+                Task { await self.board.tick() }
                 for (e, r) in zip(self.engines, [self.relay] + self.others.map(\.relay)) {
                     e.tick()
                     r.busy = e.activity.outgoing.contains { $0.nextResend != nil && $0.unit != 0 }
@@ -139,6 +144,25 @@ final class AppModel: ObservableObject {
         let note = engine.current?.colour == .amber ? ButtonWords.amberNote(in: profile) : (engine.current?.colour == .green ? okNote : nil)
         if let f = voiceTracker.update(engine.current, words: words, note: note, name: name(ofMember:)) { CallerVoice.shared.tell(f, profile: profile) }
     }
+
+    /// What a Help&I box paired with this phone is given: the first group's set-up, once the box
+    /// is a member of it. A changeover's end changes it with no other change, so the ticker asks too.
+    private func updateBoxSetup() {
+        board.setup = engine.group.flatMap { g in board.selfInfo.flatMap { HelpBox.setup(for: g, box: $0.publicKey, at: Date()) } }
+    }
+
+    /// The Help&I box on this phone's Bluetooth, as a member of the first group: what it is called
+    /// there. Nil for a stock box, or one not added yet.
+    var boxMember: Member? { group?.boxMember(key: board.selfInfo?.publicKey) }
+
+    /// A coordinator adds the Help&I box on this phone's Bluetooth to the group, with the keys it
+    /// gave in its info reply.
+    func addBox(name: String) -> String? {
+        guard let key = board.selfInfo?.publicKey, let info = board.boxInfo else { return "The box has not answered yet. Try again in a minute." }
+        return engine.addBox(key: key, sealKey: info.sealKey, name: name)
+    }
+
+    func tellRespondersOfProbablePowerCut() -> String? { engine.tellRespondersOfProbablePowerCut() }
 
     /// Before profiles, a caller's sounds and sharing where they are were switches kept on this
     /// phone. They become the caller's own choices once, so an update changes neither.

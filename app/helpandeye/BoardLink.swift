@@ -3,7 +3,9 @@ import Foundation
 import helpandeyeCore
 import UIKit
 
-/// The Bluetooth link to a Heltec board running MeshCore's standard companion firmware.
+/// The Bluetooth link to a Heltec board running MeshCore's companion firmware: stock, or Help&I's
+/// own build of it (firmware/DESIGN.md), which the phone also sets up with its group and whose
+/// own calls it carries on the phone's other routes.
 ///
 /// Commands go one at a time and wait for their reply, as the companion protocol requires
 /// (`CommandQueue` in helpandeyeCore). It can serve several groups (MeshHub): incoming Help&I
@@ -18,7 +20,17 @@ final class BoardLink: NSObject, ObservableObject {
     @Published private(set) var searching = false
     @Published private(set) var found: [CBPeripheral] = []
     @Published private(set) var selfInfo: MeshCore.SelfInfo?
+    @Published private(set) var deviceInfo: MeshCore.DeviceInfo?
     @Published private(set) var batteryMillivolts: Int?
+    /// A box on Help&I's own firmware, known by its version (`v1.18.0-hi1`). A stock box gets
+    /// no Help&I command.
+    var isHelpBox: Bool { deviceInfo?.isHelpBox == true }
+    /// What a Help&I box holds, and its own calls with the status it shows.
+    @Published private(set) var boxInfo: MeshCore.BoxInfo?
+    @Published private(set) var boxCalls: [MeshCore.BoxCall] = []
+    /// A stock box's battery suggests a power cut (`BatteryWatch`); a Help&I box reports the
+    /// mains itself, so this is never set for one.
+    @Published private(set) var probablePowerCut = false
     /// Where each group's channels are on the box, by secret: each group's current one, and its
     /// previous one during a changeover after a removal (sends go on both, so members who have not
     /// scanned their update yet still hear calls and acknowledgements).
@@ -32,6 +44,12 @@ final class BoardLink: NSObject, ObservableObject {
     /// Each group's channel secrets, current first. Whenever they change with the link up, the box
     /// is set up again.
     var channelGroups: [[Data]] = [] { didSet { if channelGroups != oldValue, commands.isUp { Task { await setUpChannels() } } } }
+    /// What the group gives a Help&I box (`HelpBox.setup`). Whenever it changes with the link up,
+    /// the box is set up again, so a membership or settings change reaches it at once.
+    var setup: HelpBox.Setup? { didSet { if setup != oldValue, commands.isUp, isHelpBox { Task { await provision() } } } }
+    /// A frame a Help&I box made (push 0xA3), for the engine, which says whether the phone's
+    /// routes took a call; the box is told (0x74).
+    var onBoxFrame: ((HelpFrame) async -> Bool?)?
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -45,6 +63,14 @@ final class BoardLink: NSObject, ObservableObject {
     private var setUpAgain = false
     /// Grows only after failed connection attempts; a dropped link reconnects at once.
     private var backoff: TimeInterval = 1
+    /// What the Help&I box was last sent, so only a change is sent again.
+    private var sync = HelpBox.Sync()
+    private var provisioning = false
+    private var provisionAgain = false
+    /// The box's calls as they come, one reply each, until the end of them.
+    private var callsArriving: [MeshCore.BoxCall] = []
+    private var battery = BatteryWatch()
+    private var lastRefresh = Date.distantPast
 
     override init() {
         super.init()
@@ -97,6 +123,7 @@ final class BoardLink: NSObject, ObservableObject {
         peripheral = p
         p.delegate = self
         backoff = 1
+        forgetBox()
         state = .connecting
         if p.state == .connected { p.discoverServices([CBUUID(string: MeshCore.serviceUUID)]) } else { central.connect(p) }
     }
@@ -107,8 +134,15 @@ final class BoardLink: NSObject, ObservableObject {
         peripheral = nil
         tearDown()
         selfInfo = nil
+        forgetBox()
         if let p { central.cancelPeripheralConnection(p) }
         state = .off
+    }
+
+    /// Another box, or none: nothing known of the last one carries over.
+    private func forgetBox() {
+        deviceInfo = nil; boxInfo = nil; boxCalls = []; sync = HelpBox.Sync()
+        battery = BatteryWatch(); probablePowerCut = false
     }
 
     /// The link is gone: nothing in flight will be answered, and nothing is listened to.
@@ -184,6 +218,75 @@ final class BoardLink: NSObject, ObservableObject {
         await setUpChannels()
         await refreshBattery()
         if state == .ready { backoff = 1; await drainMessages() }
+        if isHelpBox {
+            await queryBox()
+            await provision()
+            await refreshBoxCalls()
+        }
+    }
+
+    /// Every 15 seconds while the app runs: the battery once a minute, for the power-cut guess on
+    /// a stock box, and a Help&I box's state and calls with it. A Help&I box that says it holds
+    /// nothing (reset, or forgotten) is set up again at once.
+    func tick() async {
+        guard state == .ready, Date().timeIntervalSince(lastRefresh) >= 60 else { return }
+        lastRefresh = Date()
+        await refreshBattery()
+        guard isHelpBox else { return }
+        await queryBox()
+        if boxInfo?.provisioned == false { await provision() }
+        await refreshBoxCalls()
+    }
+
+    // MARK: A Help&I box
+
+    /// Asks a Help&I box what it holds. One that holds nothing (reset, or never set up) is set up
+    /// again whatever it was sent before.
+    private func queryBox() async {
+        guard isHelpBox, case let .boxInfo(info)? = await run(.boxInfo, expect: { if case .boxInfo = $0 { return true }; return false }) else { return }
+        boxInfo = info
+        if !info.provisioned { sync.boxHoldsNothing() }
+    }
+
+    /// Sends the group (0x71), the members (0x72, in pages) and responders' first names (0x76)
+    /// that differ from what the box was last sent (`HelpBox.Sync`): at pairing, at joining a
+    /// group, and after every membership or settings change (firmware/DESIGN.md, section 6). One
+    /// run at a time, so two runs' pages never mix; a change during a run starts another after it.
+    private func provision() async {
+        if provisioning { provisionAgain = true; return }
+        provisioning = true
+        defer { provisioning = false }
+        repeat {
+            provisionAgain = false
+            await provisionOnce()
+        } while provisionAgain
+    }
+
+    private func provisionOnce() async {
+        guard isHelpBox, let setup, commands.isUp else { return }
+        for due in sync.due(setup, namesHeld: boxInfo?.names ?? 0) {
+            for command in due.commands {
+                guard case .ok? = await run(command, expect: okOrError) else { return }
+            }
+            sync.done(due)
+        }
+        await queryBox()
+    }
+
+    /// The box's own calls, as it sees them. Each comes as its own reply before the end of them.
+    private func refreshBoxCalls() async {
+        guard isHelpBox else { return }
+        callsArriving = []
+        guard case .boxEndOfCalls? = await run(.boxGetCalls, expect: { if case .boxEndOfCalls = $0 { return true }; return false }) else { return }
+        boxCalls = callsArriving
+    }
+
+    /// A frame the box made: the engine takes it in and carries it; a call's box is told what
+    /// the phone's routes did with it.
+    private func carry(_ frame: HelpFrame) async {
+        guard let onBoxFrame, let took = await onBoxFrame(frame), case let .call(_, request, _, _) = frame else { return }
+        _ = await run(.boxRouteResult(request: request, sent: took), expect: okOrError)
+        await refreshBoxCalls()
     }
 
     /// Sets the box up for the group: the Bluetooth code, then the channels. One run at a time; a
@@ -208,6 +311,7 @@ final class BoardLink: NSObject, ObservableObject {
 
     private func setUpOnce() async {
         guard case .deviceInfo(let dev)? = await run(.deviceQuery, expect: { if case .deviceInfo = $0 { return true }; return false }) else { return }
+        deviceInfo = dev
         // A box without a screen uses MeshCore's fixed code, 123456, the same on every box, so a
         // stranger's phone could pair. Replace it with a random one. (A box with a screen shows a
         // fresh random code at each start, and reports 0; that is left alone.) Only a code safely
@@ -253,6 +357,10 @@ final class BoardLink: NSObject, ObservableObject {
     func refreshBattery() async {
         if case let .battery(mv)? = await run(.getBattery, expect: { if case .battery = $0 { return true }; return false }) {
             batteryMillivolts = mv
+            // A Help&I box's own report of the mains takes precedence over any guess.
+            guard !isHelpBox else { return }
+            battery.add(mv, at: Date())
+            if probablePowerCut != battery.probablePowerCut { probablePowerCut = battery.probablePowerCut }
         }
     }
 
@@ -289,7 +397,9 @@ final class BoardLink: NSObject, ObservableObject {
         // Before the box is set up for the group, the setup's own drain will fetch these; draining
         // now would take them off the board and throw them away.
         if case .messagesWaiting = r { if state == .ready { Task { await drainMessages() } }; return }
+        if case let .boxFrame(f) = r { Task { await carry(f) }; return }
         if commands.receive(r) { return }
+        if case let .boxCall(c) = r { callsArriving.append(c); return }
         if case let .channelData(ch, type, payload, _) = r, listenChannels.contains(ch), type == HelpFrame.meshDataType, let f = HelpFrame(payload),
            let secret = secret(of: ch) {
             onFrame?(f, secret)

@@ -44,6 +44,7 @@ struct CallView: View {
 
     private var content: some View {
         VStack(spacing: 16) {
+            if model.board.probablePowerCut, model.me?.canCall == true { ProbablePowerCut() }
             if let r = model.current { StatusCard(request: r, composingSMS: $composingSMS) }
             if let r = model.current, r.colour != .green, r.status != .notSent || FollowUps.shownPosition != nil {
                 FollowUps(request: r)
@@ -167,6 +168,33 @@ struct StatusCard: View {
         case .sent?: return "\(name): sent"
         case let .failed(why)?: return "\(name): not sent (\(why))"
         case nil: return ""
+        }
+    }
+}
+
+/// A stock MeshCore box says only its battery voltage; when that falls as on a power cut
+/// (`BatteryWatch`), the caller may tell their responders, worded as the guess it is. A Help&I
+/// box reports a power cut itself, so this is never shown for one.
+struct ProbablePowerCut: View {
+    @EnvironmentObject var model: AppModel
+    @State private var told = false
+    @State private var problem: String?
+
+    var body: some View {
+        if !told {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Your box is running on its battery, so the power may be off.").font(.headline)
+                Text("You can tell your responders. They get a “\(Colour.amber.label)” call with a note saying it is probably a power cut.")
+                Button("Tell my responders") {
+                    problem = model.tellRespondersOfProbablePowerCut()
+                    told = problem == nil
+                }
+                .buttonStyle(.secondaryAction)
+                if let problem { Text(problem) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
         }
     }
 }

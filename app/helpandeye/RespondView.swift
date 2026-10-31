@@ -38,13 +38,19 @@ struct RequestRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Circle().fill((request.colour ?? .red).color).frame(width: 18, height: 18)
+                Circle().fill(request.isPowerReport ? Color.secondary : (request.colour ?? .red).color).frame(width: 18, height: 18)
                 Text(engine.name(ofUnit: request.key.unit)).font(.title3.bold())
                 Spacer()
                 Text(request.firstHeardAt, style: .relative)
             }
-            Text(request.colour.map { ButtonWords.words($0, in: callers) } ?? "Call for help (details still arriving)")
-            ForEach(request.orderedCategories, id: \.self) { Text("• \(ButtonWords.words($0, in: callers))") }
+            if request.isPowerReport {
+                // Nobody pressed: their box reports it, and without a mains wire it is a guess.
+                Text(request.powerCutIsProbable ? "Probably a power cut at their home. Their box's battery is falling."
+                     : "Power cut at their home. Their box is on its battery.")
+            } else {
+                Text(request.colour.map { ButtonWords.words($0, in: callers) } ?? "Call for help (details still arriving)")
+                ForEach(request.orderedCategories, id: \.self) { Text("• \(ButtonWords.words($0, in: callers))") }
+            }
             ForEach(request.orderedNotes, id: \.self) { Text("“\($0)”").italic() }
             if let p = request.position,
                let url = URL(string: "https://maps.apple.com/?ll=\(p.latitude),\(p.longitude)&q=Help%26I%20caller") {
