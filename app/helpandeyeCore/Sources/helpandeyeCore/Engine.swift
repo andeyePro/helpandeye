@@ -242,10 +242,15 @@ public final class HelpEngine: ObservableObject {
     public func name(ofUnit unit: UInt32) -> String { group?.member(unit: unit)?.name ?? "Unit \(unit)" }
     public func name(ofMember n: UInt16) -> String { n == saved?.me ? "You" : (group?.member(n)?.name ?? "Responder \(n)") }
 
-    /// The unit of the Help&I box paired with this phone, when it is a member of this group: the
-    /// household's own, so its calls are never alerted for here (firmware/DESIGN.md, section 4).
-    public var pairedBoxUnit: UInt32? { group?.boxMember(key: mesh.boxPublicKey)?.unit }
-    private func isHousehold(_ unit: UInt32) -> Bool { unit == me?.unit || unit == pairedBoxUnit }
+    /// The unit of the Help&I box this phone is connected to, when the box is in this member's
+    /// home: the household's own, so its calls are never alerted for here and the phone carries
+    /// them (firmware/DESIGN.md, section 4). Nil for anyone else's box, even one this phone added
+    /// or set up: a coordinator who responds must still be alerted for its calls.
+    public var householdBoxUnit: UInt32? {
+        guard let g = group, let me, let box = g.boxMember(key: mesh.boxPublicKey), g.box(box, isHomeOf: me) else { return nil }
+        return box.unit
+    }
+    private func isHousehold(_ unit: UInt32) -> Bool { unit == me?.unit || unit == householdBoxUnit }
 
     /// Runs `work` and remembers it, so tests can wait for every send to finish.
     private func spawn(_ work: @escaping @MainActor () async -> Void) {
@@ -933,27 +938,37 @@ public final class HelpEngine: ObservableObject {
 
     /// A coordinator adds the Help&I box with this MeshCore key and sealing key (from its info
     /// reply) as a member of its own, a caller with its own unit (decision 8), told to everyone
-    /// like any member. Returns why it could not be, if it could not.
+    /// like any member, in the home of member `home` if one is chosen. Returns why it could not be,
+    /// if it could not.
     @discardableResult
-    public func addBox(key: Data, sealKey: Data, name: String) -> String? {
+    public func addBox(key: Data, sealKey: Data, name: String, home: UInt16? = nil) -> String? {
         guard actsAsCoordinator, let g = group else { return "Only a coordinator can add a box to the group" }
         guard g.boxMember(key: key) == nil else { return "This box is already in the group" }
         let me = saved?.me
         var added: UInt16?
-        updateGroup { added = $0.addBox(key: key, sealKey: sealKey, name: name, by: me) }
+        updateGroup {
+            added = $0.addBox(key: key, sealKey: sealKey, name: name, by: me)
+            if let added, let home { $0.policy.boxHome[added] = home }
+        }
         guard added != nil else { return "This box could not be added" }
         log("You added the box \(name)")
         return nil
     }
 
-    /// A frame the paired Help&I box made (push 0xA3): its call, its signed I'm OK or close, or a
-    /// sealed power-cut report. The box has sent it on the radio itself; the phone takes it in as
-    /// if heard there and carries it on its other routes, like its own. A call is kept as the
-    /// household's own, never alerted for here, and what comes back for it (acknowledgements,
-    /// closes) reaches its record like the phone's own calls'. Returns whether any route took a
-    /// call, for the box (0x74); nil for anything else.
+    /// A frame the connected Help&I box made (push 0xA3): its call, its signed I'm OK or close, or
+    /// a sealed power-cut report. The box has sent it on the radio itself. The phone of the box's
+    /// home takes it in as if heard there and carries it on its other routes, like its own: a call
+    /// is kept as the household's own, never alerted for here, and what comes back for it
+    /// (acknowledgements, closes) reaches its record like the phone's own calls'. Any other phone
+    /// connected to it, such as a coordinator's setting it up, only hears it, as on the radio, so
+    /// a responder there is alerted from their turn like everyone else. Returns whether any route
+    /// took a call, for the box (0x74); nil for anything else.
     public func receiveFromBox(_ frame: HelpFrame) async -> Bool? {
-        guard !companion, let unit = pairedBoxUnit, let g = group else { return nil }
+        guard !companion, let g = group, g.boxMember(key: mesh.boxPublicKey) != nil else { return nil }
+        guard let unit = householdBoxUnit else {
+            receive(frame, via: .mesh)
+            return nil
+        }
         let gid = g.secrets.groupID
         switch frame {
         case let .call(u, number, colour, sentAt) where u == unit:
@@ -1265,9 +1280,9 @@ public final class HelpEngine: ObservableObject {
                 if allowed {
                     settleCall(IncomingRequest.Key(unit: unit, request: request),
                            Settled(state: state, by: signer, at: Date(timeIntervalSince1970: TimeInterval(at)), reason: reason), via: route)
-                    // A coordinator's close of the paired box's call, heard off the air, goes on
+                    // A coordinator's close of the household's box's call, heard off the air, goes on
                     // the radio for the box.
-                    if unit == pairedBoxUnit, route != .mesh, sender.unit != unit {
+                    if unit == householdBoxUnit, route != .mesh, sender.unit != unit {
                         let gid = groupID
                         spawn { _ = await self.sendOnMesh(frame, kind: .optional, in: gid) }
                     }

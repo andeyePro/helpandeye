@@ -578,17 +578,17 @@ Pass: step 2 boots to the pairing code, provisions and sends the call like any b
 
 ## 60. Adding a Help&I box with the app
 
-Needs box A unprovisioned, phone A in the group as a caller (not a coordinator), phone B as the group's first coordinator, and a third board logging the channel. Internet on for both phones.
+Needs box A unprovisioned, phone A in the group as a caller (not a coordinator), phone B as the group's first coordinator who also responds, and a third board logging the channel. Internet on for both phones.
 
 1. On phone A, pair with box A in the Box tab.
-2. On phone B, pair with box A instead of its own box. In the Box tab, give it a name and tap Add this box to the group.
+2. On phone B, pair with box A instead of its own box. In the Box tab, give it a name, choose phone A's person under In the home of, and tap Add this box to the group. Once box A shows it is set up, with phone B still paired with it, press red on it, wait for phone B's turn and acknowledge on phone B.
 3. On phone B, open the box's member page, turn on Tell responders about a power cut at their home, and pair phone B with its own box again.
 4. On phone A, pair with box A again and open the Box tab. Press red on box A with phone A's Bluetooth on, then with it off.
 5. On phone B, acknowledge each call. Then, in Advanced settings, turn on Responders' first names on boxes, press red on box A and acknowledge on phone B. Turn it off again, and press and acknowledge once more.
 6. On phone B, set box A's antenna to an external antenna in its member page.
 7. Pair phone A with a box on MeshCore's stock firmware.
 
-Pass: in step 1 the Box tab says Firmware: Help&I box and asks phone A's person to ask their coordinator, and box A still shows "Not set up yet". In step 2 the box appears in the member list on both phones as a caller with its own unit, and box A shows it is set up within a minute. In step 4 the Box tab shows the box's name, unit, Set up, On mains and the call with its status as the box shows it; phone A shows no alert for the box's call and phone B hears it once (by both the radio and the internet when phone A's Bluetooth is on, by the radio only when off). With Bluetooth on, box A shows "seen" after phone B acknowledges even when phone B's acknowledgement goes only by the internet (phone B's box off). In step 5 box A says "Sam has seen your call." (phone B's person's first name) with names on, and "A responder has seen your call." again once they are off; the third board hears no name on air. In step 6 the box's power cap in its info changes without pairing again. In step 7 the Box tab says Firmware: MeshCore box and nothing else changes.
+Pass: in step 1 the Box tab says Firmware: Help&I box and asks phone A's person to ask their coordinator, and box A still shows "Not set up yet". In step 2 the box appears in the member list on both phones as a caller with its own unit, and box A shows it is set up within a minute; phone B alerts for the red press from its turn, as for anyone's call, and box A shows "seen" after the acknowledgement. In step 4 the Box tab shows the box's name, unit, Set up, On mains and the call with its status as the box shows it; phone A shows no alert for the box's call and phone B hears it once (by both the radio and the internet when phone A's Bluetooth is on, by the radio only when off). With Bluetooth on, box A shows "seen" after phone B acknowledges even when phone B's acknowledgement goes only by the internet (phone B's box off). In step 5 box A says "Sam has seen your call." (phone B's person's first name) with names on, and "A responder has seen your call." again once they are off; the third board hears no name on air. In step 6 the box's power cap in its info changes without pairing again. In step 7 the Box tab says Firmware: MeshCore box and nothing else changes.
 
 ## 61. A power cut, as the phones show it
 

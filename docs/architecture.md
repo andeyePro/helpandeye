@@ -118,10 +118,14 @@ wrote.
 - **The box as its own member.** It joins as a caller with its own unit. A coordinator pairs
   their phone with it once and taps Add this box: the phone takes the box's signing key (its
   MeshCore public key) and its sealing key (from the info reply, 0xA0), and adds it with the usual
-  signed member add, so every phone knows it. Anyone else's phone says to ask the coordinator.
-  While a phone is paired with a box, that box's calls count as its household's own: the phone
-  is never alerted for them, as for its own (`HelpEngine.pairedBoxUnit`), which also holds for a
-  coordinator who has paired with someone's box to add it.
+  signed member add, so every phone knows it, choosing whose home it is in (the group setting
+  `boxHome`, which the coordinator can change later). Anyone else's phone says to ask the
+  coordinator. A box's calls count as a phone's own household's only while that phone is
+  connected to it and it is in that member's home: it calls under their unit, or the coordinator
+  chose them for it (`HelpEngine.householdBoxUnit`). That phone is never alerted for them, as for
+  its own, and carries them. Any other phone connected to it, such as a coordinator's adding or
+  setting it up, only hears what it pushes, as if on the radio, so a coordinator who responds is
+  alerted from their turn like everyone else.
 - **Setting it up.** The phone of the first group sends the group (0x71), the member list (0x72)
   and, if the group puts them on boxes, responders' first names (0x76): at pairing, at joining,
   and after any change of members or settings, sending only the parts that changed

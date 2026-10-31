@@ -156,10 +156,10 @@ final class AppModel: ObservableObject {
     var boxMember: Member? { group?.boxMember(key: board.selfInfo?.publicKey) }
 
     /// A coordinator adds the Help&I box on this phone's Bluetooth to the group, with the keys it
-    /// gave in its info reply.
-    func addBox(name: String) -> String? {
+    /// gave in its info reply, in the home of the member the coordinator chose, if any.
+    func addBox(name: String, home: UInt16?) -> String? {
         guard let key = board.selfInfo?.publicKey, let info = board.boxInfo else { return "The box has not answered yet. Try again in a minute." }
-        return engine.addBox(key: key, sealKey: info.sealKey, name: name)
+        return engine.addBox(key: key, sealKey: info.sealKey, name: name, home: home)
     }
 
     func tellRespondersOfProbablePowerCut() -> String? { engine.tellRespondersOfProbablePowerCut() }

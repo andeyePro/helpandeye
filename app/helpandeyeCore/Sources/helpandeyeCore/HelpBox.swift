@@ -166,4 +166,10 @@ extension GroupState {
         guard let key, key.count == 32 else { return nil }
         return members.first { $0.signingKey == key }
     }
+
+    /// Whether this box is in `member`'s home: it calls under their unit, or a coordinator chose
+    /// them for it. Merely having set it up, or being connected to it, never makes it anyone's.
+    public func box(_ box: Member, isHomeOf member: Member) -> Bool {
+        (box.unit != nil && box.unit == member.unit) || policy.boxHome[box.number] == member.number
+    }
 }

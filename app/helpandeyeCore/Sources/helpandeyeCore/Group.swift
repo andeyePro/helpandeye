@@ -161,10 +161,13 @@ public struct GroupState: Codable, Equatable, Sendable {
         /// (firmware/DESIGN.md, section 6). Off unless a coordinator turns it on, as Martin may still
         /// decide against names on boxes (section 14); with it off no name is sent.
         public var namesOnBox = false
+        /// Whose home each Help&I box is in, by the box's member number: the member a coordinator
+        /// chose. Only that member's phone, connected to the box, treats its calls as its own.
+        public var boxHome: [UInt16: UInt16] = [:]
         public init() {}
 
         enum CodingKeys: String, CodingKey {
-            case useDistance, profiles, profileOf, keepsLog, antennaOf, reportsPowerCut, namesOnBox, redInterval, amberInterval, buttonWords
+            case useDistance, profiles, profileOf, keepsLog, antennaOf, reportsPowerCut, namesOnBox, boxHome, redInterval, amberInterval, buttonWords
         }
 
         /// Settings from before profiles (escalation times and button words for the whole group)
@@ -177,6 +180,7 @@ public struct GroupState: Codable, Equatable, Sendable {
             antennaOf = try c.value(.antennaOf, or: [:])
             reportsPowerCut = try c.value(.reportsPowerCut, or: [])
             namesOnBox = try c.value(.namesOnBox, or: false)
+            boxHome = try c.value(.boxHome, or: [:])
             if let p = try c.decodeIfPresent([Profile].self, forKey: .profiles), !p.isEmpty {
                 profiles = p
             } else {
@@ -197,6 +201,7 @@ public struct GroupState: Codable, Equatable, Sendable {
             if !antennaOf.isEmpty { try c.encode(antennaOf, forKey: .antennaOf) }
             if !reportsPowerCut.isEmpty { try c.encode(reportsPowerCut.sorted(), forKey: .reportsPowerCut) }
             if namesOnBox { try c.encode(namesOnBox, forKey: .namesOnBox) }
+            if !boxHome.isEmpty { try c.encode(boxHome, forKey: .boxHome) }
         }
     }
 

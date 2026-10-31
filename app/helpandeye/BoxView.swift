@@ -84,6 +84,7 @@ struct BoxView: View {
 struct HelpBoxSection: View {
     @EnvironmentObject var model: AppModel
     @State private var name = ""
+    @State private var home: UInt16?
     @State private var problem: String?
 
     var body: some View {
@@ -91,6 +92,12 @@ struct HelpBoxSection: View {
             if let member = model.boxMember {
                 LabeledContent("In the group as", value: member.name)
                 if let unit = member.unit { LabeledContent("Unit", value: String(unit)) }
+                if model.me?.role == .coordinator {
+                    BoxHomePicker(box: member.number, home: Binding(get: { model.group?.policy.boxHome[member.number] },
+                                                                    set: { h in model.updateGroup { $0.policy.boxHome[member.number] = h } }))
+                } else if let h = model.group?.policy.boxHome[member.number], let who = model.group?.member(h) {
+                    LabeledContent("In the home of", value: who.name)
+                }
                 if let info = model.board.boxInfo {
                     Text(info.provisioned ? "Set up. Its buttons call for help with or without this phone." : "Setting up the box…")
                     LabeledContent("Power", value: powerWords(info))
@@ -104,8 +111,9 @@ struct HelpBoxSection: View {
             } else if let group = model.group, model.me?.role == .coordinator {
                 Text("This box is not in \(group.name) yet. Add it as a member of its own, so its buttons can call for help without a phone.")
                 LabeledField(label: "Its name in the group, such as Kitchen box at no. 4", text: $name)
+                BoxHomePicker(box: nil, home: $home)
                 Button("Add this box to the group") {
-                    problem = model.addBox(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+                    problem = model.addBox(name: name.trimmingCharacters(in: .whitespacesAndNewlines), home: home)
                 }
                 .buttonStyle(.action)
                 .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -138,5 +146,23 @@ struct HelpBoxSection: View {
         case .notSent: "Not sent."
         case .closed: "Closed."
         }
+    }
+}
+
+/// Whose home a Help&I box is in. Only that person's phone, connected to the box, carries its calls
+/// and is not alerted for them; every other responder's phone is, the coordinator's included.
+struct BoxHomePicker: View {
+    @EnvironmentObject var model: AppModel
+    let box: UInt16?
+    @Binding var home: UInt16?
+
+    var body: some View {
+        Picker("In the home of", selection: $home) {
+            Text("No one chosen").tag(UInt16?.none)
+            ForEach(model.group?.members.filter { $0.number != box } ?? []) { m in
+                Text(m.name).tag(Optional(m.number))
+            }
+        }
+        Text("Their phone, when connected to the box, also sends its calls over the internet and home Wi-Fi, and is not alerted for them. Everyone else who responds is alerted as usual.")
     }
 }

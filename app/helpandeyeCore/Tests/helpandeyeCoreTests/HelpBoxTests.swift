@@ -1,18 +1,18 @@
 import XCTest
 @testable import helpandeyeCore
 
+private func hex(_ s: String) -> Data {
+    let s = s.replacingOccurrences(of: " ", with: "")
+    return Data(stride(from: 0, to: s.count, by: 2).map { i in
+        UInt8(s[s.index(s.startIndex, offsetBy: i)..<s.index(s.startIndex, offsetBy: i + 2)], radix: 16)!
+    })
+}
+
 /// The app's side of a Help&I box (firmware/DESIGN.md, sections 6 and 10): the bytes it sends and
 /// reads are pinned to DESIGN.md's tables and to what the firmware's `core/provision.hpp` writes,
 /// and the sealed report to bytes the firmware core made with fixed keys (TweetNaCl, as in
 /// `firmware/test`).
 final class HelpBoxTests: XCTestCase {
-    func hex(_ s: String) -> Data {
-        let s = s.replacingOccurrences(of: " ", with: "")
-        return Data(stride(from: 0, to: s.count, by: 2).map { i in
-            UInt8(s[s.index(s.startIndex, offsetBy: i)..<s.index(s.startIndex, offsetBy: i + 2)], radix: 16)!
-        })
-    }
-
     // The firmware's fixed keys: the box's identity from the seed TweetNaCl was given, and the
     // responders' X25519 scalar 0x30, 0x31, ... clamped.
     let seed = "112233445566778899aabbccddeeff102132435465768798a9bacbdcedfe0f20"
@@ -222,6 +222,23 @@ final class HelpBoxTests: XCTestCase {
         XCTAssertNotNil(g.addedFrame(number), "told to everyone like any member")
     }
 
+    func testABoxIsSomeonesHomeOnlyByTheirUnitOrTheCoordinatorsChoice() throws {
+        var g = firmwareGroup()
+        g.members.append(Member(number: 5, name: "Pat", role: .both, publicKey: Data(count: 32), unit: 70005, signingKey: Data(repeating: 5, count: 32)))
+        let box = try XCTUnwrap(g.member(4)), pat = try XCTUnwrap(g.member(5)), sam = try XCTUnwrap(g.member(1))
+        XCTAssertFalse(g.box(box, isHomeOf: pat))
+        XCTAssertFalse(g.box(box, isHomeOf: sam), "nor the coordinator's, who added it")
+        g.policy.boxHome[4] = 5
+        XCTAssertTrue(g.box(box, isHomeOf: pat))
+        XCTAssertFalse(g.box(box, isHomeOf: sam))
+        g.policy.boxHome = [:]
+        g.members[1].unit = 70005
+        XCTAssertTrue(g.box(try XCTUnwrap(g.member(4)), isHomeOf: pat), "a box calling under Pat's own unit")
+        var chosen = GroupState.StoredPolicy()
+        chosen.boxHome = [4: 5]
+        XCTAssertEqual(try JSONDecoder().decode(GroupState.StoredPolicy.self, from: JSONEncoder().encode(chosen)).boxHome, [4: 5])
+    }
+
     /// The sealed power-cut report exactly as the firmware core made it with the fixed keys above
     /// (firmware/DESIGN.md, section 10): part 1 a Power cut follow-up, part 2 the hours left, or on
     /// a box without the mains wire its "probably".
@@ -302,7 +319,7 @@ final class HelpBoxTests: XCTestCase {
         await air.run()
         for p in air.phones { await p.engine.boxReady() }
         await air.run()
-        XCTAssertNil(coordinator.engine.addBox(key: boxKey, sealKey: boxIdentity.publicKey, name: "Kitchen box"))
+        XCTAssertNil(coordinator.engine.addBox(key: boxKey, sealKey: boxIdentity.publicKey, name: "Kitchen box", home: household.engine.saved!.me))
         await air.run()
         air.groupSends = []
     }
@@ -329,14 +346,45 @@ final class HelpBoxTests: XCTestCase {
             XCTAssertEqual(m.publicKey, boxIdentity.publicKey, "its sealing key, from its info reply")
         }
         XCTAssertEqual(responder.engine.group?.boxMember(key: boxKey)?.name, "Kitchen box")
-        XCTAssertEqual(household.engine.pairedBoxUnit, boxUnit)
-        XCTAssertNil(responder.engine.pairedBoxUnit, "another phone's box is not this household's")
+        XCTAssertEqual(household.engine.householdBoxUnit, boxUnit, "the coordinator chose Pat's home for it, and that reached Pat's phone")
+        XCTAssertNil(responder.engine.householdBoxUnit, "another phone's box is not this household's")
+        coordinator.mesh.boxPublicKey = boxKey
+        XCTAssertNil(coordinator.engine.householdBoxUnit, "connected to it, having added it, does not make it the coordinator's")
         XCTAssertEqual(coordinator.engine.activity.log.entries.last?.text, "You added the box Kitchen box")
         XCTAssertNotNil(household.engine.addBox(key: boxKey, sealKey: boxIdentity.publicKey, name: "Again"), "only a coordinator adds, and never twice")
         let setup = try XCTUnwrap(HelpBox.setup(for: household.engine.group!, box: boxKey, at: clock.now))
         XCTAssertEqual(setup.member, boxMember); XCTAssertEqual(setup.unit, boxUnit)
         XCTAssertEqual(setup.group.suffix(2), Data([1, 0]), "the first coordinator")
         XCTAssertEqual(setup.members[0][5], 4, "every member, the box included")
+    }
+
+    /// The safety fix: a coordinator who responds, connected to someone else's box to add or set it
+    /// up, hears its red press from the box itself and is alerted from their own turn, as if they
+    /// had heard it on the radio. They do not carry it as their own.
+    func testACoordinatorConnectedToSomeoneElsesBoxIsAlertedFromTheirTurn() async throws {
+        let sam = coordinator.engine.saved!.me, pat = household.engine.saved!.me, jo = responder.engine.saved!.me
+        // Sam answered last time, so comes last: Pat, Jo, then Sam.
+        household.engine.press(.red)
+        await air.run()
+        let patsCall = try XCTUnwrap(household.engine.current)
+        coordinator.engine.acknowledge(IncomingRequest.Key(unit: patsCall.unit, request: patsCall.number))
+        await air.run()
+        // Only one phone at a time is connected to a box: Pat's phone is away, Sam's is on it.
+        household.mesh.boxPublicKey = Data(repeating: 9, count: 32)
+        coordinator.mesh.boxPublicKey = boxKey
+        XCTAssertNil(coordinator.engine.householdBoxUnit)
+        let pressed = clock.now
+        let none = await coordinator.engine.receiveFromBox(boxCall(1))
+        XCTAssertNil(none, "nothing for the box to hear back from a phone that does not carry its calls")
+        await air.run()
+        let r = try XCTUnwrap(coordinator.engine.activity.inbox.requests[key], "heard, as on the radio")
+        let e = try XCTUnwrap(coordinator.engine.escalation(for: r))
+        XCTAssertEqual(e.order, [pat, jo, sam])
+        let alert = try XCTUnwrap(coordinator.alerts.scheduled[key], "the coordinator is alerted for someone else's box")
+        XCTAssertEqual(alert.times.first, pressed.addingTimeInterval(2 * e.interval), "from their turn, third")
+        XCTAssertFalse(alert.calm)
+        XCTAssertFalse(coordinator.engine.activity.outgoing.contains { $0.fromBox }, "not carried as the coordinator's own")
+        XCTAssertNil(household.engine.activity.inbox.requests[key], "Pat's phone heard nothing: the box is not connected to it")
     }
 
     func testTheBoxsCallIsCarriedOnThePhonesRoutesAndNeverAlertsTheHousehold() async throws {
