@@ -436,6 +436,24 @@ final class HelpBoxTests: XCTestCase {
         XCTAssertTrue(alert.calm)
     }
 
+    func testAProbablePowerCutGoesAsANoteWordedAsAGuess() async throws {
+        household.relay.isConfigured = false; household.mesh.isReady = false
+        XCTAssertEqual(household.engine.tellRespondersOfProbablePowerCut(), HelpEngine.cannotSendPersonal)
+        XCTAssertNil(household.engine.current, "no Need a hand that could not carry the note")
+        household.relay.isConfigured = true; household.mesh.isReady = true
+        XCTAssertNil(household.engine.tellRespondersOfProbablePowerCut())
+        await air.run()
+        let r = try XCTUnwrap(household.engine.current)
+        XCTAssertEqual(r.colour, .amber, "a new Need a hand, as nothing was open")
+        XCTAssertEqual(r.notes, [HelpBox.probablePowerCutNote])
+        let k = IncomingRequest.Key(unit: r.unit, request: r.number)
+        XCTAssertEqual(responder.engine.activity.inbox.requests[k]?.orderedNotes, ["Power probably cut: the battery is falling."])
+        household.engine.press(.red)
+        XCTAssertNil(household.engine.tellRespondersOfProbablePowerCut())
+        XCTAssertEqual(household.engine.current?.colour, .red, "on an open call, the note goes on it")
+        XCTAssertEqual(household.engine.current?.notes, [HelpBox.probablePowerCutNote])
+    }
+
     func testAnotherUnitsCallFromTheBoxIsIgnored() async {
         let other = HelpFrame.call(unit: household.engine.me!.unit!, request: 5, colour: .red, sentAt: UInt32(clock.now.timeIntervalSince1970))
         let none = await household.engine.receiveFromBox(other)

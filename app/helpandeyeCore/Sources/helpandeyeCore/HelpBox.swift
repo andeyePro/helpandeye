@@ -140,8 +140,9 @@ public enum HelpBox {
         public mutating func boxHoldsNothing() { sent = [:] }
     }
 
-    /// The note a Help&I box without the mains wire sends after its power-cut report: a guess, so
-    /// it says so (firmware/DESIGN.md, section 10).
+    /// The note a Help&I box without the mains wire sends after its power-cut report, and the one a
+    /// caller is offered to send when a stock box's battery suggests a power cut (`BatteryWatch`):
+    /// a guess, so it says so (firmware/DESIGN.md, section 10).
     public static let probablePowerCutNote = "Power probably cut: the battery is falling."
 }
 

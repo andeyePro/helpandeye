@@ -991,6 +991,17 @@ public final class HelpEngine: ObservableObject {
         }
     }
 
+    /// A stock box's battery suggests a power cut (`BatteryWatch`) and the caller chose to tell
+    /// responders: as a note on their open call, or on a new Need a hand. Returns why it could not
+    /// go, if it could not.
+    @discardableResult
+    public func tellRespondersOfProbablePowerCut() -> String? {
+        if let keyProblem { return keyProblem }
+        guard canSendPersonal else { return Self.cannotSendPersonal }
+        if current?.isUnsettled != true { press(.amber) }
+        return addNote(HelpBox.probablePowerCutNote)
+    }
+
     /// Tells the group which box is this phone's, and adds the other members' boxes as contacts.
     public func boxReady() async {
         guard let myNumber = saved?.me, let key = mesh.boxPublicKey else { return }
