@@ -17,6 +17,8 @@ public enum RelayPoll {
         public let next: Int
         /// The log's name; a different one means the relay was reset.
         public let epoch: String?
+        /// The key the relay takes as the group's first coordinator.
+        public var owner: String?
         public let messages: [Message]
     }
 

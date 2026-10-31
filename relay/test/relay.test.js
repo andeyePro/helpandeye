@@ -457,3 +457,17 @@ test("a new first coordinator's deputy counts afresh, whatever the lost phone's 
     takeover: { from: second.key, to: third.key, signatures: [theirs], deputy: { version: 1, signature: (await second.sign("", "", "", 0, named)).signature } } }, id);
   assert.equal(await relay.storage.get("owner"), third.key, "the deputy takes over at once");
 });
+
+test("of two takeovers at once the relay keeps the first it can check, and tells every member which", async () => {
+  const { relay, owner, second, third, member, id, raw, c, m } = await takeoverSetUp();
+  const both = (p) => new Uint8Array([...new TextEncoder().encode("HELPA-TAKEOVER-1"), ...id, ...raw(owner.key), ...raw(p.key)]);
+  const by = async (signer, to) => ({ key: signer.key, signature: (await signer.sign("", "", "", 0, both(to))).signature });
+  const listTo = async (to, other) => ({ generation: 2, members: [c(second), c(third), m(member)], removed: [owner.key], primary: to.key,
+    takeover: { from: owner.key, to: to.key, signatures: [await by(to, to), await by(other, to)] } });
+  assert.equal((await relay.since(member.key, 0)).owner, owner.key);
+  await relay.setMembers(third.key, await listTo(third, second), id);
+  await rejects(relay.setMembers(second.key, await listTo(second, third), id), 403);
+  assert.equal(await relay.storage.get("owner"), third.key);
+  assert.equal((await relay.since(member.key, 0)).owner, third.key, "read with the messages");
+  assert.equal((await relay.since(second.key, 0)).owner, third.key);
+});

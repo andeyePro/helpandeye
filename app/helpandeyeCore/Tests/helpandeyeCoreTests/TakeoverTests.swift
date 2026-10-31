@@ -161,6 +161,81 @@ import XCTest
         XCTAssertEqual(air.relay.deputyVersion, second.engine.group?.deputyVersion, "and so does the relay")
     }
 
+    /// The third coordinator, the deputy, takes over just as the second does with the third's
+    /// agreement, before either hears the other.
+    private func twoTakeOversAtOnce() async {
+        coordinator.engine.nameDeputy(n3)
+        await air.run()
+        lose(coordinator)
+        third.engine.agreeToTakeover(by: n2)
+        await air.run()
+        XCTAssertEqual(second.engine.takeoverPath, .agreed(by: n3))
+        XCTAssertEqual(third.engine.takeoverPath, .deputy)
+        XCTAssertTrue(second.engine.takeOver())
+        XCTAssertTrue(third.engine.takeOver())
+        await air.run()
+    }
+
+    /// The loser's phone steps back to the keys every member still has, says so calmly, and takes
+    /// the winner's update code.
+    private func stepsBack(_ loser: Phone, to winner: Phone, file: StaticString = #filePath, line: UInt = #line) throws {
+        let w = winner.engine.saved!.me
+        let g = try XCTUnwrap(loser.engine.group)
+        XCTAssertFalse(loser.engine.isPrimaryCoordinator, file: file, line: line)
+        XCTAssertEqual(loser.engine.activity.tookOverFirst, w, file: file, line: line)
+        XCTAssertEqual(loser.engine.activity.log.entries.last?.text,
+                       "\(loser.engine.name(ofMember: w)) also took over as first coordinator, and the group follows them rather than you", file: file, line: line)
+        XCTAssertEqual(g.secrets.channelSecret, winner.engine.group?.previousSecrets?.channelSecret, "the keys before, as every member has", file: file, line: line)
+        XCTAssertNil(g.previousSecrets, file: file, line: line)
+        XCTAssertTrue(g.needsKeyUpdate, file: file, line: line)
+        let update = try Joining.update(XCTUnwrap(winner.engine.group), for: XCTUnwrap(g.member(loser.engine.saved!.me)), coordinator: winner.identity)
+        loser.engine.applyKeyUpdate(try Joining.openUpdate(update, current: g, me: loser.identity, relayOwner: loser.engine.activity.relayOwner))
+        XCTAssertEqual(loser.engine.group?.secrets, winner.engine.group?.secrets, file: file, line: line)
+        XCTAssertFalse(loser.engine.group!.needsKeyUpdate, file: file, line: line)
+        XCTAssertNil(loser.engine.activity.tookOverFirst, file: file, line: line)
+    }
+
+    /// Two takeovers at once: the second's phone is offline just then, so the relay takes the
+    /// third's. Phones that have not read the relay yet follow the lower member number, the
+    /// second; once they read it, every phone follows the third, the second's included.
+    func testTwoTakeoversAtOnceSettleOnTheOneTheRelayTook() async throws {
+        second.relay.isConfigured = false
+        await twoTakeOversAtOnce()
+        XCTAssertEqual(air.relay.owner, third.relay.key)
+        XCTAssertTrue(third.engine.isPrimaryCoordinator, "the relay took it")
+        XCTAssertTrue(second.engine.isPrimaryCoordinator, "not heard from the relay yet")
+        for p in [caller, responder] as [Phone] { XCTAssertEqual(p.engine.group?.primaryCoordinator, n2, "the lower member number, for now") }
+        second.relay.isConfigured = true
+        air.poll()
+        await air.run()
+        everyoneFollows(third)
+        try stepsBack(second, to: third)
+        XCTAssertEqual(responder.engine.group?.takeover?.to, n3)
+        // The second's phone, sending its own list again, is refused; the relay keeps the third.
+        second.engine.tick()
+        await air.run()
+        XCTAssertEqual(air.relay.owner, third.relay.key)
+        XCTAssertFalse(second.engine.isPrimaryCoordinator)
+    }
+
+    /// With no relay, every phone follows the lower member number, the third's phone included.
+    func testTwoTakeoversAtOnceWithoutARelaySettleOnTheLowerNumber() async throws {
+        for p in air.phones { p.relay.isConfigured = false }
+        await twoTakeOversAtOnce()
+        XCTAssertLessThan(n2, n3)
+        for p in [caller, responder, third] as [Phone] {
+            XCTAssertEqual(p.engine.group?.primaryCoordinator, n2, "\(p.engine.saved!.me) follows the second")
+            XCTAssertNil(p.engine.group?.member(1))
+            XCTAssertEqual(p.engine.group?.membershipVersion, second.engine.group?.membershipVersion)
+        }
+        XCTAssertTrue(second.engine.isPrimaryCoordinator)
+        try stepsBack(third, to: second)
+        // Heard again, as during the changeover, nothing moves.
+        await t.advance(86_400 + 60)
+        for p in [caller, responder, third] as [Phone] { XCTAssertEqual(p.engine.group?.primaryCoordinator, n2) }
+        XCTAssertTrue(second.engine.isPrimaryCoordinator)
+    }
+
     /// A phone that alone heard nothing for a week (abroad, say) asks the relay, which has heard
     /// from the first coordinator's phone: nothing changes, anywhere, and it says why.
     func testTheRelayHavingHeardTheFirstCoordinatorWithinAWeekKeepsThem() async {

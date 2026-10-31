@@ -202,6 +202,17 @@ wrote.
   member list during the changeover and travels inside each update code, so a phone that missed it
   catches up from either. Signing over keys rather than member numbers lets the relay check the
   same bytes.
+- Two coordinators can take over at once, each before hearing of the other (a deputy and an agreed
+  pair, say). Every phone keeps the takeovers it hears and follows one by a rule all share
+  (`GroupState.prefers`): the one the relay took, as the relay takes only the first it can check
+  and tells every member its owner with each read (`owner` in `GET /messages`); where the relay
+  has taken neither, or a phone has not read it since, the one to the lower member number. A rival
+  counts only with the proof the phone would have asked of it first, checked against the group as
+  it was. A phone following the other one moves over (`GroupState.follow`): if it holds that
+  one's new keys, it goes back to the keys before, which every member still has, and waits for
+  the winner's update code, as after any removal. On the loser's own phone the group's screen says
+  "<name> also took over as first coordinator, and the group follows them rather than you. They
+  will show you a new code to scan here."
 - The group keeps its ID through a takeover. The relay, which made the group's owner the key the
   ID was made from, takes a new owner only from a member list sent by that new owner with the
   takeover in keys (`takeover` in `PUT /members`): every signature a current coordinator's, the

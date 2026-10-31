@@ -72,6 +72,7 @@ final class AppModel: ObservableObject {
         board.isGroupBox = { [weak self] in self?.boxMember != nil }
         relay.onFrame = { [weak self] in self?.engine.receive($0, via: .internet) }
         relay.onAllowanceLow = { [weak self] in self?.engine.raise(.allowanceLow) }
+        relay.onOwner = { [weak self] in self?.engine.relayOwner(is: $0) }
         home.onFrame = { [weak self] in self?.engine.receive($0, via: .wifi) }
         home.keeps = { [weak self] in self?.engine.takes($0) ?? false }
         board.$state.removeDuplicates().sink { [weak self] state in
@@ -278,6 +279,7 @@ final class AppModel: ObservableObject {
         link.onText = { [weak e] in e?.receiveText(from: $0, $1) }
         relay.onFrame = { [weak e] in e?.receive($0, via: .internet) }
         relay.onAllowanceLow = { [weak e] in e?.raise(.allowanceLow) }
+        relay.onOwner = { [weak e] in e?.relayOwner(is: $0) }
         relay.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &bag)
         relay.pushToken = self.relay.pushToken
         e.bandChanged(board.selfInfo?.radio.band)

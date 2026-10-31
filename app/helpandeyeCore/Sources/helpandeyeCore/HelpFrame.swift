@@ -520,6 +520,11 @@ public struct Takeover: Codable, Equatable, Sendable {
     /// The lost phone's signing key, kept by the phone that applies the takeover for the relay's
     /// benefit, as the member is gone from the list by then. Not sent on air.
     public var fromKey: Data = Data()
+    /// Also kept by a phone that follows the takeover, not sent: the deputy naming's version it
+    /// held before, to check a rival takeover of the same lost phone against the group as it was;
+    /// and the generation of the keys the takeover made, where this phone holds them.
+    public var deputyVersionBefore: UInt32?
+    public var keysGeneration: UInt32?
 
     public init(from: UInt16, to: UInt16, version: UInt32, signatures: [Signature]) {
         self.from = from; self.to = to; self.version = version; self.signatures = signatures

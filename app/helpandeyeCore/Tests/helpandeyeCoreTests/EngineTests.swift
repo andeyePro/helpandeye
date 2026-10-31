@@ -16,6 +16,13 @@ import XCTest
     let relay = RelayModel()
     var relayLog: [(String, RelayProtocol.MemberList, Int, Data)] = []
 
+    /// Each phone the relay lists reads it, as it does every two minutes, and so hears whom the
+    /// relay takes as the group's first coordinator.
+    func poll() {
+        guard let owner = relay.owner.flatMap({ Data(base64Encoded: $0) }) else { return }
+        for p in phones where p.relay.isConfigured && p.relay.key.map(relay.isMember) == true { p.engine.relayOwner(is: owner) }
+    }
+
     func run() async {
         for _ in 0..<50 {
             for p in phones { await p.engine.settle() }
@@ -347,6 +354,7 @@ final class RelayModel {
     func advance(_ seconds: TimeInterval) async {
         clock.now = clock.now.addingTimeInterval(seconds)
         for p in air.phones { p.engine.tick() }
+        air.poll()
         await air.run()
     }
 

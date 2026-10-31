@@ -10,6 +10,8 @@ final class Relay: ObservableObject, RelayLink {
     var busy = false
     /// Set when the relay says Cloudflare's free daily allowance is nearly used.
     var onAllowanceLow: (() -> Void)?
+    /// Given the key the relay takes as the group's first coordinator, with each read.
+    var onOwner: ((Data) -> Void)?
     @Published private(set) var isConfigured = false
     @Published private(set) var lastProblem: String?
 
@@ -179,6 +181,7 @@ final class Relay: ObservableObject, RelayLink {
             guard self.group?.secrets.groupID == group.secrets.groupID, self.positionKey == positionKey else { return }
             // Answered, so this phone is listed now: a registration still waiting can go.
             registerPushToken()
+            if let owner = page.owner.flatMap({ Data(base64Encoded: $0) }) { onOwner?(owner) }
             let outcome = RelayPoll.read(page, from: stored, at: Date(), keys: group.listening(at: Date()))
             for f in outcome.frames { onFrame?(f) }
             UserDefaults.standard.set(try? JSONEncoder().encode(outcome.position), forKey: positionKey)

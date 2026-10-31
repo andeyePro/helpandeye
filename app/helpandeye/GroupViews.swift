@@ -551,13 +551,17 @@ struct ReceiveUpdateSection: View {
 
     var body: some View {
         Section(header: Header("New code from your coordinator")) {
+            if let first = model.engine.activity.tookOverFirst {
+                Text("\(model.name(ofMember: first)) also took over as first coordinator, and the group follows them rather than you. They will show you a new code to scan here.")
+            }
             if model.keyProblem != nil {
                 Text("Your coordinator has a new code for you. Until you scan it, anything you type, choose or share is not sent.")
                     .foregroundStyle(Color.warning)
             }
             CodeReader(prompt: "If your coordinator shows you a new code, scan it here") { code in
                 guard let g = model.group, let w = try? Joining.decode(Joining.Welcome.self, from: code),
-                      let updated = try? Joining.openUpdate(w, current: g, me: model.identity, primarySilent: model.engine.primaryIsSilent) else {
+                      let updated = try? Joining.openUpdate(w, current: g, me: model.identity, primarySilent: model.engine.primaryIsSilent,
+                                                         relayOwner: model.engine.activity.relayOwner) else {
                     message = "That code did not work. Ask your coordinator to show it again."; return
                 }
                 model.engine.applyKeyUpdate(updated)

@@ -616,6 +616,9 @@ caller, all with boxes and the internet route.
 5. Start again with no deputy and phone B off, and on phone C open If B's phone is lost (with the
    clock moved on six days, then eight). At eight, tap Take over.
 6. Repeat step 5 in a group with no relay (Group, Internet route, none).
+7. Start again with phone D named deputy and phone B off. On phone D tap Agree that C may take
+   over. Turn phone C's box off and put phone C in flight mode; take over on phone D, then on phone
+   C; then turn phone C's box on and flight mode off.
 
 Pass: in step 1 phone A lists C's person as "deputy to the first coordinator" and B's as "first
 coordinator". In step 2 phone C's screen says when phone B was last heard from and that it can take
@@ -627,5 +630,8 @@ takeover goes through at once. In step 5 phone C cannot take over at six days (t
 from when it can); at eight it offers Take over, says "Checking with the relay." and then, as the
 relay's own clock has not moved and it heard from phone B within the week, "<B's name>'s phone has
 been in touch in the last week, so it cannot be taken over yet.", and nothing changes on any phone.
-In step 6 phone C offers no Take over at eight days and says another coordinator must agree. No
-screen says or suggests that help is coming.
+In step 6 phone C offers no Take over at eight days and says another coordinator must agree. In
+step 7, within a few minutes every phone, phone C's included, lists D's person as first coordinator;
+phone C says under New code from your coordinator that D's person also took over and the group
+follows them rather than C's person, and takes the update code phone D shows it. No screen says or
+suggests that help is coming.

@@ -53,7 +53,7 @@ there; the app shows until when it is good.
 |---|---|---|
 | `PUT /g/<group>/members` | a coordinator | `{"generation": n, "members": [{"key": "...", "role": "coordinator" or "member"}], "removed": ["key", ...], "primary": "key"}` |
 | `POST /g/<group>/messages` | a member | `{"sealed": "<base64 ChaCha20-Poly1305 box>"}` |
-| `GET /g/<group>/messages?after=<seq>` | a member | none; the reply is `{"latest": n, "next": n, "epoch": "...", "messages": [...]}`. A negative `after` asks for the last that many messages. Read on from `next`, which moves past expired messages. `epoch` names the group's log and changes only if the relay's storage is reset, when a phone's place in the old log means nothing. |
+| `GET /g/<group>/messages?after=<seq>` | a member | none; the reply is `{"latest": n, "next": n, "epoch": "...", "owner": "...", "messages": [...]}`. A negative `after` asks for the last that many messages. Read on from `next`, which moves past expired messages. `epoch` names the group's log and changes only if the relay's storage is reset, when a phone's place in the old log means nothing. `owner` is the key the relay takes as the group's first coordinator. |
 | `PUT /g/<group>/push` | a member | `{"token": "<hex APNs device token>", "sandbox": true or false, "device": "watch"}`; `device` is left out, or anything else, for a phone. A member has one phone token and one watch token. |
 
 A member list's body may be up to 128 KiB: the largest the app can send, 256 members and 1,024
@@ -110,7 +110,10 @@ the ID, the deputy's key and the version, little-endian), a second coordinator's
 request from the owner for seven days (counted from the first takeover tried, for a group the relay
 began watching only then). Only the new owner's own list brings a takeover; anyone else's waits
 with 425 until it has. The new owner's namings of a deputy count from 0 again, as on the phones:
-the lost owner's, signed with the lost owner's key, can prove nothing now.
+the lost owner's, signed with the lost owner's key, can prove nothing now. Of two coordinators taking over
+at once, the relay keeps the first it can check, and the other's is refused (403) as no longer a
+takeover from the owner; every member reads which with its messages (`owner`), and the phones all
+follow that one.
 
 Each message is its own storage key, its sealed text at most
 4,096 characters, kept for seven days, 2,000 at most. The group's alarm deletes expired messages

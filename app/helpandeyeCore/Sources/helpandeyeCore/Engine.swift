@@ -166,6 +166,14 @@ public struct Activity: Codable, Sendable {
     /// over from the first coordinator, by signer (decision 20); and whom this phone has agreed to.
     public var takeoverConsents: [UInt16: Data] = [:]
     public var takeoverAgreed: Set<UInt16> = []
+    /// The signing key the relay last said owns the group, and takeovers heard that this phone
+    /// does not follow, or not yet: a rival to the one it follows, or one the relay may yet take.
+    /// Two coordinators taking over at once settle on one by these (`GroupState.prefers`).
+    public var relayOwner: Data?
+    public var heardTakeovers: [Takeover] = []
+    /// The coordinator whose takeover was followed in place of this phone's own, until this phone
+    /// has their update code.
+    public var tookOverFirst: UInt16?
 
     public init() {}
 }
@@ -1144,6 +1152,7 @@ public final class HelpEngine: ObservableObject {
             case .accepted:
                 // Only the list that was sent counts as published; a change made meanwhile still goes.
                 self.publishedList = list; self.publishedAt = self.now(); self.publishBackoff = 60
+                if list.primary == self.identity.signingPublicKey.base64EncodedString() { self.relayOwner(is: self.identity.signingPublicKey) }
                 self.publishMembersIfDue()
             case .refused:
                 self.refusedList = list; self.refusedPass = g.relayPass
@@ -1293,16 +1302,9 @@ public final class HelpEngine: ObservableObject {
             log(s.group.deputy.map { "\(name(ofMember: first ?? 0)) named \(name(ofMember: $0)) as deputy" } ?? "\(name(ofMember: first ?? 0)) named no deputy")
             return
         case let .takeover(t):
-            guard var s = saved, s.group.accepts(t, silent: primaryIsSilent) else { return }
-            let words = "\(name(ofMember: t.to)) took over as first coordinator from \(t.from == s.me ? "you" : name(ofMember: t.from)), \(how(t))"
-            s.group.apply(takeover: t, at: now())
-            s.primaryHeardAt = now()
-            setState(s)
-            activity.takeoverConsents = [:]
-            activity.takeoverAgreed = []
-            log(words)
-            // The lost phone, found: it is out of the group, so nothing should keep alerting it.
-            if t.from == s.me { for k in activity.inbox.requests.keys { alerts.cancel(k) } }
+            guard !activity.heardTakeovers.contains(t), let g = group, t.from == g.primaryCoordinator || t.from == g.takeover?.from else { return }
+            keepHeard(t)
+            settleTakeovers()
             return
         case let .takeoverConsent(from, to, signer, sig):
             guard to == saved?.me, let g = group, from == g.primaryCoordinator, signer != to, signer != from,
@@ -1663,11 +1665,70 @@ public final class HelpEngine: ObservableObject {
         // A pass is only ever replaced, never taken away, so an update without one keeps this phone's.
         if merged.relayPass == nil { merged.relayPass = current.relayPass }
         changeGroup(edit: false) { $0 = merged }
+        activity.tookOverFirst = nil
         // Only the first coordinator could have sealed it.
         heardPrimary()
     }
 
     // MARK: If the first coordinator's phone is lost (decision 20)
+
+    /// What the relay said owns the group, from its answer to a poll or to this phone's own
+    /// takeover: a takeover to them is the one every phone follows.
+    public func relayOwner(is key: Data) {
+        guard activity.relayOwner != key else { return }
+        activity.relayOwner = key
+        settleTakeovers()
+    }
+
+    /// Follows the takeover every phone settles on (`GroupState.prefers`) of those heard: one from
+    /// the first coordinator this phone accepts, or a rival preferred to the one it follows.
+    private func settleTakeovers() {
+        guard var s = saved else { return }
+        let owner = activity.relayOwner
+        let best = { (ts: [Takeover]) in ts.min { s.group.prefers($0, over: $1, relayOwner: owner) } }
+        if let held = s.group.takeover,
+           let rival = best(activity.heardTakeovers.filter { s.group.acceptsRival($0, relayOwner: owner) && s.group.prefers($0, over: held, relayOwner: owner) }) {
+            let mine = held.to == s.me
+            s.group.follow(rival, me: s.me, at: now())
+            // The one let go stays heard, should the relay turn out to have taken it.
+            activity.heardTakeovers.removeAll { $0 == rival }
+            keepHeard(heard(held))
+            activity.tookOverFirst = mine ? rival.to : nil
+            setState(s)
+            if rival.to == s.me {
+                log("You are first coordinator after all: the relay took your takeover")
+                let gid = groupID
+                spawn { await self.sendToAll(.takeover(rival), in: gid) }
+            } else if mine {
+                log("\(name(ofMember: rival.to)) also took over as first coordinator, and the group follows them rather than you")
+            } else {
+                log("\(name(ofMember: rival.to)) took over as first coordinator, in place of \(name(ofMember: held.to))")
+            }
+        } else if let t = best(activity.heardTakeovers.filter { s.group.accepts($0, silent: primaryIsSilent, relayOwner: owner) }) {
+            let words = "\(name(ofMember: t.to)) took over as first coordinator from \(t.from == s.me ? "you" : name(ofMember: t.from)), \(how(t))"
+            s.group.apply(takeover: t, at: now())
+            s.primaryHeardAt = now()
+            activity.heardTakeovers.removeAll { $0 == t }
+            setState(s)
+            activity.takeoverConsents = [:]
+            activity.takeoverAgreed = []
+            log(words)
+            // The lost phone, found: it is out of the group, so nothing should keep alerting it.
+            if t.from == s.me { for k in activity.inbox.requests.keys { alerts.cancel(k) } }
+        }
+    }
+
+    /// The latest heard of each coordinator's takeover of each lost phone, a few at most.
+    private func keepHeard(_ t: Takeover) {
+        activity.heardTakeovers = (activity.heardTakeovers.filter { $0.from != t.from || $0.to != t.to } + [t]).suffix(8)
+    }
+
+    /// A takeover as heard on air, without what a phone keeps with the one it follows.
+    private func heard(_ t: Takeover) -> Takeover {
+        var t = t
+        t.fromKey = Data(); t.deputyVersionBefore = nil; t.keysGeneration = nil
+        return t
+    }
 
     /// `at` is when the first coordinator's phone made what was heard, where it says.
     private func heardPrimary(at made: Date? = nil) {
@@ -1768,7 +1829,10 @@ public final class HelpEngine: ObservableObject {
             self.askingRelayToTakeOver = false
             switch result {
             case .accepted:
-                if self.group?.primaryCoordinator == t.from { self.becomeFirstCoordinator(t) }
+                // Taken by the relay, it is the one every phone follows, even where this phone
+                // followed another coordinator's takeover meanwhile.
+                if self.group?.primaryCoordinator == t.from { self.becomeFirstCoordinator(t) } else { self.keepHeard(t) }
+                self.relayOwner(is: self.identity.signingPublicKey)
             case .notYet: self.takeoverProblem = "\(first)'s phone has been in touch in the last week, so it cannot be taken over yet."
             case .refused: self.takeoverProblem = "The relay did not take it, so nothing has changed."
             case .unreachable: self.takeoverProblem = "The relay could not be reached, so nothing has changed. Try again with internet."
@@ -1975,5 +2039,8 @@ extension Activity {
         lastMembershipRepeat = try? c.decodeIfPresent(Date.self, forKey: .lastMembershipRepeat)
         takeoverConsents = try c.value(.takeoverConsents, or: [:])
         takeoverAgreed = try c.value(.takeoverAgreed, or: [])
+        relayOwner = try c.decodeIfPresent(Data.self, forKey: .relayOwner)
+        heardTakeovers = c.values(.heardTakeovers)
+        tookOverFirst = try c.decodeIfPresent(UInt16.self, forKey: .tookOverFirst)
     }
 }

@@ -381,7 +381,9 @@ export class GroupRelay {
   }
 
   /// Messages after `after`, and the latest sequence number, so a phone can tell when its place
-  /// is ahead of the relay (a new group, or a reset relay) and start again from the latest.
+  /// is ahead of the relay (a new group, or a reset relay) and start again from the latest. With
+  /// them, the owner's key: of two coordinators taking over at once, the one the relay took is
+  /// the one every phone follows (decision 20).
   async since(reader, after) {
     await this.requireMember(reader);
     const latest = (await this.storage.get("seq")) ?? 0;
@@ -393,7 +395,7 @@ export class GroupRelay {
     const page = [...(await this.storage.list({ prefix: "m:", start: GroupRelay.key(from + 1), limit: 200 })).values()];
     // `next` is the last sequence scanned, kept or expired, so a reader never stalls on old ones.
     const next = page.length ? page[page.length - 1].seq : Math.max(from, latest);
-    return { latest, next, epoch, messages: page.filter((m) => m.at >= cutoff) };
+    return { latest, next, epoch, owner: await this.storage.get("owner"), messages: page.filter((m) => m.at >= cutoff) };
   }
 
   async prune(latest) {

@@ -312,19 +312,43 @@ public struct GroupState: Codable, Equatable, Sendable {
 
     /// Whether this phone accepts a takeover: from its first coordinator, by a coordinator, every
     /// signature a current coordinator's, and the proof enough (decision 20). `silent` is whether
-    /// this phone itself has not heard from the first coordinator for `takeoverSilence`.
-    public func accepts(_ t: Takeover, silent: Bool) -> Bool {
-        guard let from = primaryCoordinator, t.from == from, t.to != from, let fromKey = member(from)?.signingKey,
-              let to = member(t.to), to.role == .coordinator, let toKey = to.signingKey else { return false }
+    /// this phone itself has not heard from the first coordinator for `takeoverSilence`;
+    /// `relayOwner` the key the relay last said owns the group, which proves a takeover to it.
+    public func accepts(_ t: Takeover, silent: Bool, relayOwner: Data? = nil) -> Bool {
+        guard let from = primaryCoordinator, t.from == from, let fromKey = member(from)?.signingKey else { return false }
+        return proves(t, fromKey: fromKey, deputyVersion: deputyVersion, silent: silent, relayOwner: relayOwner)
+    }
+
+    /// Whether `t` is a rival to the takeover this phone follows: of the same lost phone, to another
+    /// coordinator, and as good as this phone would have taken first, checked against the group as
+    /// it was then. Silence alone does not prove a rival: the relay must have taken it.
+    public func acceptsRival(_ t: Takeover, relayOwner: Data?) -> Bool {
+        guard let held = takeover, t.from == held.from, t.to != held.to else { return false }
+        return proves(t, fromKey: held.fromKey, deputyVersion: held.deputyVersionBefore ?? 0, silent: false, relayOwner: relayOwner)
+    }
+
+    private func proves(_ t: Takeover, fromKey: Data, deputyVersion: UInt32, silent: Bool, relayOwner: Data?) -> Bool {
+        guard t.to != t.from, let to = member(t.to), to.role == .coordinator, let toKey = to.signingKey else { return false }
         let signers = Set(t.signatures.map(\.signer))
-        guard signers.count == t.signatures.count, signers.contains(t.to), !signers.contains(from) else { return false }
+        guard signers.count == t.signatures.count, signers.contains(t.to), !signers.contains(t.from) else { return false }
         for s in t.signatures {
             guard let m = member(s.signer), m.role == .coordinator,
                   HelpFrame.isValidTakeoverSignature(s.signature, by: m.signingKey, fromKey: fromKey, toKey: toKey, group: secrets.groupID) else { return false }
         }
         // A naming this phone knows was replaced, by another deputy or none, proves nothing.
         let named = t.deputyVersion >= deputyVersion && t.namedDeputy(fromKey: fromKey, toKey: toKey, group: secrets.groupID)
-        return named || t.signatures.count >= 2 || silent
+        return named || t.signatures.count >= 2 || silent || relayOwner == toKey
+    }
+
+    /// Of two takeovers of the same lost phone, whether `a` is the one every phone follows: the one
+    /// the relay took, as the relay takes only the first it can check; else, where the relay has
+    /// taken neither or this phone has not heard which, the one to the lower member number.
+    public func prefers(_ a: Takeover, over b: Takeover, relayOwner: Data?) -> Bool {
+        if let owner = relayOwner {
+            if member(a.to)?.signingKey == owner { return true }
+            if member(b.to)?.signingKey == owner { return false }
+        }
+        return a.to < b.to
     }
 
     /// Applies a takeover this phone accepts: the lost phone is out, as if removed, and the new
@@ -332,8 +356,7 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// lost phone's namings, which this phone may have heard more of than the new first
     /// coordinator did, are checked against its key, so none of them can come back.
     public mutating func apply(takeover t: Takeover, at now: Date) {
-        var t = t
-        t.fromKey = member(t.from)?.signingKey ?? Data()
+        let t = recorded(t)
         apply(membership: .memberRemoved(member: t.from, version: t.version), at: now)
         takeover = t
         deputy = nil
@@ -344,13 +367,54 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// On the phone taking over: removes the lost phone and makes new keys, as `remove` does, and
     /// records how this phone came to be first coordinator.
     public mutating func takeOver(_ t: Takeover, at now: Date) {
-        var t = t
-        t.fromKey = member(t.from)?.signingKey ?? Data()
+        var t = recorded(t)
         remove(t.from, at: now)
+        t.keysGeneration = secrets.generation
         takeover = t
         deputy = nil
         deputyVersion = 0
         deputySignature = nil
+    }
+
+    private func recorded(_ t: Takeover) -> Takeover {
+        var t = t
+        t.fromKey = member(t.from)?.signingKey ?? Data()
+        t.deputyVersionBefore = deputyVersion
+        t.keysGeneration = nil
+        return t
+    }
+
+    /// Follows `winner`, a rival this phone prefers, in place of the takeover it holds (decision
+    /// 20). Keys the one held made are let go for the ones before, which every member still has,
+    /// and this phone waits for the winner's update code, as after any removal; on the winner's own
+    /// phone, new keys are made, as on taking over.
+    public mutating func follow(_ winner: Takeover, me: UInt16, at now: Date) {
+        guard let held = takeover else { return }
+        if let made = held.keysGeneration, secrets.generation >= made, let before = previousSecrets, before.generation < made {
+            secrets = before
+            previousSecrets = nil
+            previousUntil = nil
+        }
+        var t = winner
+        t.fromKey = held.fromKey
+        t.deputyVersionBefore = held.deputyVersionBefore
+        t.keysGeneration = nil
+        membershipVersion = max(membershipVersion, winner.version)
+        deputy = nil
+        deputyVersion = 0
+        deputySignature = nil
+        if winner.to == me {
+            previousSecrets = secrets
+            previousUntil = now.addingTimeInterval(Self.changeoverPeriod)
+            secrets = secrets.rotated()
+            t.keysGeneration = secrets.generation
+            removalsWithoutKeys.remove(held.from)
+            if removalsWithoutKeys.isEmpty { keysOutdatedSince = nil }
+        } else if secrets.responderPublicKey != nil {
+            removalsWithoutKeys.insert(held.from)
+            if keysOutdatedSince == nil { keysOutdatedSince = now }
+        }
+        takeover = t
     }
 
     public func member(_ number: UInt16) -> Member? { members.first { $0.number == number } }
@@ -650,8 +714,9 @@ public enum Joining {
     /// Opens an update with the group this phone already has. Only the first coordinator of that
     /// group can have sealed it, and an update can never take the group back to older secrets.
     /// `primarySilent` is whether this phone has not heard from its first coordinator for
-    /// `GroupState.takeoverSilence`, for an update from a coordinator who took over (decision 20).
-    public static func openUpdate(_ welcome: Welcome, current: GroupState, me: DeviceIdentity, primarySilent: Bool = false) throws -> GroupState {
+    /// `GroupState.takeoverSilence`, and `relayOwner` the key the relay last said owns the group,
+    /// for an update from a coordinator who took over (decision 20).
+    public static func openUpdate(_ welcome: Welcome, current: GroupState, me: DeviceIdentity, primarySilent: Bool = false, relayOwner: Data? = nil) throws -> GroupState {
         guard welcome.groupID == current.secrets.groupID else { throw Failure.wrongGroup }
         // Only the first coordinator changes the keys, so the group can never be split onto two:
         // the one this phone knows, or one who took over from them with proof this phone accepts.
@@ -662,7 +727,10 @@ public enum Joining {
             g.policy = g.policy.keepingOwn(current.policy, besides: GroupState.StoredPolicy.fields(in: json(plain)))
             guard g.secrets.generation > current.secrets.generation else { throw Failure.cannotOpen }
             if c.number == current.primaryCoordinator { return g }
-            if let t = g.takeover, t.to == c.number, current.accepts(t, silent: primarySilent) { return g }
+            if let t = g.takeover, t.to == c.number, current.accepts(t, silent: primarySilent, relayOwner: relayOwner) { return g }
+            // From the winner of two takeovers at once, where this phone followed the other.
+            if let t = g.takeover, t.to == c.number, let held = current.takeover, current.acceptsRival(t, relayOwner: relayOwner),
+               current.prefers(t, over: held, relayOwner: relayOwner) { return g }
             throw Failure.cannotOpen
         }
         throw Failure.cannotOpen
