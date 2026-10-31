@@ -258,6 +258,25 @@ import XCTest
         XCTAssertNotNil(rw.alerts.scheduled[key], "and alerting again")
     }
 
+    /// Open items: a watch that never heard its owner's removal learns it from the next handover,
+    /// and stops alerting for calls it can no longer acknowledge.
+    func testAWatchToldByHandoverThatItsOwnerWasRemovedStopsAlerting() async {
+        let rw = Phone(air: air, clock: clock, watchOf: responder)
+        rw.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity))
+        rw.mesh.isReady = false; rw.relay.isConfigured = true
+        caller.engine.press(.red)
+        await air.run()
+        let key = IncomingRequest.Key(unit: caller.request!.unit, request: caller.request!.number)
+        XCTAssertNotNil(rw.alerts.scheduled[key])
+        rw.relay.isConfigured = false
+        coordinator.engine.updateGroup { $0.remove(self.responder.engine.saved!.me, at: self.clock.now) }
+        await air.run()
+        XCTAssertNotNil(rw.alerts.scheduled[key], "the watch did not hear the removal")
+        rw.engine.take(WatchHandover(saved: responder.engine.saved!, identity: responder.identity))
+        XCTAssertNil(rw.alerts.scheduled[key])
+        XCTAssertTrue(rw.alerts.cancelled.contains(key))
+    }
+
     /// Watch review: a responder's phone that acknowledged, or heard an acknowledgement, over the
     /// radio alone gives its watch the signed acknowledgement it holds (in the application
     /// context), so the watch stops alerting at once instead of buzzing for a call already in hand.

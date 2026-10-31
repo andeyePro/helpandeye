@@ -486,6 +486,10 @@ public final class HelpEngine: ObservableObject {
             if activity.inbox.requests.values.contains(where: { $0.acknowledgedBy.contains { !current.contains($0) } }) {
                 for k in activity.inbox.revoke(keeping: current) { scheduleAlerts(for: k) }
             }
+            // Removed, or a caller only, however this phone learnt it (a removal heard, a key
+            // update, a watch handover, a takeover): it can acknowledge nothing, so nothing should
+            // keep alerting it.
+            if me?.canRespond != true { for k in activity.inbox.requests.keys { alerts.cancel(k) } }
         }
         let units = Set(group?.members.compactMap(\.unit) ?? [])
         if activity.checkInWatch.callers.keys.contains(where: { !units.contains($0) }) { activity.checkInWatch.keepOnly(units: units) }
@@ -1405,8 +1409,6 @@ public final class HelpEngine: ObservableObject {
                     let before = s.group
                     s.group.apply(membership: inner, at: now())
                     if s.group != before { setState(s) }
-                    // Removed: this phone can no longer answer, so nothing should keep alerting it.
-                    if case let .memberRemoved(n, _) = inner, n == s.me { for k in activity.inbox.requests.keys { alerts.cancel(k) } }
                     // The coordinator who invited this phone has gone before it was confirmed.
                     if case let .memberRemoved(n, _) = inner, n == s.invitedBy, !s.confirmed { raise(.inviterLeft) }
                     // The first coordinator lists at once anyone it hears another coordinator add, so
@@ -1743,8 +1745,6 @@ public final class HelpEngine: ObservableObject {
             activity.takeoverConsents = [:]
             activity.takeoverAgreed = []
             log(words)
-            // The lost phone, found: it is out of the group, so nothing should keep alerting it.
-            if t.from == s.me { for k in activity.inbox.requests.keys { alerts.cancel(k) } }
         }
     }
 
