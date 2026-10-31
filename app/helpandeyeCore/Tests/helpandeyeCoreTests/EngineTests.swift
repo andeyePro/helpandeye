@@ -246,7 +246,7 @@ final class RelayModel {
     init(air: Air, clock: Clock, watchOf owner: Phone? = nil, identity: DeviceIdentity? = nil) {
         self.identity = identity ?? owner?.identity ?? DeviceIdentity()
         mesh.air = air; relay.air = air
-        engine = HelpEngine(identity: identity, mesh: mesh, relay: relay, alerts: alerts, store: NoStore(),
+        engine = HelpEngine(identity: self.identity, mesh: mesh, relay: relay, alerts: alerts, store: NoStore(),
                             saved: nil, activity: Activity(), calendar: Calendar(identifier: .gregorian), now: { clock.now },
                             companion: owner != nil, homeWiFi: wifi)
         mesh.phone = self; relay.phone = self; wifi.phone = self; wifi.air = air
@@ -753,6 +753,44 @@ final class RelayModel {
         await air.run()
         caller.engine.receive(old, via: .internet)
         XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.profile), "Help")
+    }
+
+    /// Martin, 2026-10-30: leaving the first group while still in others, one of them takes its
+    /// place: its calls, acknowledgements and alerts come to the first engine, as the same member.
+    func testLeavingTheFirstGroupAnotherTakesItsPlace() async {
+        let jo = Phone(air: air, clock: clock), walker = Phone(air: air, clock: clock)
+        let second = Phone(air: air, clock: clock, identity: responder.identity)
+        jo.engine.createGroup(name: "Hill Road", myName: "Jo", call: false)
+        for (p, call) in [(walker, true), (second, false)] {
+            let invite = Joining.invitation(for: jo.engine.group!, coordinator: jo.identity)
+            let request = Joining.request(invite, name: call ? "Walker" : "Responder", call: call, respond: !call, me: p.identity)
+            var welcome: Joining.Welcome?
+            jo.engine.updateGroup { g in welcome = try! Joining.admit(request, to: &g, invite: invite, coordinator: jo.identity) }
+            p.engine.joined(try! Joining.open(welcome!, invite: invite, me: p.identity), as: welcome!.memberNumber)
+        }
+        await air.run()
+        // Both groups hand out unit 70001 and call 1: Mill Lane's second call tells them apart.
+        caller.engine.press(.red)
+        caller.engine.press(.amber)
+        walker.engine.press(.red)
+        await air.run()
+        let mill = key, hill = IncomingRequest.Key(unit: walker.request!.unit, request: walker.request!.number)
+        XCTAssertNotNil(responder.engine.activity.inbox.requests[mill])
+        XCTAssertNotNil(second.alerts.scheduled[hill])
+        let saved = second.engine.saved!, activity = second.engine.activity
+        responder.engine.leave()
+        second.engine.leave()
+        responder.engine.adopt(saved, activity: activity)
+        XCTAssertEqual(responder.engine.group?.name, "Hill Road")
+        XCTAssertEqual(responder.engine.saved?.me, saved.me)
+        XCTAssertNil(responder.engine.activity.inbox.requests[mill], "the old group's calls are gone")
+        XCTAssertTrue(responder.engine.activity.inbox.requests[hill]!.isOpen, "the open call came with it")
+        XCTAssertNotNil(responder.alerts.scheduled[hill], "alerted from the first engine now")
+        XCTAssertNil(second.alerts.scheduled[hill])
+        XCTAssertTrue(responder.engine.acknowledge(hill))
+        await air.run()
+        XCTAssertEqual(walker.request?.status, .seen(responder: saved.me), "the same member, with the same keys")
+        XCTAssertEqual(caller.request?.status, .waitingForResponder)
     }
 
     func testAUnitsAntennaReachesEveryoneWithTheSettings() async {

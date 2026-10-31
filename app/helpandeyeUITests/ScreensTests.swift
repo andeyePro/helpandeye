@@ -58,7 +58,7 @@ final class ScreensTests: XCTestCase {
         look("group")
         reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sam (you)")).firstMatch).tap()
         look("member")
-        reveal(app.buttons["External antenna"].exists ? app.buttons["External antenna"] : app.staticTexts["External antenna"]).tap()
+        reveal(app.buttons["External antenna"]).tap()
         look("member-external")
         app.navigationBars.buttons.firstMatch.tap()
         reveal(app.buttons["Invite someone"]).tap()
@@ -97,6 +97,36 @@ final class ScreensTests: XCTestCase {
         look("removed-respond")
         tab("Group")
         look("removed-group")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// Leaving the first group while still in another: the other is offered as the next first
+    /// group, and takes its place. Both groups are then left, so the later tests start afresh.
+    func testLeaveFirstGroupForAnother() throws {
+        launch()
+        startGroupIfNew()
+        app.terminate()
+        launch("-HelpAOtherGroup")
+        tab("Group")
+        reveal(app.buttons["Leave this group"]).tap()
+        // A row of a long list is not in the hierarchy until it is scrolled near the screen.
+        let choice = reveal(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Make Hill Road my first group")).firstMatch)
+        XCTAssert(choice.exists, "leave-first: no choice of the next first group")
+        look("leave-first-choice")
+        // The audit relays the screen out at other text sizes, which can scroll a row off it.
+        reveal(choice).tap()
+        XCTAssert(app.navigationBars["Hill Road"].waitForExistence(timeout: 5), "leave-first: Hill Road did not become the first group")
+        // The list is rebuilt for the new group and may still be moving: shown afresh, from the top.
+        tab("Box")
+        tab("Group")
+        look("leave-first-done")
+        // Left too, so the tests after this one start with a group of their own.
+        let leave = app.buttons["Leave this group"]
+        for _ in 0..<3 where !(leave.exists && leave.isHittable) { reveal(leave) }
+        leave.tap()
+        XCTAssert(app.buttons["Start a group"].waitForExistence(timeout: 5), "leave-first: the last group was not left")
         if !problems.isEmpty {
             XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
         }

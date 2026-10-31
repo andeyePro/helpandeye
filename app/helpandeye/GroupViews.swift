@@ -175,7 +175,7 @@ extension Result {
 struct GroupView: View {
     @EnvironmentObject var model: AppModel
     @State private var inviting = false
-    @State private var leaveFirstLast = false
+    @State private var choosingNextFirst = false
 
     var body: some View {
         NavigationStack {
@@ -256,12 +256,21 @@ struct GroupView: View {
                 }
                 DisplaySection()
                 Section {
-                    // The first group goes last: the others' calls are answered from its screens.
                     Button("Leave this group", role: .destructive) {
-                        if model.others.isEmpty { model.leave() } else { leaveFirstLast = true }
+                        if model.others.isEmpty { model.leave() } else { choosingNextFirst = true }
                     }
                     .foregroundStyle(Color.warning)
-                    if leaveFirstLast { Text("Leave your other groups first, under Other groups you respond in.").foregroundStyle(Color.warning) }
+                    // Still in other groups: one of them takes this one's place as the first group.
+                    if choosingNextFirst {
+                        Text("Which group should become your first group? You will call for help in it, if you may, and its check-ins and settings will be yours. You still respond in the others.")
+                        ForEach(model.others) { o in
+                            Button("Make \(o.engine.group?.name ?? "that group") my first group and leave \(model.group?.name ?? "this one")") {
+                                choosingNextFirst = false
+                                model.leave(becoming: o)
+                            }
+                        }
+                        Button("Stay in this group") { choosingNextFirst = false }
+                    }
                 }
             }
             .navigationTitle(model.group?.name ?? "Group")

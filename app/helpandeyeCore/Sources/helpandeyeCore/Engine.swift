@@ -374,6 +374,19 @@ public final class HelpEngine: ObservableObject {
         alerts.cancelAll()
     }
 
+    /// Takes over a group this person responded in through another engine, after they left the
+    /// group they called in (`leave`): it becomes their first group, with its open calls,
+    /// acknowledgements, rota and log, and this engine's alerts take over from the other's.
+    public func adopt(_ s: SavedState, activity a: Activity) {
+        var a = a
+        // The radio's record of the last hour belongs to the box, not the group.
+        a.airtime = activity.airtime
+        activity = a
+        setState(s)
+        for r in activity.inbox.requests.values where r.isOpen { scheduleAlerts(for: r.key) }
+        followProfileCheckIns()
+    }
+
     /// On a watch: takes in what the paired phone sent. Returns false if it was made with other keys,
     /// so the watch must start a new engine with them.
     @discardableResult

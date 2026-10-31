@@ -49,8 +49,11 @@ final class AppModel: ObservableObject {
     /// launch argument; nothing is saved.
     #if DEBUG && targetEnvironment(simulator)
     private static let screensKeysNeeded = ProcessInfo.processInfo.arguments.contains("-HelpAKeysNeeded")
+    /// A further group beside the first, for the screen test of leaving the first; not remembered.
+    private static let screensOtherGroup = ProcessInfo.processInfo.arguments.contains("-HelpAOtherGroup")
     #else
     private static let screensKeysNeeded = false
+    private static let screensOtherGroup = false
     #endif
 
     private init() {
@@ -81,7 +84,7 @@ final class AppModel: ObservableObject {
         engine.objectWillChange.receive(on: RunLoop.main).sink { [weak self] _ in self?.tellCaller() }.store(in: &bag)
         for tag in Store.otherGroups { start(tag) }
         #if DEBUG && targetEnvironment(simulator)
-        if Self.screensOtherGroupOnly {
+        if Self.screensOtherGroupOnly || Self.screensOtherGroup {
             start("screens")
             others.last?.engine.createGroup(name: "Hill Road", myName: "Sam", call: false)
         }
@@ -277,6 +280,17 @@ final class AppModel: ObservableObject {
         forgetSaves(other.tag)
         Store.otherGroups.removeAll { $0 == other.tag }
         others.removeAll { $0.tag == other.tag }
+    }
+
+    /// Leaves the first group and makes another this person responds in their first: its Help
+    /// button (if they may call there), check-ins and profile become theirs, on the first engine,
+    /// and the rest stay groups they respond in.
+    func leave(becoming other: Other) {
+        guard let saved = other.engine.saved else { return }
+        let activity = other.engine.activity
+        leave()
+        leave(other)
+        engine.adopt(saved, activity: activity)
     }
 
     /// Where Apple can push to wake this phone, for every group's relay.
