@@ -333,7 +333,8 @@ struct MemberView: View {
                         .labelsHidden()
                         if antenna.isExternal {
                             Stepper("Its gain: \(gainWords(antenna.gainDBi))", value: Binding(get: { antenna.gainDBi }, set: { set(.external(gainDBi: $0)) }),
-                                    in: 0...15, step: 0.5)
+                                    in: 0...Antenna.maxGainDBi, step: 0.5)
+                            Text("Help&I boxes work with antennas of up to \(gainWords(Antenna.maxGainDBi)).")
                         }
                         PowerLimits(unit: unit)
                         Text("The box keeps its radio under this limit once it is set up with Help&I's firmware. The antenna goes to every member with the group's settings.")
@@ -350,7 +351,7 @@ struct MemberView: View {
         .navigationTitle(m?.name ?? "Member")
     }
 
-    private func set(_ antenna: Antenna?) { model.updateGroup { $0.policy.antennaOf[number] = antenna } }
+    private func set(_ antenna: Antenna?) { model.updateGroup { $0.setAntenna(antenna, of: number) } }
 }
 
 func gainWords(_ dBi: Double) -> String { String(format: "%g dBi", dBi) }

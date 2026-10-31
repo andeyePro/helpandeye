@@ -23,8 +23,8 @@ public enum HelpBox {
     public enum AntennaCode: UInt8, Sendable { case whip = 0, stub = 1, external3dBi = 2, external5dBi = 3 }
 
     /// The code whose gain is at or above the antenna's, so the cap the box works out is never
-    /// looser than the app's. The firmware has no code above 5 dBi: a higher-gain antenna goes as
-    /// 5 dBi (TODO.md).
+    /// looser than the app's. The firmware has no code above 5 dBi, so no higher-gain antenna can
+    /// be set (`GroupState.setAntenna`).
     public static func antennaCode(_ antenna: Antenna) -> AntennaCode {
         switch antenna {
         case .standardWhip: .whip

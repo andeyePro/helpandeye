@@ -95,7 +95,27 @@ final class HelpBoxTests: XCTestCase {
         XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 0)), .stub)
         XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 2.5)), .external3dBi)
         XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 4)), .external5dBi)
-        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 8)), .external5dBi, "the firmware has no higher code (TODO)")
+    }
+
+    /// The firmware's antenna codes stop at 5 dBi, so an antenna above that is never set: a box
+    /// told "5 dBi" for an 8 dBi antenna would send about 3 dB over the band's limit (IR 2030).
+    func testNoAntennaIsSetThatABoxCouldNotKeepWithinTheLimit() {
+        let codeGain: [HelpBox.AntennaCode: Double] = [.stub: 0, .whip: 2, .external3dBi: 3, .external5dBi: 5]
+        var g = GroupState(name: "Mill Lane", secrets: .random(), members: [])
+        XCTAssertFalse(g.setAntenna(.external(gainDBi: 8), of: 2))
+        XCTAssertFalse(g.setAntenna(.external(gainDBi: 5.5), of: 2))
+        XCTAssertTrue(g.policy.antennaOf.isEmpty, "refused, so the box keeps the standard whip's cap")
+        for gain in stride(from: 0.0, through: 15.0, by: 0.5) {
+            guard g.setAntenna(.external(gainDBi: gain), of: 2) else { continue }
+            XCTAssertLessThanOrEqual(gain, Antenna.maxGainDBi)
+            XCTAssertGreaterThanOrEqual(codeGain[HelpBox.antennaCode(g.antenna(of: 2))]!, gain, "the box's cap is never looser at \(gain) dBi")
+        }
+        for a in [Antenna.standardWhip, .higherGainWhip] {
+            XCTAssertTrue(g.setAntenna(a, of: 2))
+            XCTAssertGreaterThanOrEqual(codeGain[HelpBox.antennaCode(a)]!, a.gainDBi)
+        }
+        XCTAssertTrue(g.setAntenna(nil, of: 2))
+        XCTAssertNil(g.policy.antennaOf[2])
     }
 
     func testMembersGoInPagesOfFourRespondersFirstUpToThirtyTwo() throws {

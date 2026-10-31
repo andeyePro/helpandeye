@@ -80,6 +80,10 @@ public enum Antenna: Codable, Equatable, Hashable, Sendable {
     public static let v4AmplifierGainDB: Double = 12
     /// The SX1262's output settings, in dBm.
     public static let radioSettings = -9...22
+    /// The highest gain a Help&I box can be told of: its firmware's antenna codes stop at 5 dBi
+    /// (`HelpBox.antennaCode`), so a box with a higher-gain antenna would work out a cap looser
+    /// than IR 2030 allows.
+    public static let maxGainDBi: Double = 5
 }
 
 extension Band {

@@ -486,6 +486,16 @@ public struct GroupState: Codable, Equatable, Sendable {
     /// The antenna on this member's box, as their coordinator set it.
     public func antenna(of member: UInt16?) -> Antenna { member.flatMap { policy.antennaOf[$0] } ?? .standardWhip }
 
+    /// Sets the antenna on this member's box (nil for the standard whip). One above
+    /// `Antenna.maxGainDBi` is refused, as a Help&I box could not keep within the band's limit
+    /// with it. Returns whether it was set.
+    @discardableResult
+    public mutating func setAntenna(_ antenna: Antenna?, of member: UInt16) -> Bool {
+        guard (antenna?.gainDBi ?? 0) <= Antenna.maxGainDBi else { return false }
+        policy.antennaOf[member] = antenna
+        return true
+    }
+
     /// The transmit-power cap for this unit's box in this band: the highest SX1262 setting its
     /// antenna allows, or nil where it must not send. For the box to take at provisioning.
     public func maxRadioSetting(ofUnit unit: UInt32, in band: Band) -> Int? {
