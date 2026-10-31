@@ -56,6 +56,19 @@ const char* statusWords(CallerStatus s);
 constexpr const char* kNotSetUpWords = "Not set up yet. Add this box to a group in the Help&I app.";
 constexpr const char* kSupplementWords = "Help&I does not replace 999 or telecare.";
 
+// Bluetooth pairing, decided at every start (section 6). The phone pairs with the random code
+// MeshCore shows on the screen. Without a working screen MeshCore falls back to its fixed code
+// 123456, which anyone in range could use to set up or wipe the box, so such a box starts no
+// Bluetooth at all; its buttons, buzzer, LED and radio need none.
+enum class Pairing : uint8_t { off, shownCode };
+Pairing pairingAtStart(bool screenWorks);
+
+// The state LED (section 5): lit while a call is open, blinking each second when it could not be
+// sent. With no call open, a box whose Bluetooth is off for want of a screen gives two short
+// flashes every two seconds while it is awake, so whoever is setting it up can tell why no phone
+// finds it.
+bool ledLit(const Screen& s, Pairing pairing, bool awake, uint64_t nowMs);
+
 // On battery with nothing to send again, the box deep-sleeps between battery readings, and each
 // reading keeps it awake for about this long (MeshCore's start-up and one poll). Section 10.
 constexpr uint32_t kSleepS = 600;

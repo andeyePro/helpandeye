@@ -847,3 +847,42 @@ TEST(theHoursAreCountedAtTheAwakeDrawWhileACallOrAPhoneKeepsTheBoxUp) {
     w.box.power(17000, 1017, false, 4200, false);
     CHECK(w.box.screen().hoursLeft == 3000);
 }
+
+TEST(aBoxWithoutAWorkingScreenStartsNoBluetooth) {
+    CHECK(pairingAtStart(false) == Pairing::off);
+    CHECK(pairingAtStart(true) == Pairing::shownCode);
+}
+
+TEST(theLEDSaysBluetoothIsOffOnlyWhenNoCallIsOpen) {
+    Screen idle{};
+    idle.provisioned = true;
+    // Two short flashes every two seconds while awake.
+    for (uint64_t t : {0, 100, 300, 449, 2000, 2350}) CHECK(ledLit(idle, Pairing::off, true, t));
+    for (uint64_t t : {150, 299, 450, 1000, 1999, 2500}) CHECK(!ledLit(idle, Pairing::off, true, t));
+    // Dark while asleep or waking only to read the battery, and with Bluetooth on.
+    CHECK(!ledLit(idle, Pairing::off, false, 0));
+    CHECK(!ledLit(idle, Pairing::shownCode, true, 0));
+    // The same before the box is set up, which is when someone is most likely to look.
+    Screen fresh{};
+    CHECK(ledLit(fresh, Pairing::off, true, 0) && !ledLit(fresh, Pairing::off, true, 1000));
+
+    // An open call keeps its own light whatever Bluetooth is doing.
+    Screen call{};
+    call.provisioned = call.hasCall = true;
+    for (CallerStatus st : {CallerStatus::sending, CallerStatus::waitingForResponder}) {
+        call.status = st;
+        for (Pairing p : {Pairing::off, Pairing::shownCode})
+            for (uint64_t t : {0, 200, 1000, 1999}) CHECK(ledLit(call, p, true, t));
+    }
+    call.status = CallerStatus::notSent;
+    for (Pairing p : {Pairing::off, Pairing::shownCode}) {
+        CHECK(!ledLit(call, p, true, 0) && !ledLit(call, p, true, 200));
+        CHECK(ledLit(call, p, true, 500) && ledLit(call, p, true, 999));
+    }
+    // A call that is seen or closed is not open: the flashes come back.
+    for (CallerStatus st : {CallerStatus::seen, CallerStatus::closed}) {
+        call.status = st;
+        CHECK(ledLit(call, Pairing::off, true, 0) && !ledLit(call, Pairing::off, true, 200));
+        CHECK(!ledLit(call, Pairing::shownCode, true, 0));
+    }
+}

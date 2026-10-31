@@ -121,7 +121,9 @@ Per unit, on top of the Heltec V4 (OLED version):
   contact bounce and interference. Illuminated buttons help people with poor sight find them.
 - **A buzzer**: a passive piezo driven by PWM through a small NPN transistor, loud enough for
   someone hard of hearing. MeshCore's generic buzzer support already uses `PIN_BUZZER`.
-- **An LED** for the box's state where the screen cannot be seen (dark room, poor sight).
+- **An LED** for the box's state where the screen cannot be seen (dark room, poor sight). It
+  also tells whoever is setting the box up that its Bluetooth is off for want of a screen
+  (section 6).
 - **Battery sensing**: already on the board. `PIN_VBAT_READ` is GPIO 1, switched by
   `PIN_ADC_CTRL` (GPIO 37); `HeltecV4Board::getBattMilliVolts` reads it.
 - **Mains sensing**: a divider (say 100 kΩ over 100 kΩ) from the board's 5 V pin, which carries
@@ -167,6 +169,26 @@ amplifiers, before any box goes out.
 No secret is built into the firmware (AGENTS.md). Everything the box holds is made on the box or
 handed to it by the phone at join, over Bluetooth pairing confirmed with the random code
 MeshCore shows on the box's screen.
+
+**No screen, no Bluetooth.** This is the default posted to Martin (fromClaude T22), not yet his
+decision: he may still choose a per-box code on a label. MeshCore's companion picks a random
+code at each start only when its screen started; without one it falls back to the build's fixed
+code, 123456, so anyone in range could pair with a box whose screen had failed and set it up for
+their own group or wipe it (Forget, 0x75). A Help&I box whose screen does not start therefore
+starts no Bluetooth at all: it neither advertises nor accepts a companion connection. The rule is
+`pairingAtStart` in `core/box.hpp`, host-tested; MeshCore's setup asks the UI task
+(`allowsBluetooth`, the second hook in `meshcore.patch`) before it starts the Bluetooth
+interface, which is then never registered, so nothing can switch it on later. A code the phone
+stored with MeshCore's own command makes no difference: no screen, no Bluetooth. Everything the
+buttons need carries on as usual: the buttons, buzzer, LED and radio, the group and members
+already in flash, resends and acknowledgements. What such a box loses is its phone: no setting
+up, no updates to the member list or names, no carrying of its calls on the phone's routes, and
+no Forget, until the screen is mended. It is decided again at every start, so a box whose screen
+works after a restart has Bluetooth again with a fresh random code on the screen. To tell
+whoever is setting the box up why no phone finds it, the state LED gives two short flashes every
+two seconds while the box is awake (the two minutes after starting or a press, when the screen
+would be lit) and no call is open; an open call keeps its own steady or blinking light
+(`ledLit`, host-tested).
 
 **The box as its own member (Martin, 2026-10-30).** The box joins the group as a caller in its
 own right, with its own unit number, like a person who only calls. Its key is made on the board
@@ -454,7 +476,7 @@ the buttons that woke it (`esp_sleep_get_ext1_wakeup_status`), so the waking pre
 if it was let go in the second the board took to start; resumes the retained copy (below); and
 after a timer wake keeps the screen dark and sleeps again as soon as the battery has been read,
 unless a mark has passed and its note's repeats keep it up. Bluetooth advertises again at every
-wake, so a phone nearby may see the box come and go; one that connects keeps it awake.
+wake (when the screen started, section 6), so a phone nearby may see the box come and go; one that connects keeps it awake.
 
 **What a sleeping box misses.** Deep sleep stops the radio, so a sleeping box hears nothing:
 calls from others (this is a caller's box, not a responder's; it never answers them),
@@ -544,9 +566,11 @@ section 6.
   own ChaCha20-Poly1305 (one implementation on the board and in the tests) over an X25519 secret
   from `Curve25519::eval`. `platformio.local.ini` adds two environments, `heltec_v4_helpandi`
   (the box: three buttons, buzzer, mains pin) and `heltec_v4_helpandi_dev` (a plain board,
-  section 7's PRG layout). `meshcore.patch` is the one change to MeshCore's own files: a
-  `Listener::onUnhandledCmdFrame` hook, six lines, so the UI task answers the Help&I companion
-  commands (section 6).
+  section 7's PRG layout). `meshcore.patch` is the one change to MeshCore's own files, two
+  hooks: `Listener::onUnhandledCmdFrame`, so the UI task answers the Help&I companion commands,
+  and `AbstractUITask::allowsBluetooth`, asked in `main.cpp`'s setup before the Bluetooth
+  interface starts, so a box with no screen starts none (both section 6). Every other UI task
+  keeps MeshCore's behaviour: the hook's default is yes.
 - `firmware/build.sh` clones MeshCore at the commit named in the script, copies the overlay and
   the core in, applies the patch and runs `pio run`. One MeshCore tree, reused. `--release` then
   signs and encrypts the images (section 16).
@@ -570,7 +594,7 @@ section 6.
 | `core/seal.hpp` | SHA-256, HKDF, ChaCha20-Poly1305, the responders' key and nonce, the sealed frame | ForResponders.swift |
 | `core/power.hpp` | The ten-second mains rule, mains from the battery's trend without the wire, hours left, the six marks and the acknowledgement that silences them | decisions 3 and 4 |
 | `core/provision.hpp` | The Help&I companion commands, the names and what the screen says with one, and the flash layout (section 6) | |
-| `core/box.hpp` | The box: presses to calls, resends, acknowledgement checking, I'm OK and closes, removals, the changeover, the cold start and what survives a reset, when the box may sleep, the draw on battery, the power cap, reports, the screen and sounds | Engine.swift |
+| `core/box.hpp` | The box: presses to calls, resends, acknowledgement checking, I'm OK and closes, removals, the changeover, the cold start and what survives a reset, when the box may sleep, the draw on battery, the power cap, reports, the screen, sounds and LED, Bluetooth at start | Engine.swift |
 
 Run the host tests from `firmware/`:
 

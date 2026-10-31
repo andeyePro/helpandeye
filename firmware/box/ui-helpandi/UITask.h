@@ -34,6 +34,7 @@ public:
   // AbstractUITask
   void notify(UIEventType) override {}
   void loop() override;
+  bool allowsBluetooth(bool screenWorks) override;
 
 private:
   // BoxPort
@@ -74,6 +75,7 @@ private:
   helpandi::MemberList _building;
   helpandi::NameList _names;
   helpandi::NameList _buildingNames;
+  helpandi::Pairing _pairing = helpandi::Pairing::off;
   bool _haveGroup = false, _haveMembers = false;
   // The monotonic clock carries on across deep sleep and a reset (section 10).
   uint64_t _monoOffset = 0;

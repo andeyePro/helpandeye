@@ -18,6 +18,16 @@ const char* statusWords(CallerStatus s) {
     return "";
 }
 
+Pairing pairingAtStart(bool screenWorks) { return screenWorks ? Pairing::shownCode : Pairing::off; }
+
+bool ledLit(const Screen& s, Pairing pairing, bool awake, uint64_t nowMs) {
+    if (s.hasCall && (s.status == CallerStatus::sending || s.status == CallerStatus::waitingForResponder)) return true;
+    if (s.hasCall && s.status == CallerStatus::notSent) return (nowMs / 500) % 2 == 1;
+    if (pairing != Pairing::off || !awake) return false;
+    uint64_t t = nowMs % 2000;
+    return t < 150 || (t >= 300 && t < 450);
+}
+
 BatteryModel batteryModel(const BatteryDraw& draw, bool mainsSensed) {
     double awakeShare = double(kAwakePerWakeMs) / (double(kSleepS) * 1000 + kAwakePerWakeMs);
     double averageUA = draw.asleepUA + (draw.awakeMA * 1000.0 - draw.asleepUA) * awakeShare;

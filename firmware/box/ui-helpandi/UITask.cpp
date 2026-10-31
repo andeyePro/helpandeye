@@ -133,6 +133,12 @@ void UITask::begin(DisplayDriver* display, SensorManager*, NodePrefs* prefs) {
   if (_display && !quiet) _display->turnOn();
 }
 
+// Asked by MeshCore's setup before begin(): with no screen to show the code on, no Bluetooth.
+bool UITask::allowsBluetooth(bool screenWorks) {
+  _pairing = pairingAtStart(screenWorks);
+  return _pairing != Pairing::off;
+}
+
 // BoxPort
 
 bool UITask::verify(const uint8_t key[32], const uint8_t sig[64], const uint8_t* message, size_t length) {
@@ -549,14 +555,13 @@ void UITask::loop() {
   _buzzer.loop();
 
   Screen s = _engine.screen();
-  bool open = s.hasCall && (s.status == CallerStatus::sending || s.status == CallerStatus::waitingForResponder ||
-                            s.status == CallerStatus::notSent);
-  bool blink = s.hasCall && s.status == CallerStatus::notSent;
-  digitalWrite(HI_PIN_LED, open && (!blink || (now / 500) % 2) ? HIGH : LOW);
+  digitalWrite(HI_PIN_LED, ledLit(s, _pairing, now < _activeUntil, now) ? HIGH : LOW);
 
   if (_display) {
     // Not for a power cut on its own: on battery the box sleeps, and a wake to read the battery
     // must not light the screen.
+    bool open = s.hasCall && (s.status == CallerStatus::sending || s.status == CallerStatus::waitingForResponder ||
+                              s.status == CallerStatus::notSent);
     bool wanted = open || _buttons.counting() || now < _activeUntil;
     if (wanted && !_display->isOn()) _display->turnOn();
     if (!wanted && _display->isOn()) _display->turnOff();
