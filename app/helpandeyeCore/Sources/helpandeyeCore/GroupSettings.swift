@@ -35,14 +35,8 @@ extension GroupState {
               let coordinator = member(signer), coordinator.role == .coordinator, let key = coordinator.signingKey,
               let pub = try? Curve25519.Signing.PublicKey(rawRepresentation: key),
               pub.isValidSignature(sig, for: Self.settingsInput(group: secrets.groupID, signer: signer, version: version, settings: data)),
-              let s = Self.decodeSettings(data) else { return false }
-        // Settings from a phone made before profiles carry none: keep the group's own, so a second
-        // coordinator still on an older version cannot wipe them by changing the relay address.
-        if Self.isPlain(data) {
-            policy.useDistance = s.policy.useDistance
-        } else {
-            policy = s.policy
-        }
+              let json = Self.settingsJSON(data), let s = try? JSONDecoder().decode(GroupSettings.self, from: json) else { return false }
+        policy = s.policy.keepingOwn(policy, besides: StoredPolicy.fields(in: json))
         relayURL = s.relayURL
         // Settings from a phone made before passes carry none: keep the group's, so a coordinator
         // on an older version changing something else cannot cut the group off the relay.
@@ -52,15 +46,12 @@ extension GroupState {
         return true
     }
 
-    /// Compressed, or plain JSON from a phone before profiles (tried first: compressed bytes are
-    /// never valid JSON, but plain JSON can look like compressed data).
-    static func decodeSettings(_ data: Data) -> GroupSettings? {
-        if let plain = try? JSONDecoder().decode(GroupSettings.self, from: data) { return plain }
-        guard let json = try? (data as NSData).decompressed(using: .zlib) as Data else { return nil }
-        return try? JSONDecoder().decode(GroupSettings.self, from: json)
+    /// The settings as JSON: compressed, or plain from a phone before profiles (tried first:
+    /// compressed bytes are never valid JSON, but plain JSON can look like compressed data).
+    static func settingsJSON(_ data: Data) -> Data? {
+        if (try? JSONSerialization.jsonObject(with: data)) != nil { return data }
+        return try? (data as NSData).decompressed(using: .zlib) as Data
     }
-
-    static func isPlain(_ data: Data) -> Bool { (try? JSONSerialization.jsonObject(with: data)) != nil }
 
     static func settingsInput(group: Data, signer: UInt16, version: UInt32, settings: Data) -> Data {
         var d = Data("HELPA-SETTINGS-1".utf8) + group

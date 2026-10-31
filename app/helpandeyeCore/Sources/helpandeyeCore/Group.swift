@@ -192,16 +192,43 @@ public struct GroupState: Codable, Equatable, Sendable {
             }
         }
 
+        /// Every field, empty or not: a phone reading them keeps its own value only for a field
+        /// left out, which a phone leaves out only when its version does not know it.
         public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encode(useDistance, forKey: .useDistance)
             try c.encode(profiles, forKey: .profiles)
             try c.encode(profileOf, forKey: .profileOf)
             try c.encode(keepsLog, forKey: .keepsLog)
-            if !antennaOf.isEmpty { try c.encode(antennaOf, forKey: .antennaOf) }
-            if !reportsPowerCut.isEmpty { try c.encode(reportsPowerCut.sorted(), forKey: .reportsPowerCut) }
-            if namesOnBox { try c.encode(namesOnBox, forKey: .namesOnBox) }
-            if !boxHome.isEmpty { try c.encode(boxHome, forKey: .boxHome) }
+            try c.encode(antennaOf, forKey: .antennaOf)
+            try c.encode(reportsPowerCut.sorted(), forKey: .reportsPowerCut)
+            try c.encode(namesOnBox, forKey: .namesOnBox)
+            try c.encode(boxHome, forKey: .boxHome)
+        }
+
+        /// The fields of the policy in a group's or its settings' JSON, as another phone wrote it.
+        static func fields(in json: Data) -> Set<String> {
+            let policy = (try? JSONSerialization.jsonObject(with: json) as? [String: Any])?["policy"] as? [String: Any]
+            return policy.map { Set($0.keys) } ?? []
+        }
+
+        /// These settings, read from another phone, with `own` kept for each field the sender left
+        /// out: one their version does not know, or one an older version left out when empty
+        /// (antennas, power-cut choices, names on boxes, boxes' homes), which this phone cannot
+        /// tell from not knowing it. So a coordinator on an older version changing one setting
+        /// does not wipe the others; a newer one emptying a field sends it empty, and it is emptied.
+        /// Settings from a phone before profiles carry only `useDistance` of these.
+        func keepingOwn(_ own: Self, besides sent: Set<String>) -> Self {
+            var p = own
+            if sent.contains(CodingKeys.useDistance.stringValue) { p.useDistance = useDistance }
+            if sent.contains(CodingKeys.profiles.stringValue) { p.profiles = profiles }
+            if sent.contains(CodingKeys.profileOf.stringValue) { p.profileOf = profileOf }
+            if sent.contains(CodingKeys.keepsLog.stringValue) { p.keepsLog = keepsLog }
+            if sent.contains(CodingKeys.antennaOf.stringValue) { p.antennaOf = antennaOf }
+            if sent.contains(CodingKeys.reportsPowerCut.stringValue) { p.reportsPowerCut = reportsPowerCut }
+            if sent.contains(CodingKeys.namesOnBox.stringValue) { p.namesOnBox = namesOnBox }
+            if sent.contains(CodingKeys.boxHome.stringValue) { p.boxHome = boxHome }
+            return p
         }
     }
 
@@ -630,7 +657,9 @@ public enum Joining {
         // the one this phone knows, or one who took over from them with proof this phone accepts.
         for c in current.members where c.role == .coordinator {
             guard let plain = try? unseal(welcome.sealed, from: c.publicKey, me: me, context: current.secrets.groupID),
-                  let g = try? unpack(plain) else { continue }
+                  var g = try? unpack(plain) else { continue }
+            // From a first coordinator on an older version: settings it does not know are kept.
+            g.policy = g.policy.keepingOwn(current.policy, besides: GroupState.StoredPolicy.fields(in: json(plain)))
             guard g.secrets.generation > current.secrets.generation else { throw Failure.cannotOpen }
             if c.number == current.primaryCoordinator { return g }
             if let t = g.takeover, t.to == c.number, current.accepts(t, silent: primarySilent) { return g }
@@ -671,8 +700,11 @@ public enum Joining {
 
     /// Reads either form: compressed, or plain from a phone before compression.
     static func unpack(_ plain: Data) throws -> GroupState {
-        if plain.first == UInt8(ascii: "{") { return try JSONDecoder().decode(GroupState.self, from: plain) }
-        return try JSONDecoder().decode(GroupState.self, from: (plain as NSData).decompressed(using: .zlib) as Data)
+        try JSONDecoder().decode(GroupState.self, from: json(plain))
+    }
+
+    private static func json(_ plain: Data) -> Data {
+        plain.first == UInt8(ascii: "{") ? plain : ((try? (plain as NSData).decompressed(using: .zlib) as Data) ?? Data())
     }
 
     /// Reads a code wherever it sits in the text, as a message app may add words around it or

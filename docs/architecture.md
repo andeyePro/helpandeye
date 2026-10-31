@@ -69,6 +69,12 @@ The first 16 kinds used the low nibble up, so later kinds have whole header byte
 Every signature (kinds 3, 9, 10, 0x21 and 0x25 to 0x27) also covers the group's ID, so one made in one group is
 worthless in another.
 
+The settings in 0x21 are JSON, the newest version winning. A phone sends every field it knows,
+empty ones included, and a phone reading them keeps its own value for any field left out, as a
+phone on an older version leaves out what it does not know (and, before this rule, left out empty
+antennas, power-cut choices, names on boxes and boxes' homes). So a coordinator on an older version
+changing one setting does not wipe the others on newer phones. A key update is read the same way.
+
 Availability (4), notice acknowledgements (5), membership (11 to 15), call states (0x22) and
 change requests (0x23) count only inside a signed frame (10) from someone allowed to send them: a
 call state from the caller (I'm OK; a close only where their profile lets them close, or lets I'm

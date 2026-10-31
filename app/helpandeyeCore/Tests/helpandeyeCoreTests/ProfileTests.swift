@@ -120,6 +120,85 @@ final class ProfileTests: XCTestCase {
         XCTAssertEqual(g.policy.profileOf[2], 1)
     }
 
+    /// A group with every setting an older version may not send: antennas, power-cut choices,
+    /// names on boxes and boxes' homes.
+    private func groupWithBoxSettings(_ coordinator: DeviceIdentity, me: DeviceIdentity? = nil) -> GroupState {
+        var g = GroupState(name: "Mill Lane", secrets: .random(), members: [
+            Member(number: 1, name: "Sam", role: .coordinator, publicKey: coordinator.publicKey, signingKey: coordinator.signingPublicKey),
+            Member(number: 2, name: "Pat", role: .both, publicKey: me?.publicKey ?? Data(count: 32), unit: 70002),
+            Member(number: 4, name: "Box", role: .caller, publicKey: Data(count: 32), unit: 70004),
+        ])
+        g.policy.antennaOf[4] = .external(gainDBi: 3)
+        g.policy.reportsPowerCut = [4]
+        g.policy.namesOnBox = true
+        g.policy.boxHome[4] = 2
+        return g
+    }
+
+    /// `json` with the box settings left out of its policy, as the version before them sent it,
+    /// and as the version before this one sent them when empty.
+    private func asOlderVersion(_ json: Data) throws -> Data {
+        var top = try XCTUnwrap(JSONSerialization.jsonObject(with: json) as? [String: Any])
+        var policy = try XCTUnwrap(top["policy"] as? [String: Any])
+        for k in ["antennaOf", "reportsPowerCut", "namesOnBox", "boxHome"] { policy[k] = nil }
+        top["policy"] = policy
+        return try JSONSerialization.data(withJSONObject: top)
+    }
+
+    func testSettingsFromAnOlderVersionKeepWhatItDoesNotSend() throws {
+        let coordinator = DeviceIdentity()
+        var g = groupWithBoxSettings(coordinator)
+        let held = g.policy
+        // A coordinator on an older version turns the log off: their phone sends the rest as it
+        // knows it, with no box settings.
+        var theirs = g.settings
+        theirs.policy.keepsLog = false
+        let data = try (asOlderVersion(JSONEncoder().encode(theirs)) as NSData).compressed(using: .zlib) as Data
+        let sig = try coordinator.signingKey.signature(for: GroupState.settingsInput(group: g.secrets.groupID, signer: 1, version: 1, settings: data))
+        XCTAssertTrue(g.apply(settings: .groupSettings(signer: 1, version: 1, settings: data, signature: sig)))
+        XCTAssertFalse(g.policy.keepsLog, "their change counts")
+        XCTAssertEqual(g.policy.antennaOf, held.antennaOf, "what their version did not send is kept")
+        XCTAssertEqual(g.policy.reportsPowerCut, held.reportsPowerCut)
+        XCTAssertTrue(g.policy.namesOnBox)
+        XCTAssertEqual(g.policy.boxHome, held.boxHome)
+        // This version sends every field, empty or not, so emptying one is followed.
+        var sender = g
+        sender.policy.antennaOf = [:]; sender.policy.reportsPowerCut = []; sender.policy.namesOnBox = false; sender.policy.boxHome = [:]
+        sender.settingsVersion = 2
+        let frame = try XCTUnwrap(sender.settingsFrame(as: 1, identity: coordinator))
+        XCTAssertTrue(g.apply(settings: frame))
+        XCTAssertEqual(g.policy, sender.policy, "emptied by a phone that knows them")
+        // Every field goes, and the policy reads as before, so an older phone still takes it.
+        guard case let .groupSettings(_, _, sent, _) = frame else { return XCTFail("not a settings frame") }
+        let json = try XCTUnwrap(GroupState.settingsJSON(sent))
+        XCTAssertEqual(GroupState.StoredPolicy.fields(in: json), ["useDistance", "profiles", "profileOf", "keepsLog", "antennaOf", "reportsPowerCut", "namesOnBox", "boxHome"])
+        XCTAssertEqual(try JSONDecoder().decode(GroupSettings.self, from: json).policy, sender.policy)
+    }
+
+    func testAKeyUpdateFromAnOlderFirstCoordinatorKeepsWhatItDoesNotSend() throws {
+        let coordinator = DeviceIdentity(), me = DeviceIdentity()
+        let current = groupWithBoxSettings(coordinator, me: me)
+        // The first coordinator, on an older version, removed someone and turned the log off.
+        var theirs = current
+        theirs.remove(4)
+        theirs.policy.keepsLog = false
+        theirs.settingsVersion = 1
+        theirs.settingsSigner = 1
+        let plain = try (asOlderVersion(JSONEncoder().encode(theirs)) as NSData).compressed(using: .zlib) as Data
+        let sealed = try seal(plain, to: me.publicKey, from: coordinator, context: current.secrets.groupID)
+        let update = try Joining.openUpdate(Joining.Welcome(groupID: current.secrets.groupID, memberNumber: 2, sealed: sealed), current: current, me: me)
+        XCTAssertEqual(update.secrets, theirs.secrets)
+        XCTAssertFalse(update.policy.keepsLog)
+        XCTAssertEqual(update.policy.antennaOf, current.policy.antennaOf, "what their version did not send is kept")
+        XCTAssertEqual(update.policy.reportsPowerCut, current.policy.reportsPowerCut)
+        XCTAssertTrue(update.policy.namesOnBox)
+        XCTAssertEqual(update.policy.boxHome, current.policy.boxHome)
+        // From this version, an emptied field stays empty.
+        theirs.policy.namesOnBox = false
+        let now = try Joining.openUpdate(Joining.update(theirs, for: XCTUnwrap(theirs.member(2)), coordinator: coordinator), current: current, me: me)
+        XCTAssertFalse(now.policy.namesOnBox)
+    }
+
     func testOwnChoicesCoverOnlyWhatThePersonChose() {
         var coordinators = Profile.standard
         coordinators.personMayChange = [.sounds, .buttons]
