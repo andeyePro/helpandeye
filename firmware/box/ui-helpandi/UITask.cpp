@@ -27,6 +27,7 @@ constexpr uint8_t kFlood = 0xFF;
 constexpr uint64_t kScreenOnMs = 120000;
 constexpr const char* kChannelName = "Help&I";
 const BatteryDraw kDraw{HI_BATTERY_MAH, HI_DRAW_AWAKE_MA, HI_DRAW_ASLEEP_UA};
+const Transmitter kTransmitter{HI_AMPLIFIER_GAIN_DB, -9, MAX_LORA_TX_POWER};
 
 // The buttons that wake the board from deep sleep, all RTC pins (section 5). Inside the box PRG
 // cannot be reached, so it is a wake source only on a plain board.
@@ -54,7 +55,8 @@ uint8_t wokenBy() {
 // The core's copy of what survives deep sleep and a reset, with the clock it was taken at, in
 // RTC memory that a reset leaves alone and a power-on leaves as it was: the core's checksum
 // tells the two apart, and the clock is written with the copy. The system clock keeps running
-// through deep sleep, and nothing can set it meanwhile, so it measures the time asleep.
+// through deep sleep, and nothing can set it meanwhile, so it measures the time asleep, read as
+// this start begins: MeshCore's setup then sets it to just after its newest contact.
 struct RetainedCopy {
   uint64_t monoMs;
   int64_t wallUs;
@@ -89,7 +91,9 @@ constexpr const char* kWarnTune = "warn:d=16,o=6,b=200:c,p,c";
 UITask::UITask(mesh::MainBoard* board, MultiSerialInterface* serial)
     : AbstractUITask(board, serial),
       _buttons(HI_LAYOUT_PRG_ONLY ? prgOnly() : threeButtons(), wokenBy()),
-      _engine(*this, RadioSettings(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR), batteryModel(kDraw, HI_MAINS_SENSED != 0), 1) {}
+      _engine(*this, RadioSettings(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR), kTransmitter, batteryModel(kDraw, HI_MAINS_SENSED != 0), 1),
+      _startMonoMs(monoMs()),
+      _startWallUs(wallUs()) {}
 
 uint64_t UITask::now() const { return monoMs() + _monoOffset; }
 
@@ -119,8 +123,12 @@ void UITask::begin(DisplayDriver* display, SensorManager*, NodePrefs* prefs) {
   _nvs.begin("helpandi", false);
   _engine.setNextRequest(_nvs.getUShort(kNextRequestKey, 1));
   applyRadio();
+  // MeshCore's setup set the clock to just after its newest contact, which after a sleep is
+  // usually earlier than the clock that ran on through it: put back the time it had.
+  uint32_t wallAtStart = uint32_t(_startWallUs / 1000000);
+  if (slept && wallAtStart > rtc_clock.getCurrentTime()) rtc_clock.setCurrentTime(wallAtStart);
   if (_engine.resume(retained.state)) {
-    _monoOffset = retained.monoMs + (slept ? uint64_t(wallUs() - retained.wallUs) / 1000 : 0) - monoMs();
+    _monoOffset = resumedMonoMs(retained.monoMs, retained.wallUs, _startWallUs, slept) - _startMonoMs;
   } else {
     // No record of the hour before this start survives a power cut (section 8).
     _engine.coldStart(now());
@@ -326,7 +334,7 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     i += 2;
     out[i++] = uint8_t(_group.antenna);
     int cap = 0;
-    out[i++] = uint8_t(_engine.powerCap(HI_AMPLIFIER_GAIN_DB, -9, MAX_LORA_TX_POWER, cap) ? int8_t(cap) : int8_t(-128));
+    out[i++] = uint8_t(_engine.powerCap(cap) ? int8_t(cap) : int8_t(-128));
     out[i++] = uint8_t(_members.count);
     out[i++] = uint8_t(_engine.callCount());
     // The box's sealing key, for its memberAdded: the X25519 public key of the same scalar
@@ -467,8 +475,11 @@ void UITask::applyRadio() {
     _cr = _prefs->cr;
     _engine.setRadio(radioFrom(*_prefs));
   }
-  int cap = 0;
-  if (_engine.powerCap(HI_AMPLIFIER_GAIN_DB, -9, MAX_LORA_TX_POWER, cap) && _prefs->tx_power_dbm > cap) {
+  // A box that must not send sends nothing of its own (the core refuses it); what MeshCore sends
+  // itself goes at the lowest setting.
+  int cap = kTransmitter.minSetting;
+  _engine.powerCap(cap);
+  if (_prefs->tx_power_dbm > cap) {
     _prefs->tx_power_dbm = int8_t(cap);
     radio_driver.setTxPower(int8_t(cap));
     the_mesh.savePrefs();

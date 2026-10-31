@@ -62,7 +62,7 @@ mkdir -p "$rel"
 
 if [ -z "$keys" ]; then
   echo "Release dry run: HI_RELEASE_KEYS is not set, so nothing is signed or encrypted. The steps:"
-  if ! $espsecure version >/dev/null 2>&1; then
+  if ! $espsecure --help >/dev/null 2>&1; then
     echo "  (espsecure.py cannot run with PlatformIO's python here: it needs esptool's 'cryptography' module)"
   fi
   keys='$HI_RELEASE_KEYS'

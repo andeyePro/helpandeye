@@ -92,6 +92,8 @@ public:
 
 const RadioSettings kUK(869.618, 62.5, 8, 5);
 const BatteryModel kCell{3000, 100};
+// The V4: about 12 dB of amplifier after the SX1262's -9 to 22 dBm.
+const Transmitter kV4{12.0, -9, 22};
 
 struct World {
     FakePort port;
@@ -102,7 +104,7 @@ struct World {
     BoxEngine box;
 
     explicit World(bool okCloses = true, bool reportPowerCut = true, const BatteryModel& battery = kCell)
-        : box(port, kUK, battery, 1) {
+        : box(port, kUK, kV4, battery, 1) {
         for (int i = 0; i < 32; i++) respondersPrivate[i] = uint8_t(0x30 + i);
         respondersPrivate[0] &= 248;
         respondersPrivate[31] &= 127;
@@ -202,7 +204,7 @@ const uint8_t kFirstRed[] = {0x11, 0x74, 0x11, 0x01, 0x00, 0x01, 0x00, 0x01, 0x0
 
 TEST(nothingGoesOutBeforeTheBoxIsProvisioned) {
     FakePort port;
-    BoxEngine box(port, kUK, kCell, 1);
+    BoxEngine box(port, kUK, kV4, kCell, 1);
     box.press(Colour::red, 1000, 1000, false);
     CHECK(port.sent.empty() && port.phone.empty());
     CHECK(box.takeSound() == Sound::notSent);
@@ -454,15 +456,18 @@ TEST(airtimeUsedInOneBandStillCountsInTheOther) {
 TEST(thePowerCapFollowsTheBandAndTheAntenna) {
     World w;
     int setting = 0;
-    CHECK(w.box.powerCap(12.0, -9, 22, setting) && setting == 15);
+    CHECK(w.box.powerCap(setting) && setting == 15);
     w.box.setRadio(RadioSettings(868.3, 62.5, 8, 5));
-    CHECK(w.box.powerCap(12.0, -9, 22, setting) && setting == 2);
+    CHECK(w.box.powerCap(setting) && setting == 2);
     w.group.antenna = Antenna::external5dBi;
     w.box.provision(w.group, w.members);
-    CHECK(w.box.powerCap(12.0, -9, 22, setting) && setting == -1);
-    CHECK(!w.box.powerCap(12.0, 0, 22, setting));
+    CHECK(w.box.powerCap(setting) && setting == -1);
+    FakePort port;
+    BoxEngine noLowerThanZero(port, RadioSettings(868.3, 62.5, 8, 5), Transmitter{12.0, 0, 22}, kCell, 1);
+    noLowerThanZero.provision(w.group, w.members);
+    CHECK(!noLowerThanZero.powerCap(setting));
     w.box.setRadio(RadioSettings(915.0, 250, 10, 5));
-    CHECK(!w.box.powerCap(12.0, -9, 22, setting));
+    CHECK(!w.box.powerCap(setting));
 }
 
 // The same table as the app's HelpBoxTests.testTheBoxAndTheAppAgreeOnTheCapForAnyGain: gain in
@@ -477,11 +482,32 @@ TEST(thePowerCapFollowsAnyAntennaGain) {
         w.group.antenna = Antenna(kAntennaByGain | uint8_t(r.gain * 2));
         w.box.provision(w.group, w.members);
         int setting = -128;
-        CHECK(w.box.powerCap(12.0, -9, 22, setting) ? setting == r.ten : r.ten == -128);
+        CHECK(w.box.powerCap(setting) ? setting == r.ten : r.ten == -128);
         w.box.setRadio(RadioSettings(868.3, 62.5, 8, 5));
         setting = -128;
-        CHECK(w.box.powerCap(12.0, -9, 22, setting) ? setting == r.one : r.one == -128);
+        CHECK(w.box.powerCap(setting) ? setting == r.one : r.one == -128);
     }
+}
+
+TEST(aBoxThatMustNotSendSendsNothingAndShowsTheCross) {
+    // At 27 dBi even the lowest setting is over 500 mW ERP (section 8): nothing of the box's own
+    // goes on air, however much airtime is free, and the person sees the cross.
+    World w;
+    w.group.antenna = Antenna(kAntennaByGain | 54);
+    w.box.provision(w.group, w.members);
+    int setting;
+    CHECK(!w.box.powerCap(setting));
+    w.box.press(Colour::red, 0, 1000, false);
+    CHECK(w.port.sent.empty());
+    CHECK(w.box.screen().status == CallerStatus::notSent && w.box.takeSound() == Sound::notSent);
+    w.box.tick(30000, 1030);
+    w.box.press(Colour::green, 40000, 1040, false);
+    w.box.tick(70000, 1070);
+    CHECK(w.port.sent.empty());
+    // Its phone can still carry a call.
+    w.box.press(Colour::amber, 80000, 1080, true);
+    w.box.phoneRoute(w.box.call(w.box.callCount() - 1).number, true);
+    CHECK(w.port.sent.empty() && w.box.screen().status == CallerStatus::waitingForResponder);
 }
 
 TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
@@ -668,13 +694,13 @@ TEST(duringAChangeoverEveryFrameGoesOnBothChannels) {
 
 TEST(requestNumbersWrapBefore32768AndAreSavedBeforeUse) {
     FakePort port;
-    BoxEngine box(port, kUK, kCell, 32767);
+    BoxEngine box(port, kUK, kV4, kCell, 32767);
     World w;
     box.provision(w.group, w.members);
     box.press(Colour::red, 0, 1000, false);
     CHECK(port.sent[0].payload[5] == 0xFF && port.sent[0].payload[6] == 0x7F);
     CHECK(port.savedNext == 1);
-    BoxEngine fresh(port, kUK, kCell, 0);
+    BoxEngine fresh(port, kUK, kV4, kCell, 0);
     CHECK(fresh.nextRequest() == 1);
     fresh.setNextRequest(40000);
     CHECK(fresh.nextRequest() == 1);
@@ -742,6 +768,50 @@ TEST(theHoursAirtimeAndThePowerCutSurviveAResetThroughRTCMemory) {
     CHECK(cold.box.callCount() == 0 && cold.box.screen().mains == PowerMonitor::Mains::unknown);
 }
 
+TEST(aResetKeepsTheBandItStartsInNotTheOneInTheCopy) {
+    // The copy was taken in the 10% band and the box starts again in the 1% band, as when the
+    // radio's settings changed in the second before a reset. The 60 s already sent this hour is
+    // over the 1% band's 32.4 s for calls, so nothing more goes.
+    World w;
+    w.port.airtime = 30000;
+    w.box.press(Colour::red, 0, 1000, false);
+    w.box.press(Colour::red, 1000, 1001, false);
+    CHECK(w.port.sent.size() == 2);
+    uint8_t rtc[BoxEngine::kRetainedBytes];
+    w.box.retain(rtc);
+    World after;
+    after.port.airtime = 30000;
+    after.box.setRadio(RadioSettings(868.3, 62.5, 8, 5));
+    CHECK(after.box.resume(rtc));
+    after.box.press(Colour::red, 2000, 1002, false);
+    CHECK(after.port.sent.empty() && after.box.screen().status == CallerStatus::notSent);
+}
+
+TEST(aCopyFromAnotherBuildRunsOnThisBuildsBattery) {
+    // A build with the mains wire and a 3000 mAh cell left the copy; this one has no wire and a
+    // 6000 mAh cell. The power cut carries on, counted and worded as this build's.
+    World w;
+    w.box.power(0, 1000, false, 4200, false);
+    w.box.power(10000, 1010, false, 4200, false);
+    uint8_t rtc[BoxEngine::kRetainedBytes];
+    w.box.retain(rtc);
+    World after(true, true, BatteryModel{6000, 100, false});
+    CHECK(after.box.resume(rtc));
+    CHECK(after.box.screen().mains == Mains::off && after.box.screen().mainsEstimated);
+    after.box.power(11000, 1011, false, 4200, false);
+    CHECK(after.box.screen().hoursLeft == 60);
+}
+
+TEST(theClockCarriesOnThroughSleepAndNeverWraps) {
+    // Ten minutes asleep by the system clock.
+    CHECK(resumedMonoMs(5000000, 1000000000, 1600000000, true) == 5600000);
+    // A plain reset: the copy is at most a second old, and the clock carries on from it.
+    CHECK(resumedMonoMs(5000000, 1000000000, 1600000000, false) == 5000000);
+    // A system clock behind the copy's (set back before it was read) adds nothing: never a wrap
+    // round to thousands of years on, which would empty the hour's airtime record.
+    CHECK(resumedMonoMs(5000000, 1000000000, 400000000, true) == 5000000);
+}
+
 TEST(theBoxSleepsOnlyOnBatteryWithNothingToSendAgainAndNoPhone) {
     World w;
     CHECK(!w.box.canSleep(false));  // mains not yet known
@@ -772,7 +842,7 @@ TEST(theBoxSleepsOnlyOnBatteryWithNothingToSendAgainAndNoPhone) {
     CHECK(!w.box.canSleep(false));
 
     FakePort port;
-    BoxEngine bare(port, kUK, kCell, 1);
+    BoxEngine bare(port, kUK, kV4, kCell, 1);
     bare.power(0, 1000, false, 4200, false);
     bare.power(10000, 1010, false, 4200, false);
     CHECK(bare.canSleep(false));  // a box not yet set up has nothing to stay awake for

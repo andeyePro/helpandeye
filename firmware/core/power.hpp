@@ -114,6 +114,9 @@ public:
 
     // The draw the hours are counted at from the next update: the box's, as it is now.
     void setDraw(uint32_t drawMA) { model_.drawMA = drawMA; }
+    // This build's battery and mains wire, for a monitor carried over from before a reset, which
+    // may have been another build's.
+    void setModel(const BatteryModel& model) { model_ = model; }
 
 private:
     BatteryModel model_;

@@ -88,6 +88,20 @@ struct BatteryDraw {
 // `mainsSensed` says whether the build has the mains wire.
 BatteryModel batteryModel(const BatteryDraw& draw, bool mainsSensed);
 
+// The board's transmitter (section 8): the gain of its amplifier after the SX1262, and the
+// SX1262's lowest and highest settings.
+struct Transmitter {
+    double amplifierGainDB;
+    int minSetting;
+    int maxSetting;
+};
+
+// The monotonic clock at a start (section 9): carried on from the retained copy, plus, after a
+// wake from deep sleep, the time asleep by the system clock read before anything in this start
+// set it. MeshCore's start sets that clock to just after its newest contact, often earlier than
+// the copy's, and a clock behind the copy's adds nothing rather than wrapping round.
+uint64_t resumedMonoMs(uint64_t retainedMonoMs, int64_t retainedWallUs, int64_t wallUsAtStart, bool slept);
+
 class BoxEngine {
 public:
     static constexpr size_t kMaxCalls = 8;
@@ -124,7 +138,8 @@ private:
 public:
     static constexpr size_t kRetainedBytes = sizeof(Retained);
 
-    BoxEngine(BoxPort& port, const RadioSettings& radio, const BatteryModel& battery, uint16_t nextRequest);
+    BoxEngine(BoxPort& port, const RadioSettings& radio, const Transmitter& transmitter, const BatteryModel& battery,
+              uint16_t nextRequest);
 
     void provision(const GroupSettings& group, const MemberList& members);
     void forget();
@@ -140,8 +155,8 @@ public:
     // The copy that survives a reset or deep sleep: the hour's airtime, the mains and battery
     // state, the calls and the open report. `retain` writes kRetainedBytes with a checksum;
     // `resume` takes a copy back, and is false when it is not one this build wrote (a cold
-    // start, with nothing or something else in the memory). Call it before setRadio changes
-    // the band, not after.
+    // start, with nothing or something else in the memory). What the copy cannot say stays as
+    // this start has it: the band's limit and this build's battery.
     void retain(uint8_t* out) const;
     bool resume(const uint8_t* in);
     // Whether the box may deep-sleep now (section 10): on battery, with nothing to send again
@@ -149,8 +164,8 @@ public:
     // A sleeping box hears nothing, which is why nothing may be waiting for an answer.
     bool canSleep(bool phoneConnected) const;
     // The highest SX1262 setting the band allows with this box's antenna, or false when the box
-    // must not send at all.
-    bool powerCap(double amplifierGainDB, int boardMin, int boardMax, int& setting) const;
+    // must not send at all: then it sends nothing of its own, and shows the cross.
+    bool powerCap(int& setting) const;
 
     // A button. `phoneConnected` says whether a phone can be asked to carry the call too.
     void press(Colour colour, uint64_t nowMs, uint32_t wallNow, bool phoneConnected);
@@ -206,9 +221,10 @@ private:
 
     BoxPort& port_;
     RadioSettings radio_;
+    Transmitter transmitter_;
     AirtimeBudget budget_;
+    BatteryModel battery_;
     PowerMonitor monitor_;
-    uint32_t asleepDrawMA_, awakeDrawMA_;
     GroupSettings group_{};
     MemberList members_;
     bool provisioned_ = false;

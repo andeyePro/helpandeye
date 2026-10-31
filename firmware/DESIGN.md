@@ -390,7 +390,11 @@ the lowest setting would be over. The antenna's gain comes from the antenna type
 set in the app (Martin, 2026-10-30; section 6), which the app sends as the gain itself, so any
 antenna can be set: the higher its gain, the lower the cap, and an antenna whose gain puts even
 the lowest setting over the limit (above about 26 dBi at 869.4 to 869.65 MHz, 13 dBi at 868.0 to
-868.6 MHz) stops the box sending. The app shows the same cap (`GroupState.maxRadioSetting`), and
+868.6 MHz) stops the box sending: `BoxEngine` then refuses every packet of its own, calls,
+resends, I'm OK, closes and reports alike, so a press shows the cross unless its phone carries
+the call, and the firmware pulls MeshCore's setting down to the lowest. That lowest setting is
+still over the limit for whatever MeshCore sends itself (a connected phone's own traffic through
+the box, its replies on the mesh), which the box cannot stop. The app shows the same cap (`GroupState.maxRadioSetting`), and
 both are tested against one table of gains. The V4's standard whip is assumed, at 2 dBi,
 until measured; with 12 dB of amplifier gain that is 15 at 869.4 to 869.65 MHz and 2 at 868.0 to
 868.6 MHz. The firmware applies the cap once a second (`UITask::applyRadio`), so a higher setting
@@ -420,9 +424,16 @@ does.
 
 **The monotonic clock across sleep and resets.** The core's schedule and airtime run on a
 monotonic clock in milliseconds (section 7). On the board it is the 64-bit `monoMs()` (ESP-IDF's
-microsecond timer, which never wraps) plus an offset (`UITask::now`). The retained copy (section 10) carries the clock it was taken at and the system
-time beside it; after a wake from deep sleep the offset adds the time asleep, measured as the
-system time's advance, which ESP-IDF keeps through deep sleep and nothing can set meanwhile.
+microsecond timer, which never wraps) plus an offset (`UITask::now`). The retained copy (section
+10) carries the clock it was taken at and the system time beside it; after a wake from deep sleep
+the offset adds the time asleep, measured as the system time's advance, which ESP-IDF keeps
+through deep sleep and nothing can set meanwhile (`resumedMonoMs`, host-tested). Both clocks are
+read as the start begins, when the UI task is made: MeshCore's setup then sets the system clock
+to just after its newest contact (`bootstrapRTCfromContacts`, at every start, a wake included),
+which is usually earlier, and read after that the time asleep came out negative and wrapped to
+thousands of years, emptying the hour's airtime record at every wake. A system clock behind the
+copy's adds nothing. The UI task then puts the system clock back to the time it had through the
+sleep, so a box asleep on battery does not fall back to its last contact's time at every wake.
 After a plain reset the copy is at most a second old and the clock carries on from it, so the
 retained calls' times and the airtime log's stamps stay in the past, never in the future.
 
@@ -492,8 +503,11 @@ reported again), the eight calls, and the open report's number and part count, a
 own bytes with a checksum and a layout number, in RTC slow memory (`RTC_NOINIT_ATTR`, which a
 reset leaves alone and a power-on leaves as it was), written every second while awake and again
 before sleep. A copy the checksum and layout do not confirm is a cold start (decision 8): a
-power-on, or another build. A report's remaining repeats are not kept, so a reset during them
-loses the rest; the next mark makes the next note.
+power-on, or another build. What the copy cannot know stays as the start has it: the band's
+duty cycle (the radio's settings may have changed in the second before a reset) and the build's
+battery and mains wire (a firmware update keeps the copy when the layout is unchanged). A report's
+remaining repeats are not kept, so a reset during them loses the rest; the next mark makes the
+next note.
 
 **Without the mains wire (Martin, 2026-10-30).** A build with `HI_MAINS_SENSED=0` has no divider,
 so `MainsEstimate` in `core/power.hpp` decides from the battery readings alone (the board reads
@@ -629,13 +643,13 @@ Ed25519 library (no signature vectors here: none could be made from a phone).
 
 ## 13. Test plan
 
-**Host tests (built, run, passing).** 126 tests in `firmware/test`: the frames byte for byte
+**Host tests (built, run, passing).** 136 tests in `firmware/test`: the frames byte for byte
 against the Swift layout, malformed and stray input, what may go on the group channel, the
 signature inputs, too small a buffer; the resend times, acknowledgement rules, removal, settling,
 I'm OK settling only earlier calls, which share each resend uses, and close repeats; airtime
 against Semtech's figure, the default preamble and packet size against EscalationTests.swift,
 both bands, the budget's three shares, entries after a clock reset, reservations and a full log;
-the power cap; debouncing, a button held at start-up, the button that woke the board, press and
+the power cap, and a box that must not send sending nothing; debouncing, a button held at start-up, the button that woke the board, press and
 long press, all three pressed at once, falling on red and green, I'm OK just after Help, the
 countdown's taps, warning and Help, a late wake, a 300-second countdown, and stopping it,
 including by a press that began just before the end; the sealing primitives against their RFC
@@ -651,7 +665,8 @@ count, a removal, I'm OK under both profiles, the cross and the phone's routes, 
 cold start, the power cap, a power-cut report opened as a responder's phone opens it, a
 coordinator's close, the changeover, request numbers and forgetting; the retained copy through a
 fake RTC store (the hour's airtime, the power cut and its part numbers and the calls carried on,
-a corrupted or empty copy refused), when the box may sleep, and the hours left with the box
+a corrupted or empty copy refused, the band and battery this start has kept over the copy's, the
+clock carried through sleep and never wrapped), when the box may sleep, and the hours left with the box
 asleep between polls. Still to add: an acknowledgement signed by a real phone, checked on a
 board.
 

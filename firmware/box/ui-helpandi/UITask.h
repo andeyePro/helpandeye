@@ -77,7 +77,10 @@ private:
   helpandi::NameList _buildingNames;
   helpandi::Pairing _pairing = helpandi::Pairing::off;
   bool _haveGroup = false, _haveMembers = false;
-  // The monotonic clock carries on across deep sleep and a reset (section 10).
+  // The monotonic clock carries on across deep sleep and a reset (section 10), from both clocks
+  // as they were when this start began, before MeshCore's setup could set the system clock.
+  uint64_t _startMonoMs;
+  int64_t _startWallUs;
   uint64_t _monoOffset = 0;
   uint64_t _nextPower = 0, _nextBattery = 0, _nextDraw = 0, _activeUntil = 0;
   uint16_t _millivolts = 0;

@@ -36,6 +36,10 @@ BatteryModel batteryModel(const BatteryDraw& draw, bool mainsSensed) {
     return m;
 }
 
+uint64_t resumedMonoMs(uint64_t retainedMonoMs, int64_t retainedWallUs, int64_t wallUsAtStart, bool slept) {
+    return retainedMonoMs + (slept && wallUsAtStart > retainedWallUs ? uint64_t(wallUsAtStart - retainedWallUs) / 1000 : 0);
+}
+
 namespace {
 // The call schedule runs in whole seconds of the monotonic clock (call.hpp).
 uint64_t seconds(uint64_t nowMs) { return nowMs / 1000; }
@@ -49,13 +53,14 @@ uint32_t checksum(const void* bytes, size_t length) {
 }
 }  // namespace
 
-BoxEngine::BoxEngine(BoxPort& port, const RadioSettings& radio, const BatteryModel& battery, uint16_t nextRequest)
+BoxEngine::BoxEngine(BoxPort& port, const RadioSettings& radio, const Transmitter& transmitter, const BatteryModel& battery,
+                     uint16_t nextRequest)
     : port_(port),
       radio_(radio),
+      transmitter_(transmitter),
       budget_(radio.band() ? radio.band()->dutyCycle : 0),
-      monitor_(battery),
-      asleepDrawMA_(battery.drawMA),
-      awakeDrawMA_(battery.awakeMA) {
+      battery_(battery),
+      monitor_(battery) {
     setNextRequest(nextRequest);
 }
 
@@ -112,7 +117,9 @@ bool BoxEngine::resume(const uint8_t* in) {
     r.sum = 0;
     if (r.version != kRetainedLayout || checksum(&r, sizeof r) != sum) return false;
     budget_ = r.budget;
+    budget_.setDutyCycle(radio_.band() ? radio_.band()->dutyCycle : 0);
     monitor_ = r.monitor;
+    monitor_.setModel(battery_);
     for (size_t i = 0; i < kMaxCalls; i++) slots_[i] = r.slots[i];
     callCount_ = r.callCount;
     reportRequest_ = r.reportRequest;
@@ -138,9 +145,10 @@ bool BoxEngine::canSleep(bool phoneConnected) const {
     return true;
 }
 
-bool BoxEngine::powerCap(double amplifierGainDB, int boardMin, int boardMax, int& setting) const {
+bool BoxEngine::powerCap(int& setting) const {
     const Band* band = radio_.band();
-    return band && maxRadioPowerSetting(*band, antennaGainDBi(group_.antenna), amplifierGainDB, boardMin, boardMax, setting);
+    return band && maxRadioPowerSetting(*band, antennaGainDBi(group_.antenna), transmitter_.amplifierGainDB,
+                                        transmitter_.minSetting, transmitter_.maxSetting, setting);
 }
 
 void BoxEngine::sound(Sound s) {
@@ -157,7 +165,8 @@ Sound BoxEngine::takeSound() {
 }
 
 bool BoxEngine::send(const uint8_t* payload, size_t length, AirtimeBudget::Kind kind, uint64_t nowMs, uint32_t wallNow) {
-    if (!radio_.band()) return false;
+    int cap;
+    if (!powerCap(cap)) return false;
     bool both = inChangeover(wallNow);
     uint32_t ms = port_.airtimeMs(length);
     if (!budget_.allows(both ? ms * 2 : ms, kind, nowMs)) return false;
@@ -387,7 +396,7 @@ void BoxEngine::addNote(const char* text, bool lastWarning, uint64_t nowMs, uint
 void BoxEngine::power(uint64_t nowMs, uint32_t wallNow, bool mainsPresent, uint16_t millivolts, bool phoneConnected) {
     // A report's own few minutes of repeats do not count: the estimate is for how the box will
     // spend the cut, which a call or a phone changes and a report does not.
-    monitor_.setDraw(keptAwake(phoneConnected) ? awakeDrawMA_ : asleepDrawMA_);
+    monitor_.setDraw(keptAwake(phoneConnected) ? battery_.awakeMA : battery_.drawMA);
     PowerMonitor::Event e = monitor_.update(nowMs, mainsPresent, millivolts);
     if (e.report == PowerMonitor::Report::none) return;
     if (!provisioned_ || !group_.reportPowerCut || !canSeal_) return;
