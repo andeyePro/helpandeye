@@ -578,8 +578,8 @@ public struct GroupState: Codable, Equatable, Sendable {
     public func antenna(of member: UInt16?) -> Antenna { member.flatMap { policy.antennaOf[$0] } ?? .standardWhip }
 
     /// Sets the antenna on this member's box (nil for the standard whip). One above
-    /// `Antenna.maxGainDBi` is refused, as a Help&I box could not keep within the band's limit
-    /// with it. Returns whether it was set.
+    /// `Antenna.maxGainDBi` is refused, as a Help&I box cannot be told of it. Returns whether it
+    /// was set.
     @discardableResult
     public mutating func setAntenna(_ antenna: Antenna?, of member: UInt16) -> Bool {
         guard (antenna?.gainDBi ?? 0) <= Antenna.maxGainDBi else { return false }

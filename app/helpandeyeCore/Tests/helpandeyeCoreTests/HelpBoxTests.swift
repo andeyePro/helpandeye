@@ -54,9 +54,9 @@ final class HelpBoxTests: XCTestCase {
         g.policy.reportsPowerCut.insert(4)
         let setup = try XCTUnwrap(HelpBox.setup(for: g, box: hex(boxKey), at: Date()))
         XCTAssertEqual(setup.member, 4); XCTAssertEqual(setup.unit, 70004)
-        // writeSetGroup in the firmware's provision.cpp, with the same settings.
+        // writeSetGroup in the firmware's provision.cpp, with the same settings and the standard whip as its gain, 2 dBi.
         XCTAssertEqual(try MeshCore.Command.boxSetGroup(body: setup.group).encoded(), hex(
-            "71 000102030405060708090a0b0c0d0e0f 0400 74110100 05 00 \(respondersPublic) 505152535455565758595a5b5c5d5e5f"
+            "71 000102030405060708090a0b0c0d0e0f 0400 74110100 05 84 \(respondersPublic) 505152535455565758595a5b5c5d5e5f"
             + " 00000000000000000000000000000000 00000000 0100"))
         XCTAssertEqual(setup.members.count, 1)
         XCTAssertEqual(try MeshCore.Command.boxSetMembers(page: setup.members[0]).encoded().prefix(7), hex("72 01000000 00 02"))
@@ -78,7 +78,7 @@ final class HelpBoxTests: XCTestCase {
         g.remove(1, at: now)
         let during = try XCTUnwrap(HelpBox.setup(for: g, box: hex(boxKey), at: now))
         XCTAssertEqual(during.group[22], 2, "the caller may close, I'm OK does not close, no power-cut reports")
-        XCTAssertEqual(during.group[23], HelpBox.AntennaCode.external3dBi.rawValue)
+        XCTAssertEqual(during.group[23], 0x86, "3 dBi, as 0x80 plus six half-dB steps")
         XCTAssertEqual(during.group.subdata(in: 56..<72), g.secrets.channelSecret, "the new channel")
         XCTAssertEqual(during.group.subdata(in: 72..<88), hex("505152535455565758595a5b5c5d5e5f"), "and the old one during the changeover")
         var w = ByteWriter(); w.u32(UInt32(now.addingTimeInterval(GroupState.changeoverPeriod).timeIntervalSince1970))
@@ -89,33 +89,36 @@ final class HelpBoxTests: XCTestCase {
         XCTAssertEqual(after.members[0][5], 1, "the members page says one member is left")
     }
 
-    func testTheAntennaCodeNeverLoosensTheCap() {
-        XCTAssertEqual(HelpBox.antennaCode(.standardWhip), .whip)
-        XCTAssertEqual(HelpBox.antennaCode(.higherGainWhip), .external5dBi)
-        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 0)), .stub)
-        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 2.5)), .external3dBi)
-        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 4)), .external5dBi)
+    func testTheAntennaByteCarriesTheGainRoundedUpToTheHalfDB() {
+        XCTAssertEqual(HelpBox.antennaCode(.standardWhip), 0x84)
+        XCTAssertEqual(HelpBox.antennaCode(.higherGainWhip), 0x8A)
+        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 0)), 0x80)
+        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: -1)), 0x80, "a loss is taken as no gain")
+        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 2.3)), 0x85, "rounded up, so the box's cap is never looser")
+        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 63.5)), 0xFF)
+        XCTAssertEqual(HelpBox.antennaCode(.external(gainDBi: 70)), 0xFF, "the highest the byte carries, where the box must not send")
     }
 
-    /// The firmware's antenna codes stop at 5 dBi, so an antenna above that is never set: a box
-    /// told "5 dBi" for an 8 dBi antenna would send about 3 dB over the band's limit (IR 2030).
-    func testNoAntennaIsSetThatABoxCouldNotKeepWithinTheLimit() {
-        let codeGain: [HelpBox.AntennaCode: Double] = [.stub: 0, .whip: 2, .external3dBi: 3, .external5dBi: 5]
-        var g = GroupState(name: "Mill Lane", secrets: .random(), members: [])
-        XCTAssertFalse(g.setAntenna(.external(gainDBi: 8), of: 2))
-        XCTAssertFalse(g.setAntenna(.external(gainDBi: 5.5), of: 2))
-        XCTAssertTrue(g.policy.antennaOf.isEmpty, "refused, so the box keeps the standard whip's cap")
-        for gain in stride(from: 0.0, through: 15.0, by: 0.5) {
-            guard g.setAntenna(.external(gainDBi: gain), of: 2) else { continue }
-            XCTAssertLessThanOrEqual(gain, Antenna.maxGainDBi)
-            XCTAssertGreaterThanOrEqual(codeGain[HelpBox.antennaCode(g.antenna(of: 2))]!, gain, "the box's cap is never looser at \(gain) dBi")
+    /// The same table as the firmware's thePowerCapFollowsAnyAntennaGain (firmware/test/box_tests.cpp):
+    /// gain in dBi, then the cap at 869.4-869.65 MHz and at 868.0-868.6 MHz, nil where the box
+    /// must not send. The app shows the cap the box works out from the byte it is sent.
+    func testTheBoxAndTheAppAgreeOnTheCapForAnyGain() throws {
+        let rows: [(gain: Double, ten: Int?, one: Int?)] = [
+            (0, 17, 4), (2, 15, 2), (3, 14, 1), (5, 12, -1), (7.5, 9, -4), (8, 9, -4),
+            (12, 5, -8), (13, 4, -9), (14, 3, nil), (26, -9, nil), (26.5, nil, nil), (63.5, nil, nil),
+        ]
+        var g = firmwareGroup()
+        for r in rows {
+            XCTAssertTrue(g.setAntenna(.external(gainDBi: r.gain), of: 4))
+            XCTAssertEqual(g.maxRadioSetting(ofUnit: 70004, in: Band.all[1]), r.ten, "\(r.gain) dBi")
+            XCTAssertEqual(g.maxRadioSetting(ofUnit: 70004, in: Band.all[0]), r.one, "\(r.gain) dBi")
+            let setup = try XCTUnwrap(HelpBox.setup(for: g, box: hex(boxKey), at: Date()))
+            XCTAssertEqual(setup.group[23], 0x80 | UInt8(r.gain * 2))
         }
-        for a in [Antenna.standardWhip, .higherGainWhip] {
-            XCTAssertTrue(g.setAntenna(a, of: 2))
-            XCTAssertGreaterThanOrEqual(codeGain[HelpBox.antennaCode(a)]!, a.gainDBi)
-        }
-        XCTAssertTrue(g.setAntenna(nil, of: 2))
-        XCTAssertNil(g.policy.antennaOf[2])
+        XCTAssertFalse(g.setAntenna(.external(gainDBi: 64), of: 4), "more than the byte carries")
+        XCTAssertEqual(g.antenna(of: 4), .external(gainDBi: 63.5))
+        XCTAssertTrue(g.setAntenna(nil, of: 4))
+        XCTAssertNil(g.policy.antennaOf[4])
     }
 
     func testMembersGoInPagesOfFourRespondersFirstUpToThirtyTwo() throws {

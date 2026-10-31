@@ -1,4 +1,5 @@
 #include <cstring>
+#include <initializer_list>
 
 #include "../core/provision.hpp"
 #include "test.hpp"
@@ -62,6 +63,8 @@ TEST(setGroupRefusesTheWrongLengthAnEmptySecretOrAnUnknownAntenna) {
     writeSetGroup(g, out, sizeof out);
     CHECK(!parseSetGroup(out, 94, back));
     out[24] = 4;
+    CHECK(!parseSetGroup(out, 95, back));
+    out[24] = 0x7F;
     CHECK(!parseSetGroup(out, 95, back));
     out[24] = 0;
     std::memset(out + 57, 0, 16);
@@ -131,6 +134,21 @@ TEST(antennaGainsAreTheOnesThePowerCapUses) {
     CHECK(antennaGainDBi(Antenna::stub) == 0.0);
     CHECK(antennaGainDBi(Antenna::external3dBi) == 3.0);
     CHECK(antennaGainDBi(Antenna::external5dBi) == 5.0);
+    CHECK(antennaGainDBi(Antenna(kAntennaByGain)) == 0.0);
+    CHECK(antennaGainDBi(Antenna(kAntennaByGain | 15)) == 7.5);
+    CHECK(antennaGainDBi(Antenna(kAntennaByGain | 24)) == 12.0);
+    CHECK(antennaGainDBi(Antenna(0xFF)) == 63.5);
+}
+
+TEST(setGroupCarriesAnyAntennaGain) {
+    uint8_t out[kSetGroupBytes];
+    GroupSettings g = sample(), back{};
+    for (uint8_t code : std::initializer_list<uint8_t>{0x80, 0x90, 0xFF}) {
+        g.antenna = Antenna(code);
+        writeSetGroup(g, out, sizeof out);
+        CHECK(out[24] == code);
+        CHECK(parseSetGroup(out, sizeof out, back) && back.antenna == g.antenna);
+    }
 }
 
 namespace {

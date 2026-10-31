@@ -40,7 +40,10 @@ enum class Role : uint8_t { caller = 1, responder = 2, both = 3, coordinator = 4
 
 inline bool canRespond(Role r) { return r != Role::caller; }
 
+// Codes 0 to 3 name an antenna. Any other antenna is kAntennaByGain plus its gain in half-dB
+// steps (0 to 63.5 dBi), so the cap follows whatever antenna the coordinator set (section 8).
 enum class Antenna : uint8_t { whip = 0, stub = 1, external3dBi = 2, external5dBi = 3 };
+constexpr uint8_t kAntennaByGain = 0x80;
 
 // The gain the power cap allows for (section 8): the V4's standard whip until measured.
 double antennaGainDBi(Antenna a);

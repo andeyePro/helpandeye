@@ -334,7 +334,6 @@ struct MemberView: View {
                         if antenna.isExternal {
                             Stepper("Its gain: \(gainWords(antenna.gainDBi))", value: Binding(get: { antenna.gainDBi }, set: { set(.external(gainDBi: $0)) }),
                                     in: 0...Antenna.maxGainDBi, step: 0.5)
-                            Text("Help&I boxes work with antennas of up to \(gainWords(Antenna.maxGainDBi)).")
                         }
                         PowerLimits(unit: unit)
                         Text("The box keeps its radio under this limit once it is set up with Help&I's firmware. The antenna goes to every member with the group's settings.")
@@ -364,6 +363,10 @@ struct PowerLimits: View {
     var body: some View {
         ForEach(Band.all, id: \.name) { band in
             LabeledContent(band.name, value: model.group?.maxRadioSetting(ofUnit: unit, in: band).map { "up to \($0) dBm from the radio" } ?? "must not send")
+        }
+        if let g = model.group, Band.all.allSatisfy({ g.maxRadioSetting(ofUnit: unit, in: $0) == nil }) {
+            Text("With this antenna the box must not send at all, so its buttons cannot call for help. It needs an antenna with less gain.")
+                .foregroundStyle(Color.warning)
         }
     }
 }

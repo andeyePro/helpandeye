@@ -32,6 +32,7 @@ bool validRole(uint8_t r) { return r >= 1 && r <= 4; }
 }  // namespace
 
 double antennaGainDBi(Antenna a) {
+    if (uint8_t(a) & kAntennaByGain) return (uint8_t(a) - kAntennaByGain) / 2.0;
     switch (a) {
     case Antenna::whip: return 2.0;
     case Antenna::stub: return 0.0;
@@ -45,7 +46,8 @@ bool GroupSettings::hasRespondersKey() const { return !allZero(respondersKey, kK
 bool GroupSettings::hasOldSecret() const { return !allZero(oldChannelSecret, kChannelSecretBytes); }
 
 bool parseSetGroup(const uint8_t* d, size_t length, GroupSettings& g) {
-    if (length != kSetGroupBytes || d[0] != kCmdSetGroup || d[24] > uint8_t(Antenna::external5dBi)) return false;
+    if (length != kSetGroupBytes || d[0] != kCmdSetGroup) return false;
+    if (d[24] > uint8_t(Antenna::external5dBi) && !(d[24] & kAntennaByGain)) return false;
     std::memcpy(g.groupID, d + 1, kGroupIDBytes);
     g.member = readU16(d + 17);
     g.unit = readU32(d + 19);

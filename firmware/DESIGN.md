@@ -225,8 +225,8 @@ little-endian; keys are raw bytes; the reply to a command is MeshCore's own `OK`
 
 | Byte 0 | Name | Body |
 |---|---|---|
-| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off; plus 4 when estimated from the battery, section 10), battery mV u16, hours left u16, antenna u8, power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`), names u8 (how many first names the box holds, section 6) |
-| 0x71 | set group | 94 bytes after the command byte: group ID (16), member u16, unit u32, flags u8 (bit 0 I'm OK closes the call, bit 1 the caller may close, bit 2 report power cuts), antenna u8 (0 the V4's whip, 1 a stub, 2 an external 3 dBi, 3 an external 5 dBi), responders' public key (32, all zero when the group has none), channel secret (16), old channel secret (16, all zero outside a changeover), old secret ends at u32, first coordinator u16 |
+| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off; plus 4 when estimated from the battery, section 10), battery mV u16, hours left u16, antenna u8 (as set by 0x71), power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`), names u8 (how many first names the box holds, section 6) |
+| 0x71 | set group | 94 bytes after the command byte: group ID (16), member u16, unit u32, flags u8 (bit 0 I'm OK closes the call, bit 1 the caller may close, bit 2 report power cuts), antenna u8 (0 the V4's whip, 1 a stub, 2 an external 3 dBi, 3 an external 5 dBi, or 0x80 plus any antenna's gain in half-dB steps, 0 to 63.5 dBi, which is what the app sends, rounded up; 4 to 0x7F are refused), responders' public key (32, all zero when the group has none), channel secret (16), old channel secret (16, all zero outside a changeover), old secret ends at u32, first coordinator u16 |
 | 0x72 | set members | version u32, index u8, total u8, then up to four of: member u16, role u8 (1 caller, 2 responder, 3 both, 4 coordinator), Ed25519 signing key (32). Index 0 starts a new list; the list replaces the old one when every position up to `total` has arrived. At most 32 members |
 | 0x73 | get calls | nothing. Replies 0xA1 per call: request u16, colour u8, pressed at u32, status u8 (0 sending, 1 waiting for a responder, 2 seen, 3 not sent, 4 closed), acknowledgements u8; then 0xA2 |
 | 0x74 | route result | request u16, sent u8 (1 the phone's routes took it, 0 none did) |
@@ -361,7 +361,11 @@ start with no valid copy (a power-on, or another build) is a cold start.
 **Transmit power.** `maxRadioPowerSetting` turns the band's ERP limit into the highest SX1262
 setting, given the antenna's gain and the amplifier's gain, and refuses to send at all if even
 the lowest setting would be over. The antenna's gain comes from the antenna type the coordinator
-set in the app (Martin, 2026-10-30; section 6): the V4's standard whip is assumed, at 2 dBi,
+set in the app (Martin, 2026-10-30; section 6), which the app sends as the gain itself, so any
+antenna can be set: the higher its gain, the lower the cap, and an antenna whose gain puts even
+the lowest setting over the limit (above about 26 dBi at 869.4 to 869.65 MHz, 13 dBi at 868.0 to
+868.6 MHz) stops the box sending. The app shows the same cap (`GroupState.maxRadioSetting`), and
+both are tested against one table of gains. The V4's standard whip is assumed, at 2 dBi,
 until measured; with 12 dB of amplifier gain that is 15 at 869.4 to 869.65 MHz and 2 at 868.0 to
 868.6 MHz. The firmware applies the cap once a second (`UITask::applyRadio`), so a higher setting
 from the app, MeshCore's console or a command is pulled back within a second. MeshCore's default

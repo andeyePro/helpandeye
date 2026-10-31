@@ -80,19 +80,22 @@ public enum Antenna: Codable, Equatable, Hashable, Sendable {
     public static let v4AmplifierGainDB: Double = 12
     /// The SX1262's output settings, in dBm.
     public static let radioSettings = -9...22
-    /// The highest gain a Help&I box can be told of: its firmware's antenna codes stop at 5 dBi
-    /// (`HelpBox.antennaCode`), so a box with a higher-gain antenna would work out a cap looser
-    /// than IR 2030 allows.
-    public static let maxGainDBi: Double = 5
+    /// The highest gain the antenna byte of set group carries (`HelpBox.antennaCode`).
+    public static let maxGainDBi: Double = 63.5
+
+    /// The gain a Help&I box is told of: rounded up to the half dB, so its cap is never looser
+    /// than the antenna's, and no lower than 0 or higher than `maxGainDBi`.
+    public var boxGainDBi: Double { min(max((gainDBi * 2).rounded(.up), 0), Antenna.maxGainDBi * 2) / 2 }
 }
 
 extension Band {
     /// The highest SX1262 output setting (dBm) that keeps a box inside this band's ERP limit with
     /// this antenna, allowing for the board's amplifier; nil when even the lowest setting is over,
-    /// so the box must not send. The same arithmetic as the firmware's `maxRadioPowerSetting`,
-    /// for the box to take at provisioning. ERP is measured against a dipole, 2.15 dBi.
+    /// so the box must not send. The same arithmetic, on the same gain, as the firmware's
+    /// `maxRadioPowerSetting`, for the box to take at provisioning. ERP is measured against a
+    /// dipole, 2.15 dBi.
     public func maxRadioSetting(antenna: Antenna, amplifierGainDB: Double = Antenna.v4AmplifierGainDB) -> Int? {
-        let conducted = 10 * log10(maxERPmW) + 2.15 - antenna.gainDBi
+        let conducted = 10 * log10(maxERPmW) + 2.15 - antenna.boxGainDBi
         let setting = Int(floor(conducted - amplifierGainDB))
         guard setting >= Antenna.radioSettings.lowerBound else { return nil }
         return min(setting, Antenna.radioSettings.upperBound)

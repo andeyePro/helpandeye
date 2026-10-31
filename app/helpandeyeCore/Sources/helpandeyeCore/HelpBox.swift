@@ -18,20 +18,11 @@ public enum HelpBox {
     public static let namesPerPage = 8
     public static let maxNameBytes = 16
 
-    /// The firmware's codes for a unit's antenna, from which the box works out its own
-    /// transmit-power cap with the same arithmetic as `Band.maxRadioSetting(antenna:)`.
-    public enum AntennaCode: UInt8, Sendable { case whip = 0, stub = 1, external3dBi = 2, external5dBi = 3 }
-
-    /// The code whose gain is at or above the antenna's, so the cap the box works out is never
-    /// looser than the app's. The firmware has no code above 5 dBi, so no higher-gain antenna can
-    /// be set (`GroupState.setAntenna`).
-    public static func antennaCode(_ antenna: Antenna) -> AntennaCode {
-        switch antenna {
-        case .standardWhip: .whip
-        case .higherGainWhip: .external5dBi
-        case let .external(g): g <= 0 ? .stub : g <= 2 ? .whip : g <= 3 ? .external3dBi : .external5dBi
-        }
-    }
+    /// The antenna byte of set group, from which the box works out its own transmit-power cap
+    /// with the same arithmetic as `Band.maxRadioSetting(antenna:)`: 0x80 plus the antenna's
+    /// `boxGainDBi` in half-dB steps. The firmware also takes its first codes, 0 to 3, for the
+    /// whip, a stub, and external 3 and 5 dBi antennas (firmware/DESIGN.md, section 6).
+    public static func antennaCode(_ antenna: Antenna) -> UInt8 { 0x80 | UInt8(antenna.boxGainDBi * 2) }
 
     /// Everything the phone gives a box: the set group body, the set members pages, and the set
     /// names pages when the group puts responders' first names on its boxes (nil when it does
@@ -53,7 +44,7 @@ public enum HelpBox {
         w.bytes(g.secrets.groupID.count == 16 ? g.secrets.groupID : Data(count: 16))
         w.u16(box.number); w.u32(unit)
         w.u8((profile.afterOK == .closesCall ? 1 : 0) | (profile.callerMayClose ? 2 : 0) | (g.policy.reportsPowerCut.contains(box.number) ? 4 : 0))
-        w.u8(antennaCode(g.antenna(of: box.number)).rawValue)
+        w.u8(antennaCode(g.antenna(of: box.number)))
         w.bytes(g.secrets.responderPublicKey.flatMap { $0.count == 32 ? $0 : nil } ?? Data(count: 32))
         w.bytes(g.secrets.channelSecret)
         let changeover = g.listening(at: now).count > 1 ? g.previousSecrets : nil

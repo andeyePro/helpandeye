@@ -460,6 +460,25 @@ TEST(thePowerCapFollowsTheBandAndTheAntenna) {
     CHECK(!w.box.powerCap(12.0, -9, 22, setting));
 }
 
+// The same table as the app's HelpBoxTests.testTheBoxAndTheAppAgreeOnTheCapForAnyGain: gain in
+// dBi, then the cap at 869.4-869.65 MHz and at 868.0-868.6 MHz, -128 where the box must not send.
+TEST(thePowerCapFollowsAnyAntennaGain) {
+    const struct { double gain; int ten, one; } rows[] = {
+        {0, 17, 4}, {2, 15, 2}, {3, 14, 1}, {5, 12, -1}, {7.5, 9, -4}, {8, 9, -4},
+        {12, 5, -8}, {13, 4, -9}, {14, 3, -128}, {26, -9, -128}, {26.5, -128, -128}, {63.5, -128, -128},
+    };
+    for (const auto& r : rows) {
+        World w;
+        w.group.antenna = Antenna(kAntennaByGain | uint8_t(r.gain * 2));
+        w.box.provision(w.group, w.members);
+        int setting = -128;
+        CHECK(w.box.powerCap(12.0, -9, 22, setting) ? setting == r.ten : r.ten == -128);
+        w.box.setRadio(RadioSettings(868.3, 62.5, 8, 5));
+        setting = -128;
+        CHECK(w.box.powerCap(12.0, -9, 22, setting) ? setting == r.one : r.one == -128);
+    }
+}
+
 TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     World w;
     w.box.press(Colour::red, 0, 1000, false);
