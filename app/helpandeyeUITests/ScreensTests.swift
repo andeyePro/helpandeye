@@ -216,6 +216,193 @@ final class ScreensTests: XCTestCase {
         }
     }
 
+    /// A Help&I box not yet in the group, added to it, and then given an antenna too strong for it
+    /// to send at all. Shown by launch argument, because a simulator has no Bluetooth. Named to run
+    /// after the group is left, so the box makes no other test's Group screen longer.
+    func testPairedHelpAndIBox() throws {
+        launch("-HelpAHelpBox")
+        startGroupIfNew()
+        tab("Box")
+        if boxToAdd() {
+            reveal(app.buttons["Add this box to the group"])
+            look("box-helpandi-add")
+            addBox()
+        }
+        let added = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Set up. Its buttons call for help")).firstMatch
+        show(added)
+        still(added)
+        XCTAssert(added.exists, "help-box: the box was not added")
+        for _ in 0..<3 { app.collectionViews.firstMatch.swipeDown(velocity: .fast) }
+        look("box-helpandi")
+        reveal(added)
+        look("box-helpandi-lower")
+
+        tab("Group")
+        reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kitchen box")).firstMatch).tap()
+        reveal(app.buttons["External antenna"]).tap()
+        // Just below the choice: dragged up a little at a time, as a swipe at the largest text
+        // carries it out of the list. Half a dB a step: held down, it runs to the top of its range.
+        let increment = app.buttons["Increment"], window = app.windows.firstMatch
+        for _ in 0..<10 where !hittable(increment) {
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+                .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+        }
+        let top = app.steppers.matching(NSPredicate(format: "label CONTAINS %@", "63.5 dBi")).firstMatch
+        for _ in 0..<10 where !top.exists { increment.press(forDuration: 5) }
+        let mustNotSend = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "With this antenna the box must not send")).firstMatch
+        show(mustNotSend)
+        still(mustNotSend)
+        XCTAssert(mustNotSend.exists, "help-box: no warning that the box must not send")
+        look("member-antenna-not-allowed")
+        // Back to the list first: the member page's picker, also labelled Antenna, would otherwise
+        // be what the contrast check finds again for the Box screen's Antenna heading.
+        app.navigationBars.buttons.firstMatch.tap()
+        tab("Box")
+        show(mustNotSend)
+        still(mustNotSend)
+        XCTAssert(mustNotSend.exists, "help-box: the Box screen does not say the box must not send")
+        look("box-antenna-not-allowed")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// A Help&I box's settings: telling responders of a power cut at its home, and responders'
+    /// first names on boxes.
+    func testPairedHelpAndIBoxSettings() throws {
+        launch("-HelpAHelpBox")
+        startGroupIfNew()
+        tab("Box")
+        if boxToAdd() { addBox() }
+        tab("Group")
+        reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Kitchen box")).firstMatch).tap()
+        let powerCut = reveal(app.switches["Tell responders about a power cut at their home"])
+        if powerCut.value as? String != "1" { powerCut.switches.firstMatch.tap() }
+        if powerCut.value as? String != "1" { powerCut.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap() }
+        XCTAssertEqual(powerCut.value as? String, "1", "box-settings: power-cut reports not turned on")
+        look("member-power-cut")
+        app.navigationBars.buttons.firstMatch.tap()
+        reveal(app.buttons["Advanced settings"]).tap()
+        reveal(app.switches["Responders' first names on boxes"])
+        look("advanced-box-names")
+        app.navigationBars.buttons.firstMatch.tap()
+        tab("Box")
+        let tells = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "It tells your responders about a power cut")).firstMatch
+        show(tells)
+        still(tells)
+        XCTAssert(tells.exists, "box-settings: the Box screen does not say it tells responders")
+        look("box-power-cut-on")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// A stock MeshCore box whose battery suggests a power cut: the caller is offered to tell
+    /// their responders, and the Box screen says what the box is.
+    func testStockBoxPowerCut() throws {
+        launch("-HelpAStockBox")
+        startGroupIfNew()
+        let offer = app.buttons["Tell my responders"]
+        XCTAssert(offer.waitForExistence(timeout: 5), "stock-box: no offer to tell responders")
+        look("help-power-cut")
+        reveal(offer)
+        look("help-power-cut-lower")
+        tab("Box")
+        look("box-stock")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// A responder's list with power cuts in it: a Help&I box's report, its "probably" without the
+    /// mains wire, and a stock box's caller who told their responders.
+    func testPowerCutReports() throws {
+        launch("-HelpAPowerCuts")
+        startGroupIfNew()
+        tab("Respond")
+        // The two reports are equally urgent, so either may come first.
+        XCTAssert(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Unit 709")).firstMatch.waitForExistence(timeout: 5), "power-cuts: no report")
+        look("respond-power-cuts")
+        let probable = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Probably a power cut at their home")).firstMatch
+        show(probable)
+        still(probable)
+        XCTAssert(probable.exists, "power-cuts: no report from a box without the mains wire")
+        look("respond-power-cuts-probable")
+        let report = app.staticTexts["Power cut at their home. Their box is on its battery."]
+        show(report)
+        still(report)
+        XCTAssert(report.exists, "power-cuts: no report from a box with the mains wire")
+        look("respond-power-cuts-sure")
+        let toldByCaller = app.staticTexts["“Power probably cut: the battery is falling.”"]
+        show(toldByCaller)
+        still(toldByCaller)
+        XCTAssert(toldByCaller.exists, "power-cuts: no note from a stock box's caller")
+        look("respond-power-cuts-caller")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// The first coordinator names a deputy from the group's other coordinators.
+    func testNamingADeputy() throws {
+        launch("-HelpADeputy")
+        tab("Group")
+        reveal(app.buttons["If your phone is lost"]).tap()
+        reveal(app.buttons["Alex"]).tap()
+        XCTAssert(app.staticTexts["Everyone in the group sees who your deputy is."].waitForExistence(timeout: 5), "deputy: no deputy to choose")
+        look("deputy")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// A second coordinator whose first coordinator, Alex, has gone quiet: the Group screen says
+    /// so, and they may take over as Alex's deputy, once they confirm.
+    func testTakingOver() throws {
+        launch("-HelpATakeover")
+        tab("Group")
+        let quiet = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Nothing heard from Alex's phone since")).firstMatch
+        show(quiet)
+        still(quiet)
+        XCTAssert(quiet.exists, "takeover: the Group screen does not say Alex has gone quiet")
+        look("takeover-group")
+        reveal(app.buttons["If Alex's phone is lost"]).tap()
+        XCTAssert(app.staticTexts["You are Alex's deputy."].waitForExistence(timeout: 5), "takeover: not told they are the deputy")
+        look("takeover")
+        reveal(app.buttons["Take over from Alex"]).tap()
+        let confirm = app.buttons["Take over"]
+        XCTAssert(confirm.waitForExistence(timeout: 5), "takeover: no confirmation")
+        look("takeover-confirm")
+        // An iPhone's action sheet has Cancel; an iPad's popover goes with a tap outside it.
+        if app.buttons["Cancel"].exists { app.buttons["Cancel"].tap() } else { app.otherElements["PopoverDismissRegion"].tap() }
+        XCTAssert(confirm.waitForNonExistence(timeout: 5), "takeover: the confirmation did not go")
+        reveal(app.buttons["Agree that Pat may take over"])
+        look("takeover-agree")
+        if !problems.isEmpty {
+            XCTFail("Accessibility audit:\n" + problems.joined(separator: "\n"))
+        }
+    }
+
+    /// Whether the Box screen offers to add the Help&I box, or has it in the group already: its
+    /// list holds only the rows near the screen, so it is scrolled until one of them is there.
+    private func boxToAdd() -> Bool {
+        let add = app.buttons["Add this box to the group"], inGroup = app.staticTexts["In the group as"]
+        _ = app.staticTexts["Status"].waitForExistence(timeout: 5)
+        for _ in 0..<15 where !add.exists && !inGroup.exists { app.swipeUp() }
+        return add.exists
+    }
+
+    /// On the Box screen with a Help&I box not yet in the group: adds it, in Sam's home.
+    private func addBox() {
+        let add = app.buttons["Add this box to the group"]
+        type("Its name in the group, such as Kitchen box at no. 4", "Kitchen box")
+        tapKeyboardDone()
+        reveal(app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "In the home of")).firstMatch).tap()
+        // The menu's row can read its name twice, "SamSam".
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Sam")).firstMatch.tap()
+        reveal(add).tap()
+    }
+
     /// iPhone puts the tabs along the bottom; iPad puts them along the top, as plain buttons.
     private func tab(_ name: String) {
         let bar = app.tabBars.buttons[name]

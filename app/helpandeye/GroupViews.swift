@@ -474,7 +474,8 @@ struct TakeoverView: View {
                 if let heard = model.saved?.primaryHeardAt {
                     Text("Last heard from \(first)'s phone: \(heard.formatted(.relative(presentation: .named))).")
                 }
-                Text(model.group?.currentDeputy.map { "\(first)'s deputy is \(model.name(ofMember: $0))." } ?? "\(first) has not named a deputy.")
+                Text(model.group?.currentDeputy.map { $0 == model.saved?.me ? "You are \(first)'s deputy." : "\(first)'s deputy is \(model.name(ofMember: $0))." }
+                     ?? "\(first) has not named a deputy.")
             }
             Section(header: Header("Taking over")) {
                 Text("If \(first)'s phone is lost or broken, you can take over running the group. Their phone is removed from the group, and the group gets new keys. You then show each member their update code, as after any removal.")

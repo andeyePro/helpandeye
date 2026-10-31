@@ -10,9 +10,10 @@ struct RespondView: View {
         NavigationStack {
             List {
                 let groups = model.engines.filter { $0.me?.canRespond == true }
-                if groups.allSatisfy({ $0.activity.inbox.requests.isEmpty }) {
+                if groups.allSatisfy({ $0.activity.inbox.requests.isEmpty }) && Self.shownPowerCuts.isEmpty {
                     Text("No calls for help.")
                 }
+                ForEach(Self.shownPowerCuts) { r in RequestRow(engine: model.engine, request: r) }
                 // One list per group, each under its name when there is more than one.
                 ForEach(groups, id: \.identityKey) { e in
                     if groups.count > 1, !e.activity.inbox.requests.isEmpty {
@@ -28,6 +29,29 @@ struct RespondView: View {
             .keyboardDismissable()
         }
     }
+}
+
+extension RespondView {
+    /// What a responder sees of a power cut, for the screen tests, which have no box to hear one
+    /// from (-HelpAPowerCuts): a Help&I box's report with the mains wire and without it, and a stock
+    /// box's caller who chose to tell their responders. Debug simulator builds only.
+    #if DEBUG && targetEnvironment(simulator)
+    static let shownPowerCuts: [IncomingRequest] = {
+        guard ProcessInfo.processInfo.arguments.contains("-HelpAPowerCuts") else { return [] }
+        var inbox = ResponderInbox()
+        let now = Date()
+        for frame: HelpFrame in [.followUp(unit: 70901, request: 1, part: 1, category: .powerCut),
+                                 .followUp(unit: 70902, request: 1, part: 1, category: .powerCut),
+                                 .note(unit: 70902, request: 1, part: 2, text: HelpBox.probablePowerCutNote),
+                                 .call(unit: 70903, request: 1, colour: .amber, sentAt: UInt32(now.timeIntervalSince1970)),
+                                 .note(unit: 70903, request: 1, part: 1, text: HelpBox.probablePowerCutNote)] {
+            inbox.receive(frame, via: .mesh, at: now)
+        }
+        return inbox.sorted
+    }()
+    #else
+    static let shownPowerCuts: [IncomingRequest] = []
+    #endif
 }
 
 struct RequestRow: View {
@@ -51,7 +75,10 @@ struct RequestRow: View {
                 Text(request.colour.map { ButtonWords.words($0, in: callers) } ?? "Call for help (details still arriving)")
                 ForEach(request.orderedCategories, id: \.self) { Text("• \(ButtonWords.words($0, in: callers))") }
             }
-            ForEach(request.orderedNotes, id: \.self) { Text("“\($0)”").italic() }
+            // A box's "probably" is said above, in words for the responder.
+            ForEach(request.orderedNotes.filter { !request.powerCutIsProbable || $0 != HelpBox.probablePowerCutNote }, id: \.self) {
+                Text("“\($0)”").italic()
+            }
             if let p = request.position,
                let url = URL(string: "https://maps.apple.com/?ll=\(p.latitude),\(p.longitude)&q=Help%26I%20caller") {
                 Link("Open their location in Maps (within \(Int(p.accuracy)) m)", destination: url)

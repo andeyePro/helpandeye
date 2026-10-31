@@ -56,13 +56,45 @@ final class AppModel: ObservableObject {
     private static let screensOtherGroup = false
     #endif
 
+    /// A made-up group of three coordinators, which one simulator cannot gather, for the screen
+    /// tests of naming a deputy (-HelpADeputy: this phone, Sam, is the first coordinator) and of
+    /// taking over (-HelpATakeover: Alex is, named Sam deputy, and has not been heard for three
+    /// days). Kept apart from the phone's own group.
+    #if DEBUG && targetEnvironment(simulator)
+    private static func screensCoordinators(_ me: DeviceIdentity) -> SavedState? {
+        let a = ProcessInfo.processInfo.arguments
+        let takeover = a.contains("-HelpATakeover")
+        guard takeover || a.contains("-HelpADeputy") else { return nil }
+        let alex = DeviceIdentity(), first = takeover ? alex : me
+        var g = GroupState(name: "Mill Lane", secrets: .forOwner(signingKey: first.signingPublicKey), members: [])
+        for (number, name, id) in [(1, takeover ? "Alex" : "Sam", first), (1001, takeover ? "Sam" : "Alex", takeover ? me : alex), (2001, "Pat", DeviceIdentity())] {
+            var m = Member(number: UInt16(number), name: name, role: .coordinator, publicKey: id.publicKey,
+                           unit: name == "Sam" ? 70001 : nil, signingKey: id.signingPublicKey)
+            m.block = UInt16(number - 1)
+            g.members.append(m)
+        }
+        var s = SavedState(group: g, me: takeover ? 1001 : 1)
+        if takeover {
+            s.group.apply(deputy: HelpFrame.signedDeputy(member: 1001, key: me.signingPublicKey, version: 1, identity: alex, group: g.secrets.groupID))
+            s.primaryHeardAt = Date().addingTimeInterval(-3 * 86_400)
+        }
+        return s
+    }
+    #else
+    private static func screensCoordinators(_ me: DeviceIdentity) -> SavedState? { nil }
+    #endif
+
     private init() {
         let airtime = AirtimeLedger(budget: Store.loadAirtime() ?? Store.loadActivity().airtime)
         airtime.onChange = { Store.save(airtime: $0) }
         hub = MeshHub(box: board, airtime: airtime)
         let link = hub.link(for: Self.firstGroup)
-        engine = HelpEngine(identity: Store.identity(), mesh: link, relay: relay, alerts: NotificationAlerts(), store: AppStore(),
-                            saved: Self.screensOtherGroupOnly ? nil : Store.loadState(), activity: Store.loadActivity(), homeWiFi: home)
+        let identity = Store.identity()
+        let coordinators = Self.screensCoordinators(identity)
+        engine = HelpEngine(identity: identity, mesh: link, relay: relay, alerts: NotificationAlerts(),
+                            store: AppStore(group: coordinators == nil ? "" : "screens-coordinators"),
+                            saved: Self.screensOtherGroupOnly ? nil : coordinators ?? Store.loadState(),
+                            activity: coordinators == nil ? Store.loadActivity() : Activity(), homeWiFi: home)
         link.onFrame = { [weak self] in self?.engine.receive($0, via: .mesh) }
         link.onText = { [weak self] in self?.engine.receiveText(from: $0, $1) }
         board.onFrame = { [weak self] in self?.hub.received($0, on: $1) }

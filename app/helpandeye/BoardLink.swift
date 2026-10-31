@@ -445,7 +445,47 @@ extension BoardLink: @preconcurrency CBCentralManagerDelegate {
             // Bluetooth off or reset: no callback may come for the link, so drop it here.
             tearDown(); searching = false; state = .off
         }
+        #if DEBUG && targetEnvironment(simulator)
+        showScreensBox()
+        #endif
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+    /// A box for the screen tests, which a simulator has no Bluetooth to reach, by launch argument:
+    /// a Help&I box in a power cut, with a call of its own (-HelpAHelpBox), or a stock box whose
+    /// battery suggests one (-HelpAStockBox). Made from the replies a box would give; nothing
+    /// reaches it.
+    private func showScreensBox() {
+        let a = ProcessInfo.processInfo.arguments
+        let help = a.contains("-HelpAHelpBox")
+        guard help || a.contains("-HelpAStockBox") else { return }
+        func le(_ v: Int, _ bytes: Int) -> [UInt8] { (0..<bytes).map { UInt8(truncatingIfNeeded: v >> (8 * $0)) } }
+        func padded(_ s: String, _ bytes: Int) -> [UInt8] { Array(s.utf8) + [UInt8](repeating: 0, count: bytes - s.utf8.count) }
+        func zeros(_ bytes: Int) -> [UInt8] { [UInt8](repeating: 0, count: bytes) }
+        var me: [UInt8] = [0x05, 1, 22, 22] + [UInt8](repeating: 0x42, count: 32) + zeros(12)
+        me += le(869_525, 4) + le(250_000, 4) + [11, 5] + Array("Kitchen box".utf8)
+        var device: [UInt8] = [0x0D, 3, 0, 8] + le(0, 4) + zeros(12)
+        device += padded("Heltec V4", 40) + padded(help ? "v1.18.0-hi1" : "v1.18.0", 20)
+        // Provisioned, on its battery with 30 hours left, holding one call, which a responder saw.
+        var box: [UInt8] = [0xA0, 1, 1] + le(0, 4) + le(0, 2) + le(2, 2)
+        box += [2] + le(3_900, 2) + le(30, 2) + [0, 22, 1, 1] + [UInt8](repeating: 0x24, count: 32) + [0]
+        var call: [UInt8] = [0xA1] + le(1, 2) + [Colour.amber.rawValue]
+        call += le(Int(Date().timeIntervalSince1970) - 1_200, 4) + [2, 1]
+        let replies = [me, device, box, call]
+        for case let r? in replies.map({ MeshCore.Response(Data($0)) }) {
+            switch r {
+            case let .selfInfo(i): selfInfo = i
+            case let .deviceInfo(d): deviceInfo = d
+            case let .boxInfo(b) where help: boxInfo = b
+            case let .boxCall(c) where help: boxCalls = [c]
+            default: break
+            }
+        }
+        batteryMillivolts = help ? 3_900 : 3_710
+        probablePowerCut = !help
+        state = .ready
+    }
+    #endif
 
     func centralManager(_ c: CBCentralManager, willRestoreState dict: [String: Any]) {
         // Relaunched in the background: the link is rebuilt when Bluetooth reports it is on.
