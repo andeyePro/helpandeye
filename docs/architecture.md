@@ -9,7 +9,7 @@ For contributors. What each part does and where its code is. The rules it follow
 |---|---|---|
 | Core logic | `app/helpandeyeCore` | Swift package with no UI: message frames, request state, escalation, rota, check-ins, airtime, group keys, the MeshCore and relay protocols, and `HelpEngine`, which applies the rules. All tests are here (`swift test`), including end-to-end tests that run several engines over a fake radio and relay. |
 | Phone app | `app/helpandeye` | SwiftUI screens, and the real box (`BoardLink`), relay (`Relay`), home Wi-Fi link (`HomeWiFi`), notifications and storage plugged into the engine. |
-| Home Wi-Fi listener | `app/helpandeyeLocalPush` | A local push extension iOS runs on the named home Wi-Fi with the phone locked: it joins the first group's phones as the app does and alerts for a call (decision 19). It confirms only the calls it alerts for, so anything else sent to it goes on by the sender's other routes. Needs a signed build. |
+| Home Wi-Fi listener | `app/helpandeyeLocalPush` | A local push extension iOS runs on the named home Wi-Fi with the phone locked: it joins the call group's phones as the app does and alerts for a call (decision 19). It confirms only the calls it alerts for, so anything else sent to it goes on by the sender's other routes. Needs a signed build. |
 | Watch app | `app/helpandeyeWatch` | Three buttons and a Help complication. In reach of its phone it sends through the phone. Out of reach it runs its own `HelpEngine` for each of the phone's groups, as the same member, and calls and responds over its own internet connection (`WatchHandover`); its calls are numbered 32768 and up, apart from the phone's. Back in reach it gives the phone the calls it is still sending and the acknowledgements it made, and the phone's application context gives it the calls a person settled there, with their signed acknowledgements, so neither alerts for a call the other's owner has answered, and the signed acknowledgements of the watch's own calls (`OutgoingRequest.acks`), so a call seen over the box alone stops being resent from the wrist. |
 | Box (prototype) | any Heltec LoRa board | MeshCore's standard companion firmware, unchanged. The app writes the group's private channel into it. |
 | Box firmware | `firmware/` | Help&I's own build of MeshCore's companion firmware for the Heltec WiFi LoRa 32 V4 (option A, `firmware/DESIGN.md`): red, amber and green buttons, a buzzer, the screen, resends, acknowledgement checking, I'm OK, the duty-cycle budget and power cap, and a sealed power-cut and battery report, with the box as its own group member. The logic is a portable C++ core (`firmware/core`) with host tests (`make test`); `firmware/box` is the overlay on a pinned MeshCore commit and `firmware/build.sh` builds it. Compiles; not yet run on a board. The app recognises it and sets it up (below). |
@@ -139,9 +139,9 @@ wrote.
   chosen, or its person has left) would be heard on the radio only, so the phone connected to it
   also carries its calls and signed or sealed frames on its other routes, keeping no record of them
   as its own and alerting for them from its turn. A phone that leaves the group for another of
-  its groups, which becomes its first, tells the box in its home to forget the group left (0x75)
+  its groups, which becomes its call group, tells the box in its home to forget the group left (0x75)
   unless the new group has it, when it sets the box up for that one instead (`Activity.leftGroupBox`).
-- **Setting it up.** The phone of the first group sends the group (0x71), the member list (0x72)
+- **Setting it up.** The phone of the call group sends the group (0x71), the member list (0x72)
   and, if the group puts them on boxes, responders' first names (0x76): at pairing, at joining,
   and after any change of members or settings, sending only the parts that changed
   (`HelpBox.Sync`), and all of them again when the info reply says the box holds nothing. Names
@@ -161,7 +161,7 @@ wrote.
   answering each with 0x74 (`HelpEngine.adoptBoxCalls`). Calls seen or closed are left.
 - **A removed box.** When a box's member is removed, the phone connected to it tells it to forget
   the group (0x75), at the removal and again whenever it connects to it, so it stops calling as a
-  member the others no longer accept. A box still in the phone's first group is never told to
+  member the others no longer accept. A box still in the phone's call group is never told to
   forget, whatever another group's list says.
 - **A power cut.** The box's report is a request of its own with a Power cut follow-up and notes,
   sealed for responders. A responder's phone shows it calmly ("power cut at home", a calm

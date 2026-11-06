@@ -96,7 +96,7 @@ final class ScreensTests: XCTestCase {
         }
     }
 
-    /// A phone removed from its first group but still in another: Respond, and a Group tab that
+    /// A phone removed from its call group but still in another: Respond, and a Group tab that
     /// offers to start or join one.
     func testRemovedFromFirstGroup() throws {
         launch("-HelpAOtherGroupOnly")
@@ -108,7 +108,7 @@ final class ScreensTests: XCTestCase {
         }
     }
 
-    /// Leaving the first group while still in another: the other is offered as the next first
+    /// Leaving the call group while still in another: the other is offered as the next call
     /// group, and takes its place. Both groups are then left, so the later tests start afresh.
     func testLeaveFirstGroupForAnother() throws {
         launch()
@@ -118,13 +118,13 @@ final class ScreensTests: XCTestCase {
         tab("Group")
         reveal(app.buttons["Leave this group"]).tap()
         // A row of a long list is not in the hierarchy until it is scrolled near the screen.
-        let choice = reveal(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Make Hill Road my first group")).firstMatch)
-        XCTAssert(choice.exists, "leave-first: no choice of the next first group")
+        let choice = reveal(app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Make Hill Road my call group")).firstMatch)
+        XCTAssert(choice.exists, "leave-first: no choice of the next call group")
         still(choice)
         look("leave-first-choice")
         // The audit relays the screen out at other text sizes, which can scroll a row off it.
         reveal(choice).tap()
-        XCTAssert(app.navigationBars["Hill Road"].waitForExistence(timeout: 5), "leave-first: Hill Road did not become the first group")
+        XCTAssert(app.navigationBars["Hill Road"].waitForExistence(timeout: 5), "leave-first: Hill Road did not become the call group")
         // The list is rebuilt for the new group and may still be moving: shown afresh, from the top.
         tab("Box")
         tab("Group")
@@ -274,7 +274,7 @@ final class ScreensTests: XCTestCase {
     }
 
     /// A Help&I box's settings: telling responders of a power cut at its home, and responders'
-    /// first names on boxes.
+    /// first names on boxes, under Privacy.
     func testPairedHelpAndIBoxSettings() throws {
         launch("-HelpAHelpBox")
         startGroupIfNew()
@@ -290,6 +290,7 @@ final class ScreensTests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
         reveal(app.buttons["Advanced settings"]).tap()
         reveal(app.switches["Responders' first names on boxes"])
+        XCTAssert(app.staticTexts["Privacy"].exists, "box-settings: names on boxes not under Privacy")
         look("advanced-box-names")
         app.navigationBars.buttons.firstMatch.tap()
         tab("Box")

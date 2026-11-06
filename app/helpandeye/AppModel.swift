@@ -13,9 +13,9 @@ final class AppModel: ObservableObject {
     /// One box for every group this person is in.
     let hub: MeshHub
     let relay = Relay()
-    /// The home Wi-Fi route for the first group (decision 19).
+    /// The home Wi-Fi route for the call group (decision 19).
     let home = HomeWiFi()
-    /// The group this person is in first: the one they may call for help in, and coordinate.
+    /// This person's call group: the one they may call for help in, and coordinate.
     let engine: HelpEngine
     /// Other groups they respond in (responders only), each with its own engine and relay.
     @Published private(set) var others: [Other] = []
@@ -33,12 +33,12 @@ final class AppModel: ObservableObject {
         var id: String { tag }
     }
 
-    /// Every engine, the first group's first.
+    /// Every engine, the call group's first.
     var engines: [HelpEngine] { [engine] + others.map(\.engine) }
 
-    /// The screen tests' phone that was removed from its first group but responds in another, which
+    /// The screen tests' phone that was removed from its call group but responds in another, which
     /// takes a second phone to arrange for real. Debug simulator builds only, and only with the
-    /// test's own launch argument; nothing is saved as the first group or listed as another.
+    /// test's own launch argument; nothing is saved as the call group or listed as another.
     #if DEBUG && targetEnvironment(simulator)
     private static let screensOtherGroupOnly = ProcessInfo.processInfo.arguments.contains("-HelpAOtherGroupOnly")
     #else
@@ -180,13 +180,13 @@ final class AppModel: ObservableObject {
         if let f = voiceTracker.update(engine.current, words: words, note: note, name: name(ofMember:)) { CallerVoice.shared.tell(f, profile: profile) }
     }
 
-    /// What a Help&I box paired with this phone is given: the first group's set-up, once the box
+    /// What a Help&I box paired with this phone is given: the call group's set-up, once the box
     /// is a member of it. A changeover's end changes it with no other change, so the ticker asks too.
     private func updateBoxSetup() {
         board.setup = engine.group.flatMap { g in board.selfInfo.flatMap { HelpBox.setup(for: g, box: $0.publicKey, at: Date()) } }
     }
 
-    /// The Help&I box on this phone's Bluetooth, as a member of the first group: what it is called
+    /// The Help&I box on this phone's Bluetooth, as a member of the call group: what it is called
     /// there. Nil for a stock box, or one not added yet.
     var boxMember: Member? { group?.boxMember(key: board.selfInfo?.publicKey) }
 
@@ -296,7 +296,7 @@ final class AppModel: ObservableObject {
 
     // MARK: Other groups this person responds in
 
-    /// The first group's place on the box, whichever group it is.
+    /// The call group's place on the box, whichever group it is.
     private static let firstGroup = Data("first".utf8)
 
     /// Starts the engine for another group, from what was saved under its tag.
@@ -343,7 +343,7 @@ final class AppModel: ObservableObject {
         others.removeAll { $0.tag == other.tag }
     }
 
-    /// Leaves the first group and makes another this person responds in their first: its Help
+    /// Leaves the call group and makes another this person responds in their call group: its Help
     /// button (if they may call there), check-ins and profile become theirs, on the first engine,
     /// and the rest stay groups they respond in.
     func leave(becoming other: Other) {

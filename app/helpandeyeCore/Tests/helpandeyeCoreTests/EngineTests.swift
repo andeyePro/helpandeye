@@ -813,7 +813,7 @@ final class RelayModel {
         XCTAssertEqual(ButtonWords.words(.red, in: caller.engine.profile), "Help")
     }
 
-    /// Martin, 2026-10-30: leaving the first group while still in others, one of them takes its
+    /// Martin, 2026-10-30: leaving the call group while still in others, one of them takes its
     /// place: its calls, acknowledgements and alerts come to the first engine, as the same member.
     func testLeavingTheFirstGroupAnotherTakesItsPlace() async {
         let jo = Phone(air: air, clock: clock), walker = Phone(air: air, clock: clock)

@@ -110,7 +110,7 @@ struct RootView: View {
                 if me.role == .caller && model.profile.hidesSettings { CallView() } else { tabs(me) }
             }
         } else if !model.others.isEmpty {
-            // Removed from the first group but still in others: still respond in those.
+            // Removed from the call group but still in others: still respond in those.
             TabView {
                 RespondView().tabItem { Label("Respond", systemImage: "bell.fill") }
                     .badge(model.engines.reduce(0) { $0 + $1.activity.inbox.requests.values.filter(\.isOpen).count })
@@ -137,7 +137,7 @@ struct RootView: View {
     }
 }
 
-/// The availability control for someone removed from their first group: it is otherwise only in the
+/// The availability control for someone removed from their call group: it is otherwise only in the
 /// Group view, which they no longer have. It sets it in every group they still respond in.
 struct SurvivingAvailability: View {
     @EnvironmentObject var model: AppModel

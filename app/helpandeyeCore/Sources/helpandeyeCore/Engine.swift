@@ -431,7 +431,7 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// Takes over a group this person responded in through another engine, after they left the
-    /// group they called in (`leave`): it becomes their first group, with its open calls,
+    /// group they called in (`leave`): it becomes their call group, with its open calls,
     /// acknowledgements, rota and log, and this engine's alerts take over from the other's.
     public func adopt(_ s: SavedState, activity a: Activity) {
         var a = a

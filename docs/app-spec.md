@@ -198,16 +198,16 @@ group in its own right, so it calls for help with no phone.
   A box in no one's home (one added before a home had to be chosen, or whose person has left the
   group) has its calls carried by whichever phone is paired with it, which still alerts for them.
 - A box whose member is removed is told to forget the group by the phone paired with it. So is
-  the box in someone's home when they leave their first group for another of theirs that does not
+  the box in someone's home when they leave their call group for another of theirs that does not
   have the box; one the new group has is set up for it instead.
 - A coordinator chooses, on each member's page, whether their box tells responders about a power
   cut at their home (decisions 3 and 4). Off unless chosen. Responders get a calm notification
   ("power cut at home", or "probably a power cut at home" from a box without the mains wire) and
   battery notes, until one of them acknowledges.
 - Responders' first names on boxes, so a box can say "Pat has seen your call.": a group setting
-  under Advanced settings, off unless a coordinator turns it on, as Martin may still decide against
-  names on boxes (firmware/DESIGN.md, section 14). Not for boxes in homes until their flash
-  protects the names (DESIGN.md, section 16).
+  under Advanced settings, Privacy, off unless a coordinator turns it on, as Martin may still
+  decide against names on boxes (firmware/DESIGN.md, section 14). Not for boxes in homes until
+  their flash protects the names (DESIGN.md, section 16).
 - With a MeshCore box, which cannot sense the mains, the app watches the box's battery while it
   is open. When it falls as it does in a power cut, the Help tab offers to tell responders, as a
   Need a hand with the note "Power probably cut: the battery is falling.". The caller chooses;

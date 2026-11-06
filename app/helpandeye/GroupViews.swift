@@ -269,11 +269,11 @@ struct GroupView: View {
                         if model.others.isEmpty { model.leave() } else { choosingNextFirst = true }
                     }
                     .foregroundStyle(Color.warning)
-                    // Still in other groups: one of them takes this one's place as the first group.
+                    // Still in other groups: one of them takes this one's place as the call group.
                     if choosingNextFirst {
-                        Text("Which group should become your first group? You will call for help in it, if you may, and its check-ins and settings will be yours. You still respond in the others.")
+                        Text("Which group should become your call group? You will call for help in it, if you may, and its check-ins and settings will be yours. You still respond in the others.")
                         ForEach(model.others) { o in
-                            Button("Make \(o.engine.group?.name ?? "that group") my first group and leave \(model.group?.name ?? "this one")") {
+                            Button("Make \(o.engine.group?.name ?? "that group") my call group and leave \(model.group?.name ?? "this one")") {
                                 choosingNextFirst = false
                                 model.leave(becoming: o)
                             }
@@ -673,7 +673,7 @@ struct AdvancedSettingsView: View {
     var body: some View {
         Form {
             RelaySection()
-            Section(header: Header("Help&I boxes")) {
+            Section(header: Header("Privacy")) {
                 Toggle("Responders' first names on boxes", isOn: Binding(get: { model.group?.policy.namesOnBox == true },
                                                                          set: { on in model.updateGroup { $0.policy.namesOnBox = on } }))
                 Text("A box then says “Pat has seen your call.” rather than “A responder has seen your call.” The names stay on the box, where someone who takes it could read them.")

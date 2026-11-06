@@ -37,7 +37,7 @@ public struct WatchHandover: Codable, Equatable, Sendable {
         self.others = others.map { Part(group: $0.group, me: $0.me) }
     }
 
-    /// One handover per group, the first group's first, each as if it were the only one.
+    /// One handover per group, the call group's first, each as if it were the only one.
     public var each: [WatchHandover] {
         var first = WatchHandover(group: group, me: me, keys: keys)
         first.own = own

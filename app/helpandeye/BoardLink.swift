@@ -35,7 +35,7 @@ final class BoardLink: NSObject, ObservableObject {
     /// previous one during a changeover after a removal (sends go on both, so members who have not
     /// scanned their update yet still hear calls and acknowledgements).
     @Published private(set) var channels: [Data: UInt8] = [:]
-    /// The first group's channel, for the Box screen.
+    /// The call group's channel, for the Box screen.
     var helpChannel: UInt8? { channelGroups.first?.first.flatMap { channels[$0] } }
 
     var onFrame: ((HelpFrame, Data) -> Void)?
@@ -53,7 +53,7 @@ final class BoardLink: NSObject, ObservableObject {
     /// The box's own list of its calls, read at reconnecting, for the engine to carry any made while
     /// the phone was away; each one it carried, with whether a route took it, goes back (0x74).
     var onBoxCalls: (([MeshCore.BoxCall]) async -> [(request: UInt16, sent: Bool)])?
-    /// Whether the box is a member of the first group, the one it is set up for: another group's
+    /// Whether the box is a member of the call group, the one it is set up for: another group's
     /// engine, which knows it only as removed, must not make it forget that one.
     var isGroupBox: (() -> Bool)?
 
