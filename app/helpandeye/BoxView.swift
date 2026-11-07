@@ -101,6 +101,7 @@ struct HelpBoxSection: View {
                 if let info = model.board.boxInfo {
                     Text(info.provisioned ? "Set up. Its buttons call for help with or without this phone." : "Setting up the box…")
                     LabeledContent("Power", value: powerWords(info))
+                    if info.clockAhead { Text("This box's clock is ahead of its responders' phones. It takes its time from this phone, so check this phone's date and time.") }
                 }
                 Text(model.group?.policy.reportsPowerCut.contains(member.number) == true
                      ? "It tells your responders about a power cut at home. Your coordinator can change this."

@@ -201,13 +201,16 @@ final class HelpBoxTests: XCTestCase {
     }
 
     /// Info (0xA0) as DESIGN.md's table gives it: version, provisioned, unit, member, next request,
-    /// mains, battery, hours, antenna, power cap, members, calls, the sealing key, names.
+    /// mains, battery, hours, antenna, power cap, members, calls, the sealing key, names, then the
+    /// label code and flags, which an older build's reply leaves off.
     func testTheBoxRepliesAreRead() throws {
         let d = hex("a0 01 01 74110100 0400 0700 02 930f 0c00 00 0f 02 01 \(boxSealKey) 03")
         guard case let .boxInfo(info)? = MeshCore.Response(d) else { return XCTFail() }
         XCTAssertEqual(info, MeshCore.BoxInfo(protocolVersion: 1, provisioned: true, unit: 70004, member: 4, nextRequest: 7, mains: .off,
                                               mainsEstimated: false, batteryMillivolts: 3987, hoursLeft: 12, antennaCode: 0, powerCap: 15,
-                                              members: 2, calls: 1, sealKey: hex(boxSealKey), names: 3))
+                                              members: 2, calls: 1, sealKey: hex(boxSealKey), names: 3, labelCode: 0, clockAhead: false))
+        guard case let .boxInfo(newer)? = MeshCore.Response(d + hex("f1fb0900 01")) else { return XCTFail() }
+        XCTAssertEqual(newer.labelCode, 654_321); XCTAssertTrue(newer.clockAhead, "bit 0 of the flags after the label code: its clock is ahead")
         var estimated = d
         estimated[11] = 2 | 4
         guard case let .boxInfo(probably)? = MeshCore.Response(estimated) else { return XCTFail() }
@@ -515,6 +518,12 @@ final class HelpBoxTests: XCTestCase {
         let heard = try XCTUnwrap(coordinator.engine.activity.inbox.requests[key]).firstHeardAt
         XCTAssertEqual(first, heard)
         XCTAssertEqual(responder.alerts.scheduled[key]?.times.first, r.firstHeardAt.addingTimeInterval(120), "the next, a turn on")
+        // Sam's acknowledgement is stamped at most five minutes past Sam's clock, an hour before
+        // the press by the box's: it counts all the same, on every phone (Martin, 2026-11-02).
+        coordinator.engine.acknowledge(key)
+        await air.run()
+        XCTAssertEqual(household.engine.activity.outgoing.first { $0.fromBox }?.status, .seen(responder: sam))
+        XCTAssertEqual(responder.engine.activity.inbox.requests[key]?.isAcknowledged, true)
     }
 
     /// A box in no one's home (added before a home had to be chosen, or whose person left): the

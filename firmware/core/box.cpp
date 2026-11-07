@@ -106,7 +106,7 @@ void BoxEngine::coldStart(uint64_t nowMs) {
 
 BoxEngine::Retained BoxEngine::snapshot() const {
     Retained r{kRetainedLayout, 0, 0, 0, 0, budget_, monitor_, {}, callCount_, reportRequest_, reportAt_, reportParts_,
-               reportAcknowledged_};
+               reportAcknowledged_, clockAhead_};
     for (size_t i = 0; i < callCount_; i++) r.slots[i] = slots_[i];
     return r;
 }
@@ -147,6 +147,7 @@ bool BoxEngine::resume(const uint8_t* in, uint64_t& monoMs, int64_t& wallUs) {
     reportAt_ = r.reportAt;
     reportParts_ = r.reportParts;
     reportAcknowledged_ = r.reportAcknowledged;
+    clockAhead_ = r.clockAhead;
     return true;
 }
 
@@ -289,6 +290,8 @@ void BoxEngine::press(Colour colour, uint64_t nowMs, uint32_t wallNow, bool phon
 }
 
 void BoxEngine::tick(uint64_t nowMs, uint32_t wallNow) {
+    if (wallNow < lastWall_) clockAhead_ = false;
+    lastWall_ = wallNow;
     for (size_t i = 0; i < callCount_; i++) {
         Slot& s = slots_[i];
         // A phone asked to carry the call and still silent at its first resend did not take it
@@ -341,8 +344,8 @@ uint32_t BoxEngine::onAck(const AckFrame& ack, uint32_t wallNow) {
     if (!port_.verify(m->signingKey, ack.signature, input, n)) return 0;
     uint32_t later = raiseClock(ack.ackedAt, ack.responder, wallNow);
     if (!ours) return later;
-    if (ack.request == reportRequest_ && !reportAcknowledged_ &&
-        int64_t(ack.ackedAt) >= int64_t(reportAt_) - kClockAllowance) {
+    if (ack.request == reportRequest_ && !reportAcknowledged_) {
+        noteClock(ack.ackedAt, reportAt_);
         reportAcknowledged_ = true;
         monitor_.acknowledged();
         return later;
@@ -350,6 +353,7 @@ uint32_t BoxEngine::onAck(const AckFrame& ack, uint32_t wallNow) {
     for (size_t i = 0; i < callCount_; i++) {
         OutgoingCall& c = slots_[i].call;
         if (c.number != ack.request) continue;
+        noteClock(ack.ackedAt, c.pressedAt);
         bool seen = c.status() == CallerStatus::seen;
         c.receive(ack);
         if (!seen && c.status() == CallerStatus::seen) sound(Sound::seen);
@@ -375,10 +379,16 @@ uint32_t BoxEngine::onSigned(const SignedFrame& s, uint32_t wallNow) {
         (inner.callState.state == CallState::closedWithConsent || inner.callState.state == CallState::closedWithReason)) {
         for (size_t i = 0; i < callCount_; i++) {
             OutgoingCall& c = slots_[i].call;
-            if (c.number == inner.callState.request) c.settle(inner.callState.state, s.signer, inner.callState.at);
+            if (c.number != inner.callState.request) continue;
+            noteClock(inner.callState.at, c.pressedAt);
+            c.settle(inner.callState.state, s.signer, inner.callState.at);
         }
     }
     return raiseClock(inner.callState.at, s.signer, wallNow);
+}
+
+void BoxEngine::noteClock(uint32_t at, uint32_t pressedAt) {
+    if (int64_t(at) < int64_t(pressedAt) - kClockAllowance) clockAhead_ = true;
 }
 
 uint32_t BoxEngine::raiseClock(uint32_t at, uint16_t member, uint32_t wallNow) {

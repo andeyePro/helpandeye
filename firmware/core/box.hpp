@@ -147,10 +147,11 @@ private:
         uint32_t reportAt;
         uint8_t reportParts;
         bool reportAcknowledged;
+        bool clockAhead;
     };
     // The layout's size and a number to raise whenever one of the types above changes without
     // changing the size, so a copy another build wrote is never read as this one's.
-    static constexpr uint32_t kRetainedLayout = uint32_t(sizeof(Retained)) << 8 | 3;
+    static constexpr uint32_t kRetainedLayout = uint32_t(sizeof(Retained)) << 8 | 4;
 
 public:
     // Two copies, written in turn.
@@ -214,6 +215,11 @@ public:
     const OutgoingCall& call(size_t i) const { return slots_[i].call; }
     uint16_t reportRequest() const { return reportRequest_; }
     bool reportAcknowledged() const { return reportAcknowledged_; }
+    // The box's clock is ahead of a responder's phone (section 9): an acknowledgement or close it
+    // took was stamped more than kClockAllowance before its own press time. Kept across a reset,
+    // and cleared once the clock is set back, as the phone sets it at each connection. The info
+    // reply carries it to the phone.
+    bool clockAhead() const { return clockAhead_; }
     // Whether the box sends on the old channel too, during a changeover.
     bool inChangeover(uint32_t wallNow) const { return group_.hasOldSecret() && wallNow < group_.oldSecretEndsAt; }
 
@@ -241,6 +247,7 @@ private:
     void revokeAcks();
     uint32_t onAck(const AckFrame& ack, uint32_t wallNow);
     uint32_t onSigned(const SignedFrame& s, uint32_t wallNow);
+    void noteClock(uint32_t at, uint32_t pressedAt);
     void addReportPart(const uint8_t* inner, size_t innerLength, bool lastWarning, uint64_t nowMs, uint32_t wallNow);
     uint32_t raiseClock(uint32_t at, uint16_t member, uint32_t wallNow);
 
@@ -261,13 +268,16 @@ private:
     size_t callCount_ = 0;
 
     uint16_t reportRequest_ = 0;
-    // When the power cut was reported, by the box's clock: an acknowledgement must not be older.
+    // When the power cut was reported, by the box's clock, for noteClock.
     uint32_t reportAt_ = 0;
     uint8_t reportParts_ = 0;
     bool reportAcknowledged_ = false;
     ReportPart parts_[kMaxReportParts];
 
     uint32_t retainedSequence_ = 0;
+    bool clockAhead_ = false;
+    // The wall clock at the last tick, so a clock set back is seen.
+    uint32_t lastWall_ = 0;
     // A time too far ahead to take on one member's word, and whose it was.
     uint32_t farAt_ = 0;
     uint16_t farMember_ = 0;

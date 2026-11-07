@@ -1307,10 +1307,9 @@ public final class HelpEngine: ObservableObject {
             // Other phones pass on acknowledgements they hold, so one may be days old: it says when.
             if who == group?.primaryCoordinator { heardPrimary(at: Date(timeIntervalSince1970: TimeInterval(at))) }
             let k = IncomingRequest.Key(unit: unit, request: request)
-            let pressed = activity.inbox.requests[k]?.sentAt ?? activity.outgoing.first(where: { $0.unit == unit && $0.number == request })?.createdAt
-            // Logged only when it will count: for a call heard, and made after it was pressed.
-            if let pressed, TimeInterval(at) >= pressed.timeIntervalSince1970 - OutgoingRequest.clockAllowance,
-               activity.inbox.requests[k]?.acknowledgedBy.contains(who) != true,
+            let heard = activity.inbox.requests[k]?.sentAt != nil || activity.outgoing.contains { $0.unit == unit && $0.number == request }
+            // Logged only when it will count: for a call heard, and not from this responder already.
+            if heard, activity.inbox.requests[k]?.acknowledgedBy.contains(who) != true,
                activity.outgoing.first(where: { $0.unit == unit && $0.number == request })?.acknowledgedBy.contains(who) != true {
                 log("\(name(ofMember: who)) acknowledged \(describe(unit, request, activity.inbox.requests[k]?.colour))")
             }
@@ -1510,7 +1509,8 @@ public final class HelpEngine: ObservableObject {
     }
 
     /// Never before the call was pressed, so a responder whose clock is slow is still counted by
-    /// the caller, who takes only acknowledgements made after the press.
+    /// a caller on a build from before 2026-11-07, which took only acknowledgements made after
+    /// the press.
     private func ackTime(_ key: IncomingRequest.Key) -> Date {
         // A call frame anyone in the group could forge cannot push an acknowledgement into the future.
         min(max(now(), activity.inbox.requests[key]?.sentAt ?? .distantPast), now().addingTimeInterval(OutgoingRequest.clockAllowance))

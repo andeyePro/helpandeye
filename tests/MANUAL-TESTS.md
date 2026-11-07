@@ -538,8 +538,9 @@ Pass: output is within the band's ERP limit with the antenna's gain. In step 2 t
 ## 56. The box and its phone together
 
 1. With phone A connected to box A and the internet on, press red on the box.
+2. Set phone A's clock an hour ahead (Settings, General, Date & Time, automatic off) and pair it with box A again, so that it sets the box's clock, and leave it so. Press red on box A and acknowledge on phone B, whose clock is right. Then set phone A's clock back to automatic, pair it with box A again, and press red and acknowledge on phone B once more.
 
-Pass: phone A is told of the call (push 0xA3) and carries it on its own routes; phone B hears the call once, whether by the mesh or the internet, and box A shows "seen" after B acknowledges, by either route.
+Pass: phone A is told of the call (push 0xA3) and carries it on its own routes; phone B hears the call once, whether by the mesh or the internet, and box A shows "seen" after B acknowledges, by either route. In step 2 box A shows "seen" within seconds of phone B's acknowledgement, as in step 1, and does not send the call again; within a minute phone A's Box tab says the box's clock is ahead of its responders' phones and takes its time from this phone. Once phone A's clock is back and it has paired again, that line is gone within a minute, and the second call's acknowledgement does not bring it back.
 
 ## 57. Provisioning over Bluetooth
 

@@ -175,12 +175,13 @@ public struct OutgoingRequest: Equatable, Sendable, Codable {
     public static let clockAllowance: TimeInterval = 300
 
     /// Records an acknowledgement that came back over any route. Only a frame for this request
-    /// counts, so an acknowledgement of some other request can never reassure this caller, and
-    /// nor can one made before this request existed (a stale one for a reused number). Check the
-    /// signature with `HelpFrame.isValidAck` before calling this.
+    /// counts, so an acknowledgement of some other request can never reassure this caller;
+    /// whatever its time stamp, as on the box (Martin, 2026-11-02; firmware/DESIGN.md, section 7),
+    /// so a box or phone whose clock runs ahead is not left without "seen". The request number
+    /// is the guard against an old one for a reused number. Check the signature with
+    /// `HelpFrame.isValidAck` before calling this.
     public mutating func receive(_ frame: HelpFrame) {
-        guard case let .ack(u, r, who, at, _) = frame, u == unit, r == number,
-              TimeInterval(at) >= createdAt.timeIntervalSince1970 - Self.clockAllowance else { return }
+        guard case let .ack(u, r, who, _, _) = frame, u == unit, r == number else { return }
         if !acknowledgedBy.contains(who) { acknowledgedBy.append(who) }
         if acks[who] == nil { acks[who] = frame }
     }
@@ -280,24 +281,7 @@ public struct ResponderInbox: Sendable, Codable {
             if var existing = requests[key] {
                 let changed = existing.colour == nil || !existing.heardOn.contains(route)
                 existing.colour = existing.colour ?? colour
-                if existing.sentAt == nil {
-                    existing.sentAt = pressed
-                    // Acknowledgements heard before the call can now be checked: ones from before
-                    // it was pressed belong to an older call with the same numbers.
-                    let cutoff = pressed.timeIntervalSince1970 - OutgoingRequest.clockAllowance
-                    let wasAcknowledged = existing.isAcknowledged
-                    for (who, f) in existing.acks {
-                        if case let .ack(_, _, _, at, _) = f, TimeInterval(at) < cutoff {
-                            existing.acks[who] = nil
-                            existing.acknowledgedBy.removeAll { $0 == who }
-                        }
-                    }
-                    if wasAcknowledged && !existing.isAcknowledged {
-                        existing.heardOn.insert(route)
-                        requests[key] = existing
-                        return .new(key)
-                    }
-                }
+                if existing.sentAt == nil { existing.sentAt = pressed }
                 existing.heardOn.insert(route)
                 requests[key] = existing
                 return changed ? .updated(key) : .duplicate
@@ -317,14 +301,13 @@ public struct ResponderInbox: Sendable, Codable {
             r.heardOn.insert(route)
             requests[key] = r
             return isNew ? .new(key) : (changed ? .updated(key) : .duplicate)
-        case let .ack(unit, request, responder, ackedAt, _):
+        case let .ack(unit, request, responder, _, _):
             // Check the signature with `HelpFrame.isValidAck` before calling this. An ack can
             // overtake its call; keep it, so the call arrives already acknowledged and nobody is
-            // alerted for something already in hand. An ack from before the call was pressed is
-            // stale, as on the caller's side, so both sides agree on whether it counts.
+            // alerted for something already in hand. It counts whatever its time stamp, as on the
+            // caller's side and the box, so every side agrees (firmware/DESIGN.md, section 7).
             let key = IncomingRequest.Key(unit: unit, request: request)
             var r = requests[key] ?? IncomingRequest(key: key, colour: nil, firstHeardAt: now)
-            if let s = r.sentAt, TimeInterval(ackedAt) < s.timeIntervalSince1970 - OutgoingRequest.clockAllowance { return .ignored }
             guard !r.acknowledgedBy.contains(responder) else { return .duplicate }
             r.acknowledgedBy.append(responder)
             r.acks[responder] = frame

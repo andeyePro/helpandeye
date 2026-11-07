@@ -591,31 +591,65 @@ TEST(aPowerCutIsSealedForRespondersAndTheHoursFollow) {
     CHECK(w.box.screen().mains == PowerMonitor::Mains::on);
 }
 
-TEST(aReportsAcknowledgementIsNoOlderThanTheCut) {
+TEST(aReportsAcknowledgementCountsWhateverItsStampAndAnEarlyOneSaysTheClockIsAhead) {
     World w;
-    w.box.power(0, 2000, true, 4200, false);
-    w.box.power(10000, 2010, true, 4200, false);
-    w.box.power(20000, 2020, false, 4200, false);
-    w.box.power(30000, 2030, false, 4200, false);
+    w.box.power(0, 9000, true, 4200, false);
+    w.box.power(10000, 9010, true, 4200, false);
+    w.box.power(20000, 9020, false, 4200, false);
+    w.box.power(30000, 9030, false, 4200, false);
     CHECK(w.box.reportRequest() == 1 && w.port.sent.size() == 1);
     uint8_t rtc[BoxEngine::kRetainedBytes] = {};
     w.box.retain(rtc, 0, 0);
-    // An acknowledgement of an earlier request 1, made long before this cut, is not for it.
-    auto old = w.ack(w.responder, 2, 1, 1600);
-    w.box.heard(old.data(), old.size(), 2040);
-    CHECK(!w.box.reportAcknowledged());
-    auto fresh = w.ack(w.responder, 2, 1, 2025);
-    w.box.heard(fresh.data(), fresh.size(), 2040);
-    CHECK(w.box.reportAcknowledged());
-    // The cut's time survives a reset with the report.
+    auto fresh = w.ack(w.responder, 2, 1, 9025);
+    w.box.heard(fresh.data(), fresh.size(), 9040);
+    CHECK(w.box.reportAcknowledged() && !w.box.clockAhead());
+    // Stamped an hour before the cut by the responder's clock: the box's clock is ahead, and the
+    // acknowledgement counts all the same (Martin, 2026-11-02). The cut's time survives a reset
+    // with the report, so the box can still tell.
     World after;
     CHECK(resumeFrom(after.box, rtc));
-    old = after.ack(after.responder, 2, 1, 1600);
-    after.box.heard(old.data(), old.size(), 2040);
-    CHECK(!after.box.reportAcknowledged());
-    fresh = after.ack(after.responder, 2, 1, 2025);
-    after.box.heard(fresh.data(), fresh.size(), 2040);
-    CHECK(after.box.reportAcknowledged());
+    auto early = after.ack(after.responder, 2, 1, 9020 - 3600);
+    after.box.heard(early.data(), early.size(), 9040);
+    CHECK(after.box.reportAcknowledged() && after.box.clockAhead());
+}
+
+TEST(aBoxAnHourFastStillShowsSeenAndTellsThePhoneItsClockIsAhead) {
+    // The box's clock says 5000 at the press; the responders' phones say 1400, and a phone stamps
+    // its acknowledgement at most five minutes past its own clock.
+    World w;
+    w.box.press(Colour::red, 0, 5000, false);
+    w.box.tick(1000, 5001);
+    CHECK(!w.box.clockAhead());
+    auto seen = w.ack(w.responder, 2, 1, 1700);
+    CHECK(w.box.heard(seen.data(), seen.size(), 5002) == 0);
+    CHECK(w.box.screen().status == CallerStatus::seen);
+    CHECK(w.box.takeSound() == Sound::press && w.box.takeSound() == Sound::seen);
+    w.box.tick(30000, 5030);
+    CHECK(w.port.sent.size() == 1);  // no resend: the call was seen
+    CHECK(w.box.clockAhead());
+    // Another responder's phone, as fast as the box, does not take the flag back.
+    auto agrees = w.ack(w.coordinator, 1, 1, 5040);
+    w.box.heard(agrees.data(), agrees.size(), 5040);
+    CHECK(w.box.clockAhead());
+    uint8_t rtc[BoxEngine::kRetainedBytes] = {};
+    w.box.retain(rtc, 40000, 0);
+    World after;
+    CHECK(resumeFrom(after.box, rtc));
+    after.box.setNextRequest(w.box.nextRequest());
+    CHECK(after.box.clockAhead());
+    // The phone sets the box's clock back at its next connection: nothing more to tell.
+    after.box.tick(41000, 5041);
+    CHECK(after.box.clockAhead());
+    after.box.tick(42000, 1442);
+    CHECK(!after.box.clockAhead());
+    // A coordinator's close stamped an hour before the press closes the call and says the same.
+    after.box.press(Colour::amber, 50000, 5050, false);
+    CallStateFrame close{70004, 2, CallState::closedWithReason, 1450, 0, {}};
+    uint8_t inner[16];
+    size_t n = encode(close, inner, sizeof inner);
+    auto byCoordinator = after.signedBy(after.coordinator, 1, inner, n);
+    after.box.heard(byCoordinator.data(), byCoordinator.size(), 5051);
+    CHECK(after.box.screen().status == CallerStatus::closed && after.box.clockAhead());
 }
 
 TEST(theClockIsRaisedOnlyFromTimesACurrentMemberSigned) {

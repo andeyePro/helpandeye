@@ -136,6 +136,12 @@ public enum MeshCore {
         public let sealKey: Data
         /// How many responders' first names it holds.
         public let names: Int
+        /// Its pairing code for when its screen fails (firmware/DESIGN.md, section 6): 0 until its
+        /// first set group, and from a build before the code.
+        public let labelCode: UInt32
+        /// Its clock is ahead of a responder's phone (section 9): an acknowledgement it took was
+        /// stamped well before its own press time. It takes its time from the phone that connects.
+        public let clockAhead: Bool
     }
 
     /// One of the box's own calls (reply 0xA1 to `boxGetCalls`), with the status the box shows.
@@ -222,10 +228,13 @@ public enum MeshCore {
                       let mainsByte = r.u8(), let mains = BoxInfo.Mains(rawValue: mainsByte & 3), let mv = r.u16(), let hours = r.u16(),
                       let antenna = r.u8(), let cap = r.u8(), let members = r.u8(), let calls = r.u8(), let seal = r.take(32),
                       let names = r.u8() else { return nil }
+                // Added after the first builds: an older box's reply ends at the names.
+                let labelCode = r.u32() ?? 0, flags = r.u8() ?? 0
                 self = .boxInfo(BoxInfo(protocolVersion: proto, provisioned: provisioned != 0, unit: unit, member: member, nextRequest: next,
                                         mains: mains, mainsEstimated: mainsByte & 4 != 0, batteryMillivolts: Int(mv), hoursLeft: Int(hours),
                                         antennaCode: antenna, powerCap: Int8(bitPattern: cap) == -128 ? nil : Int(Int8(bitPattern: cap)),
-                                        members: Int(members), calls: Int(calls), sealKey: Data(seal), names: Int(names)))
+                                        members: Int(members), calls: Int(calls), sealKey: Data(seal), names: Int(names),
+                                        labelCode: labelCode, clockAhead: flags & 1 != 0))
             case 0xA1:
                 guard let request = r.u16(), let colour = r.u8().flatMap(Colour.init), let at = r.u32(), let status = r.u8(), let acks = r.u8() else { return nil }
                 let s: CallerStatus

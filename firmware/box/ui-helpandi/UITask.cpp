@@ -367,6 +367,7 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     out[i++] = uint8_t(_names.count);
     memcpy(out + i, &_labelCode, 4);
     i += 4;
+    out[i++] = _engine.clockAhead() ? 1 : 0;
     _interfaceManager->writeFrame(out, i);
     return true;
   }

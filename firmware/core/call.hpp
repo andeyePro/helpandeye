@@ -26,7 +26,8 @@ constexpr uint32_t kSteady = 600;
 uint64_t due(uint64_t n);
 }  // namespace resend
 
-// How far a responder's clock may be behind the caller's.
+// How far behind the press a responder may stamp an acknowledgement before the box takes it
+// that its own clock is ahead (section 9). It never decides whether the acknowledgement counts.
 constexpr uint32_t kClockAllowance = 300;
 
 enum class RouteState : uint8_t { untried, sending, sent, failed };
@@ -64,8 +65,9 @@ struct OutgoingCall {
 
     CallFrame callFrame() const { return CallFrame{unit, number, colour, pressedAt}; }
 
-    // Records an acknowledgement. Only one for this call, made after it was pressed, counts.
-    // Check first that it carries a current responder's valid signature: this does not.
+    // Records an acknowledgement. Only one for this call counts, whatever its time stamp (Martin,
+    // 2026-11-02): the request number is the guard against an old one. Check first that it
+    // carries a current responder's valid signature: this does not.
     void receive(const AckFrame& ack);
 
     // Takes back acknowledgements from people no longer able to respond.
@@ -77,8 +79,8 @@ struct OutgoingCall {
         ackCount = kept;
     }
 
-    // A person settled the call. Only a settlement made after the press counts; a close is final,
-    // and "I'm OK" never undoes one.
+    // A person settled the call, whatever the time stamp. A close is final, and "I'm OK" never
+    // undoes one.
     void settle(CallState state, uint16_t by, uint32_t at);
 
     // A Help or Need a hand call nobody has closed, which I'm OK can settle.

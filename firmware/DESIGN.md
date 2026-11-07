@@ -270,7 +270,7 @@ file, to none.
 
 | Byte 0 | Name | Body |
 |---|---|---|
-| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off; plus 4 when estimated from the battery, section 10), battery mV u16, hours left u16, antenna u8 (as set by 0x71), power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`), names u8 (how many first names the box holds, section 6), label code u32 (the box's pairing code for when its screen fails, section 6; 0 until its first set group) |
+| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off; plus 4 when estimated from the battery, section 10), battery mV u16, hours left u16, antenna u8 (as set by 0x71), power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`), names u8 (how many first names the box holds, section 6), label code u32 (the box's pairing code for when its screen fails, section 6; 0 until its first set group), flags u8 (bit 0: the box's clock is ahead of a responder's phone, section 9; a reply that ends at the label code is from a build before the flags) |
 | 0x71 | set group | 94 bytes after the command byte: group ID (16), member u16, unit u32, flags u8 (bit 0 I'm OK closes the call, bit 1 the caller may close, bit 2 report power cuts), antenna u8 (0 the V4's whip, 1 a stub, 2 an external 3 dBi, 3 an external 5 dBi, or 0x80 plus any antenna's gain in half-dB steps, 0 to 63.5 dBi, which is what the app sends, rounded up; 4 to 0x7F are refused), responders' public key (32, all zero when the group has none), channel secret (16), old channel secret (16, all zero outside a changeover), old secret ends at u32, first coordinator u16. The box's first set group also makes its label code, which the next 0x70 gives |
 | 0x72 | set members | version u32, index u8, total u8, then up to four of: member u16, role u8 (1 caller, 2 responder, 3 both, 4 coordinator), Ed25519 signing key (32). Index 0 starts a new list; the list replaces the old one when every position up to `total` has arrived. At most 32 members |
 | 0x73 | get calls | nothing. Replies 0xA1 per call: request u16, colour u8, pressed at u32, status u8 (0 sending, 1 waiting for a responder, 2 seen, 3 not sent, 4 closed), acknowledgements u8; then 0xA2 |
@@ -334,10 +334,17 @@ in `core/call.hpp`:
 - While a call stands at I'm OK (profile B), the signed I'm OK goes with each resend, so a
   responder who missed both still comes to check.
 - A close the box made is repeated on the call's resend times four times.
-- An acknowledgement counts only if it names this unit and request, was made no more than five
-  minutes before the press by the sender's clock, and carries the valid signature of a current
-  member who can respond. The box checks the signature and membership before
-  `OutgoingCall::receive`, which checks the rest.
+- An acknowledgement counts if it names this unit and request and carries the valid signature of
+  a current member who can respond, whatever its time stamp (Martin, 2026-11-02: as resilient as
+  possible; until then a box whose clock had run ahead refused every acknowledgement, so the
+  caller never saw "seen" and the box kept resending). The same goes for a coordinator's signed
+  close. The box checks the signature and membership before `OutgoingCall::receive`, which
+  checks the numbers. The request number is the only guard against an old acknowledgement being
+  replayed for a new call: the box holds a call for its number alone, and never reuses a number
+  until it has used 32767, so a replay can match only after the numbers wrap, or after the NVS
+  that holds the next number is erased and they start again at 1. An acknowledgement stamped
+  more than five minutes before the press says the box's clock is ahead, which it tells the
+  phone (section 9).
 - What the box shows follows `CallerStatus`: sending, sent and waiting for a responder, seen,
   the cross (nothing could be sent by the box or by its phone), or closed. There is no
   "delivered": the radio sending is not a person reading it (decision 7). The words follow the
@@ -437,7 +444,8 @@ budget is on top of it and does not replace it.
 ## 9. The clock
 
 Frames carry wall-clock times: a call's press time, which responders' phones use to count
-escalation from the press, and an acknowledgement's time, checked against the press. A Heltec has
+escalation from the press, and an acknowledgement's time, which says whether the box's clock is
+ahead. A Heltec has
 no clock battery. The box gets the time from the phone whenever it connects and keeps it while it
 has power. After a cold start with no phone, MeshCore already sets its clock to just after the
 newest time saved in flash (`bootstrapRTCfromContacts`).
@@ -460,6 +468,18 @@ with its clock set days ahead cannot move the box's on. A phone a few hours fast
 phone that connects to the box can set its time directly; so the responders' phones count
 escalation from the earlier of the press time and when they first heard the call
 (`IncomingRequest.escalatesFrom`), and a call stamped ahead is alerted at once, not late.
+
+**Telling the phone (Martin, 2026-11-02).** A box whose clock runs ahead, by up to a day on one
+member's signed frame or by any amount from the phone that set it, takes every acknowledgement
+all the same (section 7). It also knows: a responder's phone stamps its acknowledgement no more
+than five minutes past its own clock (`ackTime` in Engine.swift), so one stamped more than
+`kClockAllowance` before the box's own press time means the box's clock is ahead of that phone's.
+The box records that (`BoxEngine::clockAhead`, host-tested, kept in the retained copy across a
+reset) and the info reply (0x70) carries it as a flag, so the app can say so on the box's page
+to whoever is paired, a coordinator included. The flag is cleared when the box's clock is set
+back, which the app does at every connection, so a phone whose own clock is right clears it as
+it connects and only a phone that is itself ahead goes on seeing it. Nothing on the box's screen
+changes: it says a responder has seen the call once the acknowledgement counts, which is true.
 
 **The monotonic clock across sleep and resets.** The core's schedule and airtime run on a
 monotonic clock in milliseconds (section 7). On the board it is the 64-bit `monoMs()` (ESP-IDF's
@@ -488,9 +508,9 @@ choice (Martin, 2026-10-30). `core/power.hpp` and `BoxEngine::power`:
 - Battery: hours left from the cell's resting voltage (a piecewise-linear curve from 4.2 V to the
   board's 3.4 V shutdown) and the box's average draw on battery, reported as the estimate passes
   24, 12, 6, 3, 2 and 1 hours. A responder's acknowledgement of the report silences all but the
-  final warning. It counts only if made no more than five minutes before the cut by the
-  sender's clock, as for a call (section 7), so an old acknowledgement of the same request number
-  does not; the cut's time is kept with the report across a reset. The draw (`batteryModel`) is the deep-sleep draw (`HI_DRAW_ASLEEP_UA`) plus the
+  final warning, whatever its time stamp, as for a call (section 7); the cut's time is kept with
+  the report across a reset, so one stamped more than five minutes before it still says the
+  box's clock is ahead (section 9). The draw (`batteryModel`) is the deep-sleep draw (`HI_DRAW_ASLEEP_UA`) plus the
   awake draw (`HI_DRAW_AWAKE_MA`) for the share of each ten minutes the box is up to read the
   battery (about three seconds, `kAwakePerWakeMs`), rounded up to a whole milliamp so the
   estimate never flatters the cell; `HI_BATTERY_MAH` and both draws are build flags until section

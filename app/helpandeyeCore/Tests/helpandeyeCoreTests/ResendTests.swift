@@ -107,12 +107,12 @@ final class SecondReviewTests: XCTestCase {
         XCTAssertFalse(inbox.requests[key]!.isAcknowledged)
     }
 
-    func testResponderIgnoresAnAckFromBeforeTheCallLikeTheCallerDoes() {
+    func testResponderCountsAnAckFromBeforeTheCallLikeTheCallerDoes() {
         var inbox = ResponderInbox()
         let key = IncomingRequest.Key(unit: 5, request: 1)
         inbox.receive(.call(unit: 5, request: 1, colour: .red, sentAt: at0), via: .mesh, at: t0)
-        XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: at0 - 3600, signature: sig), via: .mesh, at: t0), .ignored)
-        XCTAssertFalse(inbox.requests[key]!.isAcknowledged)
+        XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: at0 - 3600, signature: sig), via: .mesh, at: t0), .updated(key))
+        XCTAssertTrue(inbox.requests[key]!.isAcknowledged, "an hour before the press by the responder's clock: the number is the guard, as on the caller's side and the box")
     }
 
     func testHeardAcksAreKeptForPassingOn() {

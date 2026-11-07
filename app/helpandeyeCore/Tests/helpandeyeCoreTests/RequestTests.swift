@@ -33,9 +33,9 @@ final class RequestTests: XCTestCase {
         r.receive(.call(unit: 5, request: 1, colour: .red, sentAt: 0))
         XCTAssertEqual(r.status, .waitingForResponder)
         r.receive(.ack(unit: 5, request: 1, responder: 9, ackedAt: at0 - 3600, signature: sig))
-        XCTAssertEqual(r.status, .waitingForResponder, "an ack from before this request was made is stale")
-        r.receive(.ack(unit: 5, request: 1, responder: 9, ackedAt: at0 - 60, signature: sig))
-        XCTAssertEqual(r.status, .seen(responder: 9), "a minute of clock difference is allowed")
+        XCTAssertEqual(r.status, .seen(responder: 9), "stamped an hour before the press by a clock behind the caller's: it still counts (Martin, 2026-11-02)")
+        r.receive(.ack(unit: 5, request: 1, responder: 9, ackedAt: at0 + 5, signature: sig))
+        XCTAssertEqual(r.acknowledgedBy, [9], "once each")
     }
 
     func testFollowUpsAreNumbered() {
@@ -96,7 +96,8 @@ final class RequestTests: XCTestCase {
         var inbox = ResponderInbox()
         let key = IncomingRequest.Key(unit: 5, request: 1)
         XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: 0, signature: sig), via: .mesh, at: t0), .updated(key))
-        XCTAssertEqual(inbox.receive(.call(unit: 5, request: 1, colour: .amber, sentAt: 0), via: .mesh, at: t0), .updated(key))
+        XCTAssertEqual(inbox.receive(.call(unit: 5, request: 1, colour: .amber, sentAt: at0), via: .mesh, at: t0), .updated(key),
+                       "pressed long after the ack's stamp by the caller's clock: still in hand")
         XCTAssertEqual(inbox.receive(.followUp(unit: 5, request: 1, part: 1, category: .fallen), via: .mesh, at: t0), .updated(key))
         XCTAssertEqual(inbox.receive(.ack(unit: 5, request: 1, responder: 2, ackedAt: 0, signature: sig), via: .internet, at: t0), .duplicate)
         XCTAssertEqual(inbox.requests[key]?.colour, .amber)

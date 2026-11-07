@@ -79,13 +79,14 @@ TEST(imOKIsRepeatedAFewTimesThenLeft) {
     CHECK(!c.nextResend(next));
 }
 
-TEST(onlyAnAcknowledgementOfThisCallCounts) {
+TEST(onlyAnAcknowledgementOfThisCallCountsWhateverItsStamp) {
     OutgoingCall c = redCall();
     c.receive(ack(5, 2, 3, t0));  // another request
     c.receive(ack(6, 1, 3, t0));  // another unit
-    c.receive(ack(5, 1, 3, t0 - kClockAllowance - 1));  // made before the press: an old call's
     CHECK(c.status() == CallerStatus::waitingForResponder);
-    c.receive(ack(5, 1, 3, t0 - kClockAllowance));  // a responder's clock a little behind
+    // Stamped an hour before the press: the box's clock is ahead, and the acknowledgement still
+    // counts (Martin, 2026-11-02). The request number is the guard against an old call's.
+    c.receive(ack(5, 1, 3, t0 - 3600));
     CHECK(c.status() == CallerStatus::seen);
     c.receive(ack(5, 1, 3, t0 + 5));
     CHECK(c.ackCount == 1);
@@ -104,10 +105,8 @@ TEST(acknowledgementsFromRemovedRespondersAreTakenBack) {
 
 TEST(aCloseIsFinalAndImOKNeverUndoesIt) {
     OutgoingCall c = redCall();
-    c.settle(CallState::closedByCaller, 9, t0 - kClockAllowance - 1);  // older than the call
-    CHECK(!c.settled);
-    c.settle(CallState::callerOK, 9, t0 + 10);
-    CHECK(c.status() == CallerStatus::waitingForResponder);
+    c.settle(CallState::callerOK, 9, t0 - 3600);  // stamped before the press: counts all the same
+    CHECK(c.settled && c.status() == CallerStatus::waitingForResponder);
     CHECK(c.resendDue(m0 + 30));  // I'm OK goes with the resends: a responder still checks
     c.settle(CallState::closedWithConsent, 1, t0 + 20);
     CHECK(c.status() == CallerStatus::closed);

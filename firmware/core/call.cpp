@@ -9,12 +9,8 @@ uint64_t resend::due(uint64_t n) {
     return early + later;
 }
 
-namespace {
-bool notBefore(uint32_t at, uint32_t pressedAt) { return int64_t(at) >= int64_t(pressedAt) - kClockAllowance; }
-}  // namespace
-
 void OutgoingCall::receive(const AckFrame& ack) {
-    if (ack.unit != unit || ack.request != number || !notBefore(ack.ackedAt, pressedAt)) return;
+    if (ack.unit != unit || ack.request != number) return;
     for (size_t i = 0; i < ackCount; i++)
         if (acknowledgedBy[i] == ack.responder) return;
     // Past the first few, more names change nothing the box shows.
@@ -22,7 +18,6 @@ void OutgoingCall::receive(const AckFrame& ack) {
 }
 
 void OutgoingCall::settle(CallState state, uint16_t by, uint32_t at) {
-    if (!notBefore(at, pressedAt)) return;
     if (settled && (closes(settledState) || !closes(state))) return;
     settled = true;
     settledState = state;
