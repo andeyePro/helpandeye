@@ -641,3 +641,31 @@ step 7, within a few minutes every phone, phone C's included, lists D's person a
 phone C says under New code from your coordinator that D's person also took over and the group
 follows them rather than C's person, and takes the update code phone D shows it. No screen says or
 suggests that help is coming.
+
+## 63. The rooftop repeater's current draw
+
+Needs a Heltec T114 on MeshCore repeater firmware 1.14.1 or later, set up as in `docs/repeater.md`
+section 2 with its antenna fitted, and either a bench supply with a current readout (or a
+multimeter on its milliamp range in the supply's lead) or a USB meter that counts mAh. For step
+5, box A with phone A and box B with phone B from section 2, both within the repeater's range
+and out of each other's (a few streets apart, or with their antennas removed).
+
+1. With a bench supply: disconnect the cell, set the supply to 3.7 V with a 0.5 A limit, and
+   connect it to the board's battery connector through the meter. With a USB meter: disconnect
+   the cell and power the board over USB through the meter (this reading includes the board's
+   own regulators, so it is higher than the cell will see; say which you used).
+2. With `powersaving off`, leave the repeater alone for five minutes, then read the current
+   once a minute for five minutes and note the lowest, highest and typical readings.
+3. Send `powersaving on` and `reboot`, wait five minutes, and read for five minutes again.
+4. With a USB meter that counts mAh, zero it and leave the repeater for an hour: the count is
+   the hour's average in mA.
+5. Press red on box A. Watch the meter while it relays, and acknowledge on phone B.
+6. Put the cell back and check the board shows a sensible battery voltage in the companion
+   app's repeater page.
+
+Pass: the readings in step 3 are lower than in step 2, and the typical reading in step 3 is
+10 mA or less at 3.7 V (`docs/repeater.md` budgets 8 mA listening). In step 5 box B's phone
+alerts for box A's call, so the repeater relayed it while asleep, and the meter shows a short
+rise while it sends. Record the firmware version, the antenna, which meter and the figures
+from steps 2 to 4 in the pull request, and replace the budget figures in `docs/repeater.md`
+section 6 with them.

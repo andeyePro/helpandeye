@@ -14,6 +14,7 @@ For contributors. What each part does and where its code is. The rules it follow
 | Box (prototype) | any Heltec LoRa board | MeshCore's standard companion firmware, unchanged. The app writes the group's private channel into it. |
 | Box firmware | `firmware/` | Help&I's own build of MeshCore's companion firmware for the Heltec WiFi LoRa 32 V4 (option A, `firmware/DESIGN.md`): red, amber and green buttons, a buzzer, the screen, resends, acknowledgement checking, I'm OK, the duty-cycle budget and power cap, and a sealed power-cut and battery report, with the box as its own group member. The logic is a portable C++ core (`firmware/core`) with host tests (`make test`); `firmware/box` is the overlay on a pinned MeshCore commit and `firmware/build.sh` builds it. Compiles; not yet run on a board. The app recognises it and sets it up (below). |
 | Relay | `relay/` | Cloudflare Worker. Stores and forwards sealed messages for the internet route. |
+| Rooftop repeater | [repeater.md](repeater.md) | A self-built Heltec T114 on MeshCore's stock repeater firmware, solar powered, within IR 2030's 27 dBm ERP and 10% duty cycle. It holds no group key and no Help&I rule; it only widens the mesh's reach. Specified, not yet built. |
 
 ## A red press
 
