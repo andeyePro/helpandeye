@@ -40,11 +40,12 @@ Agreed with Martin, 2026-10-28.
 - A coordinator makes named sets of settings, called profiles, such as "Living alone" or "Lone
   worker", and gives one to each person who calls for help. Everyone starts on the group's
   standard profile.
-- A profile covers what each button shows (words, an Apple symbol, or both; both by default:
-  a raised hand, a helping hand and a tick), the sounds and spoken words, what I'm OK does after
-  Help or Need a hand, sharing where they are, offering a text when nothing else got through,
-  check-ins, and how often responders are alerted again. SOS is allowed as a button's words, with
-  a warning to make doubly clear to the people on that profile that it does not replace 999.
+- A profile covers what each button shows (words, a symbol, or both; both by default: a figure
+  with an arm straight up, a figure with a hand raised, and a tick), the sounds and spoken words,
+  what I'm OK does after Help or Need a hand, sharing where they are, offering a text when nothing
+  else got through, check-ins, and how often responders are alerted again. SOS is allowed as a
+  button's words, with a warning to make doubly clear to the people on that profile that it does
+  not replace 999.
 - For each setting the coordinator chooses whether the person may change it. Settings they may
   not change are shown, but cannot be changed; beside them the person can ask the coordinator
   to change one. The request goes signed, over the internet only, and is shown under Group for

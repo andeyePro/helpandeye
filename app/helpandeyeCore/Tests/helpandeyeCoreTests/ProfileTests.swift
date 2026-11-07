@@ -20,7 +20,8 @@ final class ProfileTests: XCTestCase {
     func testTheStandardProfile() {
         let p = Profile.standard
         XCTAssertEqual(p.face, .wordsAndSymbol, "words and a symbol together by default")
-        XCTAssertEqual(p.symbol(.red), "hand.raised.fill")
+        XCTAssertEqual(p.symbol(.red), "figure.help")
+        XCTAssertEqual(p.symbol(.amber), "figure.hand")
         XCTAssertEqual(p.notSent, .eehOoh)
         XCTAssertEqual(p.afterOK, .stopsRepeats, "new groups start on B")
         XCTAssertFalse(p.callerMayClose)

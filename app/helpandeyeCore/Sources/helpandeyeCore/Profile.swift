@@ -90,12 +90,17 @@ public struct Profile: Codable, Equatable, Sendable, Identifiable {
     public static let standard = Profile(id: 0, name: "Standard")
 
     public static func standardSymbol(_ colour: Colour) -> String {
-        switch colour { case .red: "hand.raised.fill"; case .amber: "hands.and.sparkles.fill"; case .green: "checkmark" }
+        switch colour { case .red: "figure.help"; case .amber: "figure.hand"; case .green: "checkmark" }
     }
 
+    /// Help&I's own symbols (`Symbols.xcassets`): a figure with the arm straight up, and one with
+    /// the hand raised. Every other name is Apple's.
+    public static let ownSymbols: Set<String> = ["figure.help", "figure.hand"]
+
     /// Symbols a coordinator can choose from.
-    public static let symbolChoices = ["hand.raised.fill", "hands.and.sparkles.fill", "checkmark", "sos", "exclamationmark.triangle.fill",
-                                       "bell.fill", "phone.fill", "house.fill", "heart.fill", "hand.thumbsup.fill", "figure.wave"]
+    public static let symbolChoices = ["figure.help", "figure.hand", "hand.raised.fill", "hands.and.sparkles.fill", "checkmark", "sos",
+                                       "exclamationmark.triangle.fill", "bell.fill", "phone.fill", "house.fill", "heart.fill",
+                                       "hand.thumbsup.fill", "figure.wave"]
 
     public func symbol(_ colour: Colour) -> String {
         symbols[ButtonWords.key(colour)].flatMap { $0.isEmpty ? nil : $0 } ?? Self.standardSymbol(colour)

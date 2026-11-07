@@ -27,7 +27,7 @@ struct Entry: TimelineEntry { let date: Date }
 
 struct Face: View {
     @Environment(\.widgetFamily) private var family
-    private let symbol = Image(systemName: "hand.raised.fill")
+    private let symbol = Image("figure.help")
 
     var body: some View {
         shape
@@ -38,7 +38,7 @@ struct Face: View {
 
     @ViewBuilder private var shape: some View {
         switch family {
-        case .accessoryInline: Label("Help", systemImage: "hand.raised.fill")
+        case .accessoryInline: Label { Text("Help") } icon: { symbol }
         case .accessoryCorner: symbol.font(.title2.bold()).widgetLabel("Help")
         case .accessoryRectangular:
             HStack {

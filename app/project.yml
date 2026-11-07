@@ -108,6 +108,8 @@ targets:
       - helpandeye/Store.swift
       - helpandeye/Alerts.swift
       - helpandeye/Colours.swift
+      - helpandeye/Symbols.swift
+      - helpandeye/Symbols.xcassets
       - helpandeye/CallerVoice.swift
       - helpandeye/Sounds
     dependencies:
@@ -134,7 +136,7 @@ targets:
   helpandeyeWatchWidgets:
     type: app-extension
     platform: watchOS
-    sources: [helpandeyeWatchWidgets]
+    sources: [helpandeyeWatchWidgets, helpandeye/Symbols.xcassets]
     info:
       path: helpandeyeWatchWidgets/Info.plist
       properties:
