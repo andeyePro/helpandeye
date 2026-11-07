@@ -2,6 +2,10 @@
 
 Done work, newest first. Open items live in the issue tracker.
 
+## 2026-11-07
+
+- [x] **Moving to a new phone: design proposal** (this commit) - docs/new-phone.md sets out what a member loses when their keys do not follow them (their member and unit numbers, the group's secrets and the responders' key, role, profile, open calls, a coordinator's log; a first coordinator's authority) and what the group sees (nothing at first; a box still calls on the radio; a responder's turn passes in silence; the seven-day clock of decision 20 starts). Four options in one shape: a handover from the old phone (needs both phones, costs the group nothing), a passphrase-sealed file or printed code the person keeps (survives a lost phone, cannot shut it out), rejoining with the old member removed (the rules of today; the only route that shuts out a lost phone), and a key change that keeps the member's numbers (new work). How each meets decisions 12 and 20 (as it stands and as redesigned on 2026-11-02), the seven days after a removal, the relay pass's 30-day grace (a payment grace, never for a phone change) and the rule that nothing depends on Apple's or Google's services. Recommends the handover plus a one-step "Replace <name>'s phone" for coordinators, no export, with the counter-argument stated; eight questions for Martin. Nothing built.
+
 ## 2026-10-31
 
 - [x] **Taking over is confirmed in the list** (this commit) - the takeover's confirmation was a system pop-up whose message ("Only do this if … phone is lost or broken …") was cut off at the largest text; it is now asked on the screen itself, with Take over now and Don't take over, so the whole question shows at any size. Screen test and MANUAL-TESTS 62 updated.
