@@ -1,6 +1,6 @@
 import { configured, push } from "./apns.js";
 import { checkPass, PASS_HEADER, requiresPass } from "./pass.js";
-import { authenticate, GroupRelay, KEEP_MS, MAX_MEMBERS_REQUEST, MAX_REQUEST, Meter as MeterLogic, NOT_MEMBER, RelayError, unb64 } from "./relay.js";
+import { authenticate, GroupRelay, KEEP_MS, MAX_MEMBERS_REQUEST, MAX_REQUEST, Meter as MeterLogic, RelayError, unb64 } from "./relay.js";
 
 // Routes:
 //   PUT  /g/<groupId>/members          coordinator sends the member list (public keys only)
@@ -23,13 +23,15 @@ export const PUSH_BATCH = SUBREQUESTS - 1;
 let low = false;
 
 // Any fresh key passes the signature check, so a stranger rotating keys costs a group's Durable
-// Object a request each time. A group's refusals of non-members are counted by address, as failed
-// signature checks are; past the limit, that address's requests stop here for a minute, except a
-// call and a key a group has already answered here. Both are kept in this isolate only, so this
-// is a best effort that never adds a wait to a member's request.
+// Object a request each time. A group marks its refusals of keys that are not its members, and
+// they are counted by address, as failed signature checks are; past the limit, that address's
+// requests stop here for a minute, except a call and a key a group has already answered here. Both
+// records are kept in this isolate only, so this is a best effort that never adds a wait to a
+// member's request.
 export const REFUSE_MS = 60_000;
 const CACHE_MAX = 10_000;
 const refusing = new Map(), answered = new Set();
+const STRANGER = "X-HelpA-Stranger";
 
 export default {
   async fetch(request, env, ctx) {
@@ -84,8 +86,7 @@ export default {
         if (answered.size >= CACHE_MAX) answered.clear();
         answered.add(known);
       }
-      else if (response.status === 403 && (await response.clone().json().catch(() => ({}))).error === NOT_MEMBER
-               && !(await allowed(env.IP_LIMIT, address))) {
+      else if (response.headers.has(STRANGER) && !(await allowed(env.IP_LIMIT, address))) {
         if (refusing.size >= CACHE_MAX) refusing.clear();
         refusing.set(address, Date.now() + REFUSE_MS);
         response = json(429, { error: "too many requests" });
@@ -96,6 +97,7 @@ export default {
       response = json(e.status, { error: e.message });
     }
     const out = new Response(response.body, response);
+    out.headers.delete(STRANGER);
     if (low) out.headers.set("X-HelpA-Allowance-Low", "1");
     return out;
   },
@@ -149,12 +151,20 @@ export class Group {
   }
 
   async fetch(request) {
+    // Only the Worker reaches a group, and it has checked this key's signature.
+    const key = request.headers.get("X-HelpA-Key") ?? "";
+    const response = await this.answer(request, key);
+    // A refusal of a key that is not a member, whatever it asked for, is marked for the Worker to
+    // count by address; a member's (a list not taken, a post past the limit) is not.
+    if (!response.ok && !(await this.relay.isMember(key))) response.headers.set(STRANGER, "1");
+    return response;
+  }
+
+  async answer(request, key) {
     try {
       const url = new URL(request.url);
       const [, , groupId, kind] = url.pathname.split("/");
       const body = await request.text();
-      // Only the Worker reaches a group, and it has checked this key's signature.
-      const key = request.headers.get("X-HelpA-Key") ?? "";
       await this.relay.heard(key);
       if (kind === "members" && request.method === "PUT") {
         const list = JSON.parse(body);

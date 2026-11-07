@@ -207,6 +207,51 @@ test("strangers with throwaway keys are counted by address and then stopped befo
   await w.settle();
 });
 
+test("a group marks its refusals of keys that are not its members, and the Worker keeps the mark", async () => {
+  const { member, group, path } = await setup();
+  const stranger = await phone();
+  const mark = async (request) => (await group.fetch(request)).headers.get("X-HelpA-Stranger");
+  assert.equal(await mark(await stranger.request("GET", path("messages"), "")), "1");
+  assert.equal(await mark(await stranger.request("PUT", path("members"), "null")), "1");
+  assert.equal(await mark(await stranger.request("PUT", path("members"), firstList(stranger))), "1", "not this group's first coordinator");
+  assert.equal(await mark(await member.request("POST", path("messages"), "null")), null, "a member's refused request is not marked");
+  assert.equal(await mark(await member.request("PUT", path("members"), firstList(member))), null, "nor a list a member may not send");
+  assert.equal(await mark(await member.request("GET", path("messages"), "")), null);
+  const w = worker();
+  const owner = await phone();
+  assert.equal((await w.fetch(await owner.request("PUT", `/g/${await groupId(owner)}/members`, firstList(owner)))).status, 200);
+  const refused = await w.fetch(await stranger.request("GET", `/g/${await groupId(owner)}/messages`, ""));
+  assert.equal(refused.status, 403);
+  assert.equal(refused.headers.get("X-HelpA-Stranger"), null, "the mark is for the Worker alone");
+});
+
+test("whatever a stranger asks a group for, its refusal counts by address; a member's refusal does not", async () => {
+  const ip = limiter();
+  const w = worker({ IP_LIMIT: ip, REGISTER_LIMIT: limiter(new Set(["198.51.100.9"])) });
+  const owner = await phone(), member = await phone();
+  const id = await groupId(owner);
+  const path = (kind) => `/g/${id}/${kind}`;
+  const busy = { headers: { "CF-Connecting-IP": "198.51.100.9" } };
+  assert.equal((await w.fetch(await owner.request("PUT", path("members"), firstList(owner, member), { headers: { "CF-Connecting-IP": "198.51.100.10" } }))).status, 200);
+  assert.equal((await w.fetch(await member.request("GET", path("messages"), "", busy))).status, 200);
+  const stranger = await phone();
+  assert.equal((await w.fetch(await stranger.request("PUT", path("members"), firstList(stranger), busy))).status, 403, "not this group's first coordinator");
+  assert.equal((await w.fetch(await (await phone()).request("PUT", path("members"), "null", busy))).status, 400);
+  assert.equal((await w.fetch(await (await phone()).request("GET", path("members"), "", busy))).status, 405);
+  assert.equal((await w.fetch(await stranger.request("PUT", `/g/${await groupId(stranger)}/members`, firstList(stranger), busy))).status, 429, "too many new groups");
+  assert.deepEqual(ip.asked, Array(4).fill("198.51.100.9"), "each counted by address, as a non-member's read is");
+  assert.equal((await w.fetch(await member.request("PUT", path("members"), firstList(owner, member), busy))).status, 403, "only a coordinator");
+  assert.equal((await w.fetch(await member.request("POST", path("messages"), "null", busy))).status, 400);
+  assert.equal(ip.asked.length, 4, "a member's refused request is not counted");
+  ip.refused.add("198.51.100.9");
+  assert.equal((await w.fetch(await (await phone()).request("PUT", path("members"), "null", busy))).status, 429, "past the limit");
+  const reached = w.reached.groups;
+  assert.equal((await w.fetch(await (await phone()).request("PUT", path("members"), "null", busy))).status, 429);
+  assert.equal(w.reached.groups, reached, "stopped before the group");
+  assert.equal((await w.fetch(await member.request("POST", path("messages"), "null", busy))).status, 400, "a member the Worker has answered still reaches it");
+  await w.settle();
+});
+
 test("signed requests are limited per key, but never a post that wakes others for a call", async () => {
   const keys = limiter();
   const w = worker({ KEY_LIMIT: keys });

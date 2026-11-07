@@ -133,13 +133,21 @@ Cloudflare's rate limiting (`ratelimits` in `wrangler.jsonc`) also refuses, with
 - more than 120 requests a minute from one address that fail the time or signature check. A
   request whose signature checks is never limited by address, so phones sharing one (a care
   home's Wi-Fi, or a mobile network's shared address) never hold each other back.
-- the same 120 a minute, counted together with those, for requests a group refuses (403) because
-  the key is not a member: any fresh key passes the signature check, so rotating keys would
-  otherwise cost the group's Durable Object a request every time. Past the limit, that address's
-  requests are refused at the Worker for a minute, before the group, except a post asking for a
-  `call` wake and a key a group has already answered there. That record is kept by each Worker
-  instance for itself, so it never slows a member's request, and a member on the same address who
-  has not been answered by that instance yet waits the minute out (their calls still go).
+- the same 120 a minute, counted together with those, for requests a group refuses from a key that
+  is not one of its members, whatever was asked and why it was refused (not a member, not this
+  group's first coordinator, a bad list, a wrong method, too many new groups): any fresh key passes
+  the signature check, so rotating keys would otherwise cost the group's Durable Object a request
+  every time. A member's refused request (a list the relay will not take from them, a bad message,
+  a post past their limit) is not counted. Past the limit, that address's requests are refused at
+  the Worker for a minute, before the group, except a post asking for a `call` wake and a key a
+  group has already answered there. That record is kept by each Worker instance for itself, so it
+  never slows a member's request, and a member on the same address who has not been answered by
+  that instance yet waits the minute out (their calls still go). The count is one for all the
+  instances at a location, so another instance lets one request from that address through to the
+  group, and then refuses for a minute too. A post asking for a `call` wake from a key no group
+  has answered is never refused before the group, so a stranger's calls, from one key or many,
+  reach the group and are refused there, each at the cost of a request; with `REQUIRE_PASS` on,
+  only someone holding the group's pass can send them.
 - more than 120 signed requests a minute from one phone's key. A phone and its watch polling twice
   a minute, up to 5 pages each, make 20. A post asking for a `call` wake is never refused by this
   limit: only by the 20 posts a minute above.
