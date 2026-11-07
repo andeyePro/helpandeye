@@ -22,8 +22,8 @@ Pairing pairingAtStart(bool screenWorks, bool hasLabelCode) {
     return screenWorks ? Pairing::shownCode : hasLabelCode ? Pairing::labelCode : Pairing::off;
 }
 
-uint32_t labelCodeFrom(uint32_t random) {
-    uint32_t code = 100000 + random % 899999;
+uint32_t labelCodeFrom(uint32_t bits) {
+    uint32_t code = 100000 + bits % 899999;
     return code < 123456 ? code : code + 1;
 }
 

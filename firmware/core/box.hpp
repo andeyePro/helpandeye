@@ -71,7 +71,7 @@ constexpr const char* kNotSentAntennaWords = "Not sent: this box's antenna is no
 enum class Pairing : uint8_t { off, shownCode, labelCode };
 Pairing pairingAtStart(bool screenWorks, bool hasLabelCode);
 // A label code from 32 random bits: 100000 to 999999, never 123456.
-uint32_t labelCodeFrom(uint32_t random);
+uint32_t labelCodeFrom(uint32_t bits);
 
 // The state LED (section 5): lit while a call is open, blinking each second when it could not be
 // sent. With no call open, a box whose Bluetooth is off for want of a screen and a label code

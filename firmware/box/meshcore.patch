@@ -9,7 +9,7 @@ index d927c1a..f15eebe 100644
 +  // Asked once at start, before begin(). False and Bluetooth is never started.
 +  virtual bool allowsBluetooth(bool /* screenWorks */) { return true; }
 +  // The pairing code Bluetooth starts with, given the one MeshCore chose.
-+  virtual uint32_t pairingCode(uint32_t meshcores) { return meshcores; }
++  virtual uint32_t pairingCode(uint32_t meshcoreCode) { return meshcoreCode; }
    virtual void notify(UIEventType t = UIEventType::none) = 0;
    virtual void loop() = 0;
  };

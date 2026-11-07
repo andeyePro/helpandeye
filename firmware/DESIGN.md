@@ -199,9 +199,15 @@ screen. To tell whoever is setting such a box up why no phone finds it, the stat
 short flashes every two seconds while the box is awake (the two minutes after starting or a
 press, when the screen would be lit) and no call is open; an open call keeps its own steady or
 blinking light (`ledLit`, host-tested). With the label code in use the LED does not flash: a
-phone finds the box as usual. The label code is a pairing secret of the same kind as the one on
-the screen, worth what being in Bluetooth range of the box is worth: it opens the companion
-link, over which the phone must still hold the group's keys to do anything a responder could.
+phone finds the box as usual. The label is a secret: a phone paired with the label code can do
+what any paired phone can, and set group (0x71) and Forget (0x75) need no group key, so whoever
+has read the label can set up a box whose screen has failed for their own group or wipe it. The
+label belongs on the box's underside or inside its lid, not where a visitor reads it. Until the
+app shows the code from the info reply (TODO.md), a box provisioned on this firmware holds a code
+nobody has read: if its screen then fails it advertises with that code and the LED does not
+flash, and the box has to be set up again once its screen is mended. The code is made before the
+group file is written, so a set group whose file could not be saved (ERR 5) leaves the code for
+the phone's retry.
 
 **The box as its own member (Martin, 2026-10-30).** The box joins the group as a caller in its
 own right, with its own unit number, like a person who only calls. Its key is made on the board

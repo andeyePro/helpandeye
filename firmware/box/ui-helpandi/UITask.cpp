@@ -153,7 +153,7 @@ bool UITask::allowsBluetooth(bool screenWorks) {
   return _pairing != Pairing::off;
 }
 
-uint32_t UITask::pairingCode(uint32_t meshcores) { return _pairing == Pairing::labelCode ? _labelCode : meshcores; }
+uint32_t UITask::pairingCode(uint32_t meshcoreCode) { return _pairing == Pairing::labelCode ? _labelCode : meshcoreCode; }
 
 // BoxPort
 

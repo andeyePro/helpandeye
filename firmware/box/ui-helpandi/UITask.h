@@ -35,7 +35,7 @@ public:
   void notify(UIEventType) override {}
   void loop() override;
   bool allowsBluetooth(bool screenWorks) override;
-  uint32_t pairingCode(uint32_t meshcores) override;
+  uint32_t pairingCode(uint32_t meshcoreCode) override;
 
 private:
   // BoxPort

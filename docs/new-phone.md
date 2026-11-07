@@ -44,9 +44,10 @@ its groups:
 What the group sees, with nothing done, is nothing at first. The member stays in the list. A
 caller's calls stop, but their Help&I box, which is a member in its own right (decision 8), still
 calls on the radio; only its internet route through the phone stops. A responder's turn in the
-escalation order passes in silence until the next responder is added, so each call takes a turn
-longer to reach someone. A first coordinator's daily member list stops, which starts the seven-day
-clock in decision 20 and, two days on, leaves anyone invited by another coordinator unconfirmed.
+escalation order passes in silence, and after the group's escalation time the next responder is
+added, so each call takes a turn longer to reach someone. A first coordinator's daily member list
+stops, which starts the seven-day clock in decision 20 and, two days on, leaves anyone invited by
+another coordinator unconfirmed.
 
 The old phone, if it still exists, is as much a member as it ever was. A phone handed on to a
 grandchild without being wiped, or stolen, can acknowledge calls as that person and, if they were
@@ -170,11 +171,11 @@ B as an extra for whoever wants it, or not at all.
 - **Seven days after a removal.** C and D cost the group that changeover. A costs nothing. A copy
   made under B is dead seven days after any removal it predates, and the app must say so rather
   than show a cross.
-- **The 30-day grace.** The grace after a relay pass lapses (Martin, 2026-11-02, T18) is a payment
-  grace, once in twelve months. The pass is a group setting that reaches every member, so a lost
-  phone does not lapse it; a paying coordinator who comes back by C needs to be made a
-  coordinator again before they can put the renewed pass in. The grace must never be spent on a
-  phone change, and no option here touches it.
+- **The relay pass.** A relay pass that lapses has its own grace period, which is a payment
+  matter and never a route for a phone change. The pass is a group setting that reaches every
+  member, so a lost phone does not lapse it; a paying coordinator who comes back by C needs to be
+  made a coordinator again before they can put the renewed pass in. No option here touches the
+  grace.
 - **Nothing depends on Apple or Google.** All of A to D use Help&I's own codes, links and files.
   iCloud Keychain and Block Store, when on, make A unnecessary and B redundant for the people who
   have them, and change nothing else. Turning them on means marking the keychain items
@@ -203,10 +204,9 @@ most wants not to depend on anyone, and with A and C alone a broken phone leaves
 a coordinator, who may be themselves. A couple, or a works team of three, who lose the first
 coordinator's phone with nobody named, set the group up again from nothing. B is the only option
 that gets such a person back without a coordinator and without a working old phone, and a printed
-code in a drawer, which Help&I's unit label already is, may be a smaller risk than a group that
-cannot be rebuilt. If that argument wins, B should be a choice under Group, never pressed on
-anyone at setup, and the code should restore the key pair only, never a copy of the responders'
-key.
+code in a drawer may be a smaller risk than a group that cannot be rebuilt. If that argument wins,
+B should be a choice under Group, never pressed on anyone at setup, and the code should restore
+the key pair only, never a copy of the responders' key.
 
 ## Decisions for Martin
 

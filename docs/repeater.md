@@ -1,10 +1,11 @@
 # A rooftop repeater: a self-built Heltec T114
 
 Martin's decision of 2026-11-03: build Help&I's rooftop repeaters ourselves rather than buy a
-sealed unit. The Heltec Mesh Node T114 has the same nRF52840 and SX1262 as the RAK4631 and the
-SenseCAP Solar Node, so it listens on the same current, and it is the cheapest. This is the
-specification and its test (`tests/MANUAL-TESTS.md`, section 63). Nothing here has been built
-yet; section 8 lists what was confirmed from a source and what was not.
+sealed unit. The board is Claude's proposal, which Martin accepted: the Heltec Mesh Node T114
+has the same nRF52840 and SX1262 as the RAK4631 and the SenseCAP Solar Node, so it listens on
+the same current, and it is the cheapest. This is the specification and its test
+(`tests/MANUAL-TESTS.md`, section 63). Nothing here has been built yet; section 8 lists what
+was confirmed from a source and what was not.
 
 A repeater runs MeshCore's stock repeater firmware, not Help&I's. It holds no group key: it
 repeats sealed packets it cannot read. Nothing on it is personal, and nothing of Help&I's depends
@@ -30,9 +31,12 @@ command for nRF52 repeaters (in `CommonCLI.cpp` at the tag `repeater-v1.14.1`) a
 enforcement (token bucket, PR 1297). 1.15.0 added `set dutycycle` (PR 1961); before it the
 airtime factor `set af` does the same job less exactly.
 
-Set it up over the companion app's repeater administration, or the USB serial console. Every
-Help&I box in the area must be on the same radio preset, the EU/UK narrow one, which
-`tests/MANUAL-TESTS.md` already requires of the boxes.
+Set it up over the USB serial console, or the companion app's repeater administration, before
+the roof antenna is fitted, with a dummy load or the short antenna supplied with the board on
+the socket, never an open socket: the build ships at `set tx 22`, which on the Taoglas antenna
+of section 3 is above the Ofcom limit, so the transmit power and duty cycle go in first and the
+antenna after. Every Help&I box in the area must be on the same radio preset, the EU/UK narrow
+one, which `tests/MANUAL-TESTS.md` already requires of the boxes.
 
 ```
 password <a new one>        the default is "password"; anyone in range can otherwise administer it
@@ -76,7 +80,7 @@ highest setting = 27 − gain (dBd) + losses, rounded down to a whole dBm
 The setting is treated as the output. Heltec's figure of 21 ± 1 dBm at the top setting means
 the board may put out up to 22 dBm when set to 22, so the arithmetic uses the setting itself
 and the top setting is used only where the table allows it. Measure the output if a power meter
-is to hand (`MANUAL-TESTS.md`, section 55).
+is to hand: section 55 of `MANUAL-TESTS.md`, run with the repeater in place of box A.
 
 ### The antenna
 
@@ -104,24 +108,28 @@ tables, which is close enough for 869.6 MHz:
 | LMR-240 | 7.6 dB per 100 ft, 25 dB per 100 m | 0.75 dB |
 | RG58 | 11 to 14 dB per 100 ft, 36 to 46 dB per 100 m | 1.1 to 1.4 dB |
 
-Add about 0.1 dB for each N connector and 0.2 dB for the short SMA to N lead inside the box.
-LMR-400 is the choice; LMR-240 where it must bend tightly; RG58 for nothing longer than the lead
-inside the box. 3 m of LMR-400 with its connectors and the lead is about 0.7 dB.
+Add about 0.1 dB for each N connector, 0.2 dB for the short SMA to N lead inside the box, and
+the surge arrestor's insertion loss (section 5), taken here as 0.1 dB: no figure for the Westell
+was found, so it is unconfirmed. LMR-400 is the choice; LMR-240 where it must bend tightly;
+RG58 for nothing longer than the lead inside the box. 3 m of LMR-400 (0.4 dB) with two N
+connectors (0.2 dB) and the lead (0.2 dB) is 0.8 dB, and 0.9 dB with the arrestor.
 
 ### The setting
 
-With 3 m of LMR-400 (0.7 dB in all) and no filter:
+With 3 m of LMR-400, its connectors, the lead and the arrestor (0.9 dB in all) and no filter:
 
 | Antenna | Highest setting | ERP at that setting |
 |---|---|---|
-| Taoglas, 5.85 dBd | 27 − 5.85 + 0.7 = 21.85, so `set tx 21` | 21 − 0.7 + 5.85 = 26.15 dBm (410 mW) |
-| Sirio, 4.1 dBd | 23.6, so `set tx 22` (the board's top) | 22 − 0.7 + 4.1 = 25.4 dBm (350 mW) |
-| RAK, 3.65 dBd | 24.05, so `set tx 22` | 22 − 0.7 + 3.65 = 24.95 dBm (310 mW) |
+| Taoglas, 5.85 dBd | 27 − 5.85 + 0.9 = 22.05, so `set tx 21` (see below) | 21 − 0.9 + 5.85 = 25.95 dBm (390 mW) |
+| Sirio, 4.1 dBd | 23.8, so `set tx 22` (the board's top) | 22 − 0.9 + 4.1 = 25.2 dBm (330 mW) |
+| RAK, 3.65 dBd | 24.25, so `set tx 22` | 22 − 0.9 + 3.65 = 24.75 dBm (300 mW) |
 
-With a SAW filter in the line (section 4, about 2 dB) the Taoglas allows `set tx 22`:
-22 − 2.7 + 5.85 = 25.15 dBm. Redo the arithmetic for any other antenna, cable length or filter,
-and write the figures on a label inside the box. A longer cable loses more than a higher
-setting gains: put the box at the antenna, not the antenna's cable at the box.
+The Taoglas reaches 22.05 only on the arrestor's unconfirmed 0.1 dB; without it the figure is
+21.95, so it stays at `set tx 21` until the arrestor's loss is measured. With a SAW filter in
+the line (section 4, about 2 dB) the Taoglas allows `set tx 22`: 22 − 2.9 + 5.85 = 24.95 dBm.
+Redo the arithmetic for any other antenna, cable length or filter, and write the figures on a
+label inside the box. A longer cable loses more than a higher setting gains: put the box at the
+antenna, not the antenna's cable at the box.
 
 No range figure is given here. None was measured, and none found in a source applies to this
 antenna, this preset and a given roof.
@@ -151,9 +159,10 @@ Everything stays on the roof. No wire of any kind runs into the house, so there 
 earth indoors and nothing a strike can follow in.
 
 - **Enclosure:** IP66 or IP67 (IP66 is rated for powerful water jets, IP67 for brief immersion),
-  polycarbonate or ABS, UV stable, with a hinged or screwed lid on a gasket. Hammond's 1554 and
-  1555 series are rated IP66 and IP67 by Hammond; Fibox and Spelsberg make the same kind. Large
-  enough for the board, the cells, the charger and the filter with room to work.
+  polycarbonate or ABS, UV stable, with a hinged or screwed lid on a gasket. Hammond's listings
+  give its 1554 and 1555 series as IP66 and IP67 (not read here, section 8); Fibox and Spelsberg
+  make the same kind. Large enough for the board, the cells, the charger and the filter with
+  room to work.
 - **Connectors:** an N female bulkhead for the antenna and IP68 cable glands (M12 or M16) for
   the panel lead, all on the bottom face, never the top. A short SMA to N lead from the board
   to the bulkhead.
@@ -250,7 +259,7 @@ at midday in December, when the sun is 15° above the horizon at best. A 12 V pa
 this charger. Check the charger's input limit against the panel's open-circuit voltage on a
 cold bright day before connecting them.
 
-## 7. What a box on this repeater's roof gets
+## 7. What the repeater changes in Help&I's rules
 
 Nothing. The repeater is not a member of any group and carries no Help&I rule. A Help&I box
 within its range reaches more boxes; a box out of its range is as it was. The rules in
@@ -289,7 +298,9 @@ Not confirmed, and to be checked before the build:
   be run for the roof.
 - Whether the T114 runs the radio at full power from a LiFePO4 cell.
 - How much of the battery's capacity the cold takes.
-- The board's real output against its setting, until measured (section 55).
+- The board's real output against its setting, until measured (section 55, with the repeater
+  in place of box A).
+- The surge arrestor's insertion loss: 0.1 dB is assumed.
 - The Hammond enclosures' ratings (Hammond's figures, not read here).
 - Any range figure. None is given.
 
