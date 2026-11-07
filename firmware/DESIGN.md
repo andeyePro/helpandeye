@@ -122,8 +122,8 @@ Per unit, on top of the Heltec V4 (OLED version):
 - **A buzzer**: a passive piezo driven by PWM through a small NPN transistor, loud enough for
   someone hard of hearing. MeshCore's generic buzzer support already uses `PIN_BUZZER`.
 - **An LED** for the box's state where the screen cannot be seen (dark room, poor sight). It
-  also tells whoever is setting the box up that its Bluetooth is off for want of a screen
-  (section 6).
+  also tells whoever is setting the box up that its Bluetooth is off for want of a screen and a
+  label code (section 6).
 - **Battery sensing**: already on the board. `PIN_VBAT_READ` is GPIO 1, switched by
   `PIN_ADC_CTRL` (GPIO 37); `HeltecV4Board::getBattMilliVolts` reads it.
 - **Mains sensing**: a divider (say 100 kΩ over 100 kΩ) from the board's 5 V pin, which carries
@@ -170,25 +170,38 @@ No secret is built into the firmware (AGENTS.md). Everything the box holds is ma
 handed to it by the phone at join, over Bluetooth pairing confirmed with the random code
 MeshCore shows on the box's screen.
 
-**No screen, no Bluetooth.** This is the default posted to Martin (fromClaude T22), not yet his
-decision: he may still choose a per-box code on a label. MeshCore's companion picks a random
-code at each start only when its screen started; without one it falls back to the build's fixed
-code, 123456, so anyone in range could pair with a box whose screen had failed and set it up for
-their own group or wipe it (Forget, 0x75). A Help&I box whose screen does not start therefore
-starts no Bluetooth at all: it neither advertises nor accepts a companion connection. The rule is
-`pairingAtStart` in `core/box.hpp`, host-tested; MeshCore's setup asks the UI task
-(`allowsBluetooth`, the second hook in `meshcore.patch`) before it starts the Bluetooth
-interface, which is then never registered, so nothing can switch it on later. A code the phone
-stored with MeshCore's own command makes no difference: no screen, no Bluetooth. Everything the
-buttons need carries on as usual: the buttons, buzzer, LED and radio, the group and members
-already in flash, resends and acknowledgements. What such a box loses is its phone: no setting
-up, no updates to the member list or names, no carrying of its calls on the phone's routes, and
-no Forget, until the screen is mended. It is decided again at every start, so a box whose screen
-works after a restart has Bluetooth again with a fresh random code on the screen. To tell
-whoever is setting the box up why no phone finds it, the state LED gives two short flashes every
-two seconds while the box is awake (the two minutes after starting or a press, when the screen
-would be lit) and no call is open; an open call keeps its own steady or blinking light
-(`ledLit`, host-tested).
+**No screen: the label code (Martin, 2026-11-02).** MeshCore's companion picks a random code at
+each start only when its screen started; without one it falls back to the build's fixed code,
+123456, so anyone in range could pair with a box whose screen had failed and set it up for their
+own group or wipe it (Forget, 0x75). Martin's decision: each box gets its own pairing code, made
+at provisioning and printed on a label, used when its screen fails. The box makes it at its first
+set group (0x71): six digits from the chip's random generator, 100000 to 999999 and never 123456
+(`labelCodeFrom` in `core/box.hpp`, host-tested), kept in NVS with the names (encryptable,
+section 16) and given to the phone in every info reply (0x70) from then on, so the app that
+provisioned the box can show it for the label. Nothing is baked into the firmware and no new
+command is needed. At every start the rule is `pairingAtStart` (`core/box.hpp`, host-tested
+for every case): a working screen shows MeshCore's fresh random code as before and the label
+code is not used; no screen and a label code, and Bluetooth starts with the label code
+(`AbstractUITask::pairingCode`, beside `allowsBluetooth` in `meshcore.patch`, gives MeshCore the
+code to start with); no screen and no label code, and the box starts no Bluetooth at all, neither
+advertising nor accepting a companion connection (`allowsBluetooth`, the second hook, asked
+before the interface starts, which is then never registered, so nothing can switch it on later).
+A code the phone stored with MeshCore's own command makes no difference without a screen. Forget
+clears the label code with the rest, so a box given to a new group gets a new code and a new
+label at its next set group; until then, with no screen, it is back to no Bluetooth, which is
+also where a box that was never provisioned stands. Everything the buttons need carries on as
+usual whatever Bluetooth does: the buttons, buzzer, LED and radio, the group and members already
+in flash, resends and acknowledgements. A box with neither screen nor label code loses its
+phone: no setting up, no updates to the member list or names, no carrying of its calls on the
+phone's routes, and no Forget, until the screen is mended. It is decided again at every start,
+so a box whose screen works after a restart has Bluetooth again with a fresh random code on the
+screen. To tell whoever is setting such a box up why no phone finds it, the state LED gives two
+short flashes every two seconds while the box is awake (the two minutes after starting or a
+press, when the screen would be lit) and no call is open; an open call keeps its own steady or
+blinking light (`ledLit`, host-tested). With the label code in use the LED does not flash: a
+phone finds the box as usual. The label code is a pairing secret of the same kind as the one on
+the screen, worth what being in Bluetooth range of the box is worth: it opens the companion
+link, over which the phone must still hold the group's keys to do anything a responder could.
 
 **The box as its own member (Martin, 2026-10-30).** The box joins the group as a caller in its
 own right, with its own unit number, like a person who only calls. Its key is made on the board
@@ -251,17 +264,17 @@ file, to none.
 
 | Byte 0 | Name | Body |
 |---|---|---|
-| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off; plus 4 when estimated from the battery, section 10), battery mV u16, hours left u16, antenna u8 (as set by 0x71), power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`), names u8 (how many first names the box holds, section 6) |
-| 0x71 | set group | 94 bytes after the command byte: group ID (16), member u16, unit u32, flags u8 (bit 0 I'm OK closes the call, bit 1 the caller may close, bit 2 report power cuts), antenna u8 (0 the V4's whip, 1 a stub, 2 an external 3 dBi, 3 an external 5 dBi, or 0x80 plus any antenna's gain in half-dB steps, 0 to 63.5 dBi, which is what the app sends, rounded up; 4 to 0x7F are refused), responders' public key (32, all zero when the group has none), channel secret (16), old channel secret (16, all zero outside a changeover), old secret ends at u32, first coordinator u16 |
+| 0x70 | info | nothing. Reply 0xA0: Help&I protocol version u8 (1), provisioned u8, unit u32, member u16, next request u16, mains u8 (0 unknown, 1 on, 2 off; plus 4 when estimated from the battery, section 10), battery mV u16, hours left u16, antenna u8 (as set by 0x71), power cap i8 (-128 when the box must not send), members u8, calls u8, the box's sealing key (32: the X25519 public key for its `memberAdded`; its signing key is MeshCore's own public key from `CMD_APP_START`), names u8 (how many first names the box holds, section 6), label code u32 (the box's pairing code for when its screen fails, section 6; 0 until its first set group) |
+| 0x71 | set group | 94 bytes after the command byte: group ID (16), member u16, unit u32, flags u8 (bit 0 I'm OK closes the call, bit 1 the caller may close, bit 2 report power cuts), antenna u8 (0 the V4's whip, 1 a stub, 2 an external 3 dBi, 3 an external 5 dBi, or 0x80 plus any antenna's gain in half-dB steps, 0 to 63.5 dBi, which is what the app sends, rounded up; 4 to 0x7F are refused), responders' public key (32, all zero when the group has none), channel secret (16), old channel secret (16, all zero outside a changeover), old secret ends at u32, first coordinator u16. The box's first set group also makes its label code, which the next 0x70 gives |
 | 0x72 | set members | version u32, index u8, total u8, then up to four of: member u16, role u8 (1 caller, 2 responder, 3 both, 4 coordinator), Ed25519 signing key (32). Index 0 starts a new list; the list replaces the old one when every position up to `total` has arrived. At most 32 members |
 | 0x73 | get calls | nothing. Replies 0xA1 per call: request u16, colour u8, pressed at u32, status u8 (0 sending, 1 waiting for a responder, 2 seen, 3 not sent, 4 closed), acknowledgements u8; then 0xA2 |
 | 0x74 | route result | request u16, sent u8 (1 the phone's routes took it, 0 none did) |
-| 0x75 | forget | nothing: the box leaves the group and clears its flash, names included |
+| 0x75 | forget | nothing: the box leaves the group and clears its flash, names and label code included |
 | 0x76 | set names | version u32, index u8, total u8, then up to eight of: member u16, length u8 (1 to 16), the first name in UTF-8. Chunked like 0x72: index 0 starts a new list, which replaces the old one when every position up to `total` has arrived; a total of 0 clears the names. At most 32 |
 | 0xA3 | frame (push) | a frame the box made (its call, its signed I'm OK or close, a sealed report), for the phone to carry on its own routes and to show. The phone answers a call with 0x74 |
 
 The box keeps the set-group and set-members bytes in flash as they came (`/hi_group`,
-`/hi_members` on SPIFFS), the names as 0x76 chunks in NVS, and its next request number in NVS, written before each use. It puts
+`/hi_members` on SPIFFS), the names as 0x76 chunks in NVS, its label code in NVS, and its next request number in NVS, written before each use. It puts
 the group's channel (and the old one during a changeover) into MeshCore's own channel table
 itself, at provisioning and at every start, since MeshCore decrypts group datagrams only for
 channels it knows: the phone need not set the channel for the box to hear acknowledgements. Each
@@ -604,13 +617,13 @@ section 6.
   own ChaCha20-Poly1305 (one implementation on the board and in the tests) over an X25519 secret
   from `Curve25519::eval`. `platformio.local.ini` adds two environments, `heltec_v4_helpandi`
   (the box: three buttons, buzzer, mains pin) and `heltec_v4_helpandi_dev` (a plain board,
-  section 7's PRG layout). `meshcore.patch` is the one change to MeshCore's own files, three
+  section 7's PRG layout). `meshcore.patch` is the one change to MeshCore's own files, four
   hooks: `Listener::onUnhandledCmdFrame`, so the UI task answers the Help&I companion commands;
-  `AbstractUITask::allowsBluetooth`, asked in `main.cpp`'s setup before the Bluetooth
-  interface starts, so a box with no screen starts none (both section 6); and
-  `RadioLibWrapper::setTransmitAllowed`, so a box whose antenna is not allowed transmits nothing
-  at all (section 8). Every other UI task and firmware keeps MeshCore's behaviour: the hooks'
-  defaults are yes.
+  `AbstractUITask::allowsBluetooth` and `pairingCode`, asked in `main.cpp`'s setup before the
+  Bluetooth interface starts, so a box with no screen starts it with its label code or not at
+  all (all three section 6); and `RadioLibWrapper::setTransmitAllowed`, so a box whose antenna
+  is not allowed transmits nothing at all (section 8). Every other UI task and firmware keeps
+  MeshCore's behaviour: the hooks' defaults are yes and MeshCore's own code.
 - `firmware/build.sh` clones MeshCore at the commit named in the script, copies the overlay and
   the core in, applies the patch and runs `pio run`. One MeshCore tree, reused. `--release` then
   signs and encrypts the images (section 16).
@@ -693,8 +706,9 @@ coordinator's close, the changeover, request numbers and forgetting; the retaine
 fake RTC store (the hour's airtime, the power cut and its part numbers and the calls carried on,
 a corrupted or empty copy refused, the band and battery this start has kept over the copy's, the
 clock carried through sleep and never wrapped, a write cut off part way resumed from the other
-copy), a time more than a day ahead taken only when a second member agrees, when the box may sleep, and the hours left with the box
-asleep between polls. Still to add: an acknowledgement signed by a real phone, checked on a
+copy), a time more than a day ahead taken only when a second member agrees, when the box may sleep, the hours left with the box
+asleep between polls, and Bluetooth at start (the screen's code, the label code, or none, and
+the LED's flashes only for none; a label code's range and never 123456). Still to add: an acknowledgement signed by a real phone, checked on a
 board.
 
 **On a board** (not run): `tests/MANUAL-TESTS.md` sections 46 to 58, which replace "Help&I needs
@@ -812,8 +826,8 @@ JTAG is off and USB reads of flash are refused. Not yet:
 - *The keys and names are not encrypted.* Flash encryption covers the bootloader, partition
   table and app partitions only. MeshCore keeps its identity (the box's signing and sealing key)
   and contacts in SPIFFS, with the group file (channel secrets) and member list beside them, and
-  SPIFFS cannot sit on an encrypted partition; the names and the next request number are in NVS,
-  which needs NVS encryption, not in the prebuilt core. Over USB they are unreadable once the
+  SPIFFS cannot sit on an encrypted partition; the names, the label code (section 6) and the
+  next request number are in NVS, which needs NVS encryption, not in the prebuilt core. Over USB they are unreadable once the
   eFuses are burned; with the flash chip taken off the board they are plain.
 
 Both need an Arduino core built for it (`esp32-arduino-lib-builder`, or ESP-IDF with Arduino as

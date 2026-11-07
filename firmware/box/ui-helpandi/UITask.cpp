@@ -22,6 +22,9 @@ constexpr const char* kNextRequestKey = "next";
 // The names as chunks, each after its length byte. In NVS, not SPIFFS: NVS can be encrypted
 // under flash encryption and SPIFFS cannot (DESIGN.md, section 16).
 constexpr const char* kNamesKey = "names";
+// The box's own pairing code for when its screen fails (section 6), made at its first
+// provisioning; 0 until then.
+constexpr const char* kLabelCodeKey = "label";
 constexpr size_t kNamesBlobBytes = kMaxMembers / kNamesPerChunk * 8 + kMaxMembers * (3 + kMaxNameBytes);
 constexpr uint8_t kFlood = 0xFF;
 constexpr uint64_t kScreenOnMs = 120000;
@@ -117,7 +120,6 @@ void UITask::begin(DisplayDriver* display, SensorManager*, NodePrefs* prefs) {
   pinMode(HI_PIN_LED, OUTPUT);
   _buzzer.begin();
   _buzzer.quiet(false);
-  _nvs.begin("helpandi", false);
   _engine.setNextRequest(_nvs.getUShort(kNextRequestKey, 1));
   applyRadio();
   // MeshCore's setup set the clock to just after its newest contact, which after a sleep is
@@ -142,11 +144,16 @@ void UITask::begin(DisplayDriver* display, SensorManager*, NodePrefs* prefs) {
   if (_display && !quiet) _display->turnOn();
 }
 
-// Asked by MeshCore's setup before begin(): with no screen to show the code on, no Bluetooth.
+// Asked by MeshCore's setup before begin(), so the box's store opens here: with no screen to show
+// MeshCore's code on, the phone pairs with the label code, or not at all.
 bool UITask::allowsBluetooth(bool screenWorks) {
-  _pairing = pairingAtStart(screenWorks);
+  _nvs.begin("helpandi", false);
+  _labelCode = _nvs.getUInt(kLabelCodeKey, 0);
+  _pairing = pairingAtStart(screenWorks, _labelCode != 0);
   return _pairing != Pairing::off;
 }
+
+uint32_t UITask::pairingCode(uint32_t meshcores) { return _pairing == Pairing::labelCode ? _labelCode : meshcores; }
 
 // BoxPort
 
@@ -358,6 +365,8 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     if (the_mesh.self_id.writeTo(prv, sizeof prv) == PRV_KEY_SIZE) Curve25519::eval(out + i, prv, nullptr);
     i += kKeyBytes;
     out[i++] = uint8_t(_names.count);
+    memcpy(out + i, &_labelCode, 4);
+    i += 4;
     _interfaceManager->writeFrame(out, i);
     return true;
   }
@@ -366,6 +375,16 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     if (!parseSetGroup(frame, len, g)) {
       reply(kErrorBadArgument);
       return true;
+    }
+    // The label code is made once, at the box's first provisioning, and the info reply gives it
+    // to the phone for the label (section 6).
+    if (!_labelCode) {
+      uint32_t code = labelCodeFrom(esp_random());
+      if (!_nvs.putUInt(kLabelCodeKey, code)) {
+        reply(kErrorFileIO);
+        return true;
+      }
+      _labelCode = code;
     }
     if (!saveFile(kGroupFile, frame, len)) {
       reply(kErrorFileIO);
@@ -439,7 +458,9 @@ bool UITask::onUnhandledCmdFrame(const uint8_t* frame, size_t len) {
     SPIFFS.remove(kGroupFile);
     SPIFFS.remove(kMembersFile);
     _nvs.remove(kNamesKey);
+    _nvs.remove(kLabelCodeKey);
     _names.count = 0;
+    _labelCode = 0;
     _haveGroup = _haveMembers = false;
     _engine.forget();
     dropOldChannels(rtc_clock.getCurrentTime());

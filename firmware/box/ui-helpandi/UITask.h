@@ -35,6 +35,7 @@ public:
   void notify(UIEventType) override {}
   void loop() override;
   bool allowsBluetooth(bool screenWorks) override;
+  uint32_t pairingCode(uint32_t meshcores) override;
 
 private:
   // BoxPort
@@ -77,6 +78,7 @@ private:
   helpandi::NameList _names;
   helpandi::NameList _buildingNames;
   helpandi::Pairing _pairing = helpandi::Pairing::off;
+  uint32_t _labelCode = 0;
   bool _haveGroup = false, _haveMembers = false;
   // The monotonic clock carries on across deep sleep and a reset (section 10), from both clocks
   // as they were when this start began, before MeshCore's setup could set the system clock.

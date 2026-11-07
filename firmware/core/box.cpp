@@ -18,7 +18,14 @@ const char* statusWords(CallerStatus s) {
     return "";
 }
 
-Pairing pairingAtStart(bool screenWorks) { return screenWorks ? Pairing::shownCode : Pairing::off; }
+Pairing pairingAtStart(bool screenWorks, bool hasLabelCode) {
+    return screenWorks ? Pairing::shownCode : hasLabelCode ? Pairing::labelCode : Pairing::off;
+}
+
+uint32_t labelCodeFrom(uint32_t random) {
+    uint32_t code = 100000 + random % 899999;
+    return code < 123456 ? code : code + 1;
+}
 
 bool ledLit(const Screen& s, Pairing pairing, bool awake, uint64_t nowMs) {
     if (s.hasCall && (s.status == CallerStatus::sending || s.status == CallerStatus::waitingForResponder)) return true;

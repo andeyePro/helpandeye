@@ -63,16 +63,20 @@ constexpr const char* kAntennaNotAllowedWords = "This box cannot send: its anten
 constexpr const char* kNotSentAntennaWords = "Not sent: this box's antenna is not allowed. If you need help now, call 999.";
 
 // Bluetooth pairing, decided at every start (section 6). The phone pairs with the random code
-// MeshCore shows on the screen. Without a working screen MeshCore falls back to its fixed code
-// 123456, which anyone in range could use to set up or wipe the box, so such a box starts no
-// Bluetooth at all; its buttons, buzzer, LED and radio need none.
-enum class Pairing : uint8_t { off, shownCode };
-Pairing pairingAtStart(bool screenWorks);
+// MeshCore shows on the screen. Without a working screen it pairs with the box's own label code
+// (Martin, 2026-11-02): six digits made at the box's first provisioning and printed on a label.
+// A box with neither starts no Bluetooth at all, since MeshCore would otherwise fall back to its
+// fixed code 123456, which anyone in range could use to set up or wipe the box; its buttons,
+// buzzer, LED and radio need none.
+enum class Pairing : uint8_t { off, shownCode, labelCode };
+Pairing pairingAtStart(bool screenWorks, bool hasLabelCode);
+// A label code from 32 random bits: 100000 to 999999, never 123456.
+uint32_t labelCodeFrom(uint32_t random);
 
 // The state LED (section 5): lit while a call is open, blinking each second when it could not be
-// sent. With no call open, a box whose Bluetooth is off for want of a screen gives two short
-// flashes every two seconds while it is awake, so whoever is setting it up can tell why no phone
-// finds it.
+// sent. With no call open, a box whose Bluetooth is off for want of a screen and a label code
+// gives two short flashes every two seconds while it is awake, so whoever is setting it up can
+// tell why no phone finds it.
 bool ledLit(const Screen& s, Pairing pairing, bool awake, uint64_t nowMs);
 
 // On battery with nothing to send again, the box deep-sleeps between battery readings, and each

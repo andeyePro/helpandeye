@@ -1007,9 +1007,26 @@ TEST(theHoursAreCountedAtTheAwakeDrawWhileACallOrAPhoneKeepsTheBoxUp) {
     CHECK(w.box.screen().hoursLeft == 3000);
 }
 
-TEST(aBoxWithoutAWorkingScreenStartsNoBluetooth) {
-    CHECK(pairingAtStart(false) == Pairing::off);
-    CHECK(pairingAtStart(true) == Pairing::shownCode);
+TEST(aWorkingScreenShowsTheCodeElseTheLabelCodeElseNoBluetooth) {
+    CHECK(pairingAtStart(true, false) == Pairing::shownCode);
+    CHECK(pairingAtStart(true, true) == Pairing::shownCode);
+    CHECK(pairingAtStart(false, true) == Pairing::labelCode);
+    CHECK(pairingAtStart(false, false) == Pairing::off);
+}
+
+TEST(aLabelCodeHasSixDigitsAndIsNever123456) {
+    CHECK(labelCodeFrom(0) == 100000);
+    CHECK(labelCodeFrom(899998) == 999999);
+    CHECK(labelCodeFrom(23455) == 123455 && labelCodeFrom(23456) == 123457);
+    // Every code from 100000 to 999999 but 123456 is reached: 899999 values for 899999 seeds.
+    for (uint32_t r = 0; r < 899999; r++) {
+        uint32_t code = labelCodeFrom(r);
+        CHECK(code == (r < 23456 ? 100000 + r : 100001 + r));
+    }
+    for (uint32_t r : {899999u, 1000000u, 0xFFFFFFFFu}) {
+        uint32_t code = labelCodeFrom(r);
+        CHECK(code >= 100000 && code <= 999999 && code != 123456);
+    }
 }
 
 TEST(theLEDSaysBluetoothIsOffOnlyWhenNoCallIsOpen) {
@@ -1018,9 +1035,10 @@ TEST(theLEDSaysBluetoothIsOffOnlyWhenNoCallIsOpen) {
     // Two short flashes every two seconds while awake.
     for (uint64_t t : {0, 100, 300, 449, 2000, 2350}) CHECK(ledLit(idle, Pairing::off, true, t));
     for (uint64_t t : {150, 299, 450, 1000, 1999, 2500}) CHECK(!ledLit(idle, Pairing::off, true, t));
-    // Dark while asleep or waking only to read the battery, and with Bluetooth on.
+    // Dark while asleep or waking only to read the battery, and with Bluetooth on either way.
     CHECK(!ledLit(idle, Pairing::off, false, 0));
     CHECK(!ledLit(idle, Pairing::shownCode, true, 0));
+    CHECK(!ledLit(idle, Pairing::labelCode, true, 0));
     // The same before the box is set up, which is when someone is most likely to look.
     Screen fresh{};
     CHECK(ledLit(fresh, Pairing::off, true, 0) && !ledLit(fresh, Pairing::off, true, 1000));
@@ -1030,11 +1048,11 @@ TEST(theLEDSaysBluetoothIsOffOnlyWhenNoCallIsOpen) {
     call.provisioned = call.hasCall = true;
     for (CallerStatus st : {CallerStatus::sending, CallerStatus::waitingForResponder}) {
         call.status = st;
-        for (Pairing p : {Pairing::off, Pairing::shownCode})
+        for (Pairing p : {Pairing::off, Pairing::shownCode, Pairing::labelCode})
             for (uint64_t t : {0, 200, 1000, 1999}) CHECK(ledLit(call, p, true, t));
     }
     call.status = CallerStatus::notSent;
-    for (Pairing p : {Pairing::off, Pairing::shownCode}) {
+    for (Pairing p : {Pairing::off, Pairing::shownCode, Pairing::labelCode}) {
         CHECK(!ledLit(call, p, true, 0) && !ledLit(call, p, true, 200));
         CHECK(ledLit(call, p, true, 500) && ledLit(call, p, true, 999));
     }
@@ -1042,6 +1060,6 @@ TEST(theLEDSaysBluetoothIsOffOnlyWhenNoCallIsOpen) {
     for (CallerStatus st : {CallerStatus::seen, CallerStatus::closed}) {
         call.status = st;
         CHECK(ledLit(call, Pairing::off, true, 0) && !ledLit(call, Pairing::off, true, 200));
-        CHECK(!ledLit(call, Pairing::shownCode, true, 0));
+        CHECK(!ledLit(call, Pairing::shownCode, true, 0) && !ledLit(call, Pairing::labelCode, true, 0));
     }
 }
