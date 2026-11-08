@@ -15,8 +15,6 @@ settings:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
-    # No app icon set yet; without this, the symbols catalog makes Xcode look for one.
-    ASSETCATALOG_COMPILER_APPICON_NAME: ""
 targets:
   helpandeye:
     type: application
@@ -55,6 +53,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help
         TARGETED_DEVICE_FAMILY: "1,2"
+        # No app icon set yet; without this the symbols catalog makes Xcode look for one.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
   helpandeyeNotify:
     type: app-extension
     platform: iOS
@@ -135,6 +135,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.andeye.help.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"
+        # No app icon set yet; without this the symbols catalog makes Xcode look for one.
+        ASSETCATALOG_COMPILER_APPICON_NAME: ""
   helpandeyeWatchWidgets:
     type: app-extension
     platform: watchOS
