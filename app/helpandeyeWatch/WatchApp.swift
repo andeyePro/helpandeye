@@ -180,7 +180,7 @@ struct WatchCallView: View {
     /// Words, a symbol, or both, as on the phone; the symbol is left out when both will not fit.
     @ViewBuilder private func label(_ colour: Colour) -> some View {
         let p = model.profile
-        let symbol = Image(systemName: p.symbol(colour))
+        let symbol = Image(symbol: p.symbol(colour))
         switch p.face {
         case .words: Text(model.words(colour))
         case .symbol: symbol.font(.title2)

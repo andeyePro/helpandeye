@@ -96,7 +96,7 @@ struct CallButtonLabel: View {
     var body: some View {
         let words = ButtonWords.words(colour, in: profile)
         VStack(spacing: 6) {
-            if profile.showsSymbol { Image(systemName: profile.symbol(colour)).imageScale(.large) }
+            if profile.showsSymbol { Image(symbol: profile.symbol(colour)).imageScale(.large) }
             if profile.showsWords { Text(words) }
         }
         .padding(.vertical, 8)

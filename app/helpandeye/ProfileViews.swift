@@ -285,7 +285,9 @@ struct ProfileEditor: View {
             ForEach(Colour.allCases, id: \.self) { c in
                 LabeledField(label: ButtonWords.standard(c), text: words(ButtonWords.key(c)))
                 Picker("Symbol for \(ButtonWords.words(c, in: p))", selection: symbol(c)) {
-                    ForEach(Profile.symbolChoices, id: \.self) { name in Label(symbolWords(name), systemImage: name).tag(name) }
+                    ForEach(Profile.symbolChoices, id: \.self) { name in
+                        Label { Text(symbolWords(name)) } icon: { Image(symbol: name) }.tag(name)
+                    }
                 }
             }
             if Colour.allCases.contains(where: { ButtonWords.soundsLikeEmergencyService(ButtonWords.words($0, in: p)) }) {
@@ -318,6 +320,8 @@ struct ProfileEditor: View {
     /// What each symbol is, for the picker and VoiceOver.
     private func symbolWords(_ name: String) -> String {
         switch name {
+        case "figure.help": "Figure, arm straight up"
+        case "figure.hand": "Figure, hand raised"
         case "hand.raised.fill": "Raised hand"
         case "hands.and.sparkles.fill": "Hands"
         case "checkmark": "Tick"
